@@ -1,25 +1,37 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useEffect, useState } from 'react';
+import type { ComponentType, ReactNode, SVGProps } from 'react';
 import {
-  Cpu,
-  Clock,
-  Globe,
-  Database,
   Activity,
+  ChevronDown,
+  Clock3,
+  Cpu,
+  Database,
   DollarSign,
+  Globe2,
   Radio,
-  LayoutDashboard,
-  Users,
-  MessageSquare,
-  ChevronRight,
-  Hash,
-  Wifi,
+  ShieldCheck,
+  Sparkles,
 } from 'lucide-react';
-import type { StatusResponse, CostSummary, Session, ChannelDetail } from '@/types/api';
-import { getStatus, getCost, getSessions, getChannels } from '@/lib/api';
-import { useSSE } from '@/hooks/useSSE';
-import { t } from '@/lib/i18n';
+import type { CostSummary, StatusResponse } from '@/types/api';
+import { getCost, getStatus } from '@/lib/api';
 
-type TabId = 'overview' | 'sessions' | 'channels';
+type DashboardSectionKey = 'cost' | 'channels' | 'health';
+
+interface DashboardSectionState {
+  cost: boolean;
+  channels: boolean;
+  health: boolean;
+}
+
+interface CollapsibleSectionProps {
+  title: string;
+  subtitle: string;
+  icon: ComponentType<SVGProps<SVGSVGElement>>;
+  sectionKey: DashboardSectionKey;
+  openState: DashboardSectionState;
+  onToggle: (section: DashboardSectionKey) => void;
+  children: ReactNode;
+}
 
 function formatUptime(seconds: number): string {
   const d = Math.floor(seconds / 86400);
@@ -34,41 +46,17 @@ function formatUSD(value: number): string {
   return `$${value.toFixed(4)}`;
 }
 
-function formatTime(iso: string): string {
-  try {
-    return new Date(iso).toLocaleString();
-  } catch {
-    return iso;
-  }
-}
-
-function formatRelative(iso: string): string {
-  try {
-    const diff = Date.now() - new Date(iso).getTime();
-    const seconds = Math.floor(diff / 1000);
-    if (seconds < 60) return `${seconds}s ago`;
-    const minutes = Math.floor(seconds / 60);
-    if (minutes < 60) return `${minutes}m ago`;
-    const hours = Math.floor(minutes / 60);
-    if (hours < 24) return `${hours}h ago`;
-    const days = Math.floor(hours / 24);
-    return `${days}d ago`;
-  } catch {
-    return iso;
-  }
-}
-
 function healthColor(status: string): string {
   switch (status.toLowerCase()) {
     case 'ok':
     case 'healthy':
-      return 'var(--color-status-success)';
+      return 'bg-emerald-400';
     case 'warn':
     case 'warning':
     case 'degraded':
-      return 'var(--color-status-warning)';
+      return 'bg-amber-400';
     default:
-      return 'var(--color-status-error)';
+      return 'bg-rose-500';
   }
 }
 
@@ -76,846 +64,291 @@ function healthBorder(status: string): string {
   switch (status.toLowerCase()) {
     case 'ok':
     case 'healthy':
-      return 'rgba(0, 230, 138, 0.2)';
+      return 'border-emerald-500/30';
     case 'warn':
     case 'warning':
     case 'degraded':
-      return 'rgba(255, 170, 0, 0.2)';
+      return 'border-amber-400/30';
     default:
-      return 'rgba(255, 68, 102, 0.2)';
+      return 'border-rose-500/35';
   }
 }
 
-function healthBg(status: string): string {
-  switch (status.toLowerCase()) {
-    case 'ok':
-    case 'healthy':
-      return 'rgba(0, 230, 138, 0.05)';
-    case 'warn':
-    case 'warning':
-    case 'degraded':
-      return 'rgba(255, 170, 0, 0.05)';
-    default:
-      return 'rgba(255, 68, 102, 0.05)';
-  }
-}
-
-function sessionStatusColor(status: string): string {
-  switch (status) {
-    case 'active':
-      return 'var(--color-status-success)';
-    case 'idle':
-      return 'var(--color-status-warning)';
-    default:
-      return 'var(--pc-text-faint)';
-  }
-}
-
-const STATUS_CARDS = [
-  {
-    icon: Cpu,
-    accent: "var(--pc-accent)",
-    labelKey: "dashboard.provider_model",
-    getValue: (s: StatusResponse) => s.provider ?? "Unknown",
-    getSub: (s: StatusResponse) => s.model ?? "",
-  },
-  {
-    icon: Clock,
-    accent: "#34d399",
-    labelKey: "dashboard.uptime",
-    getValue: (s: StatusResponse) => formatUptime(s.uptime_seconds),
-    getSub: () => t("dashboard.since_last_restart"),
-  },
-  {
-    icon: Globe,
-    accent: "#a78bfa",
-    labelKey: "dashboard.gateway_port",
-    getValue: (s: StatusResponse) => `:${s.gateway_port}`,
-    getSub: () => "",
-  },
-  {
-    icon: Database,
-    accent: "#fbbf24",
-    labelKey: "dashboard.memory_backend",
-    getValue: (s: StatusResponse) => s.memory_backend,
-    getSub: (s: StatusResponse) =>
-      `${t("dashboard.paired")}: ${s.paired ? t("dashboard.paired_yes") : t("dashboard.paired_no")}`,
-  },
-];
-
-const TABS: { id: TabId; labelKey: string; icon: typeof LayoutDashboard }[] = [
-  { id: 'overview', labelKey: 'dashboard.tab_overview', icon: LayoutDashboard },
-  { id: 'sessions', labelKey: 'dashboard.tab_sessions', icon: Users },
-  { id: 'channels', labelKey: 'dashboard.tab_channels', icon: Wifi },
-];
-
-// ---------------------------------------------------------------------------
-// Overview Tab (existing dashboard content)
-// ---------------------------------------------------------------------------
-
-function OverviewTab({
-  status,
-  cost,
-  showAllChannels,
-  setShowAllChannels,
-}: {
-  status: StatusResponse;
-  cost: CostSummary;
-  showAllChannels: boolean;
-  setShowAllChannels: (fn: (v: boolean) => boolean) => void;
-}) {
-  const maxCost = Math.max(
-    cost.session_cost_usd,
-    cost.daily_cost_usd,
-    cost.monthly_cost_usd,
-    0.001
-  );
+function CollapsibleSection({
+  title,
+  subtitle,
+  icon: Icon,
+  sectionKey,
+  openState,
+  onToggle,
+  children,
+}: CollapsibleSectionProps) {
+  const isOpen = openState[sectionKey];
 
   return (
-    <>
-      {/* Status Cards Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 stagger-children">
-        {STATUS_CARDS.map(({ icon: Icon, accent, labelKey, getValue, getSub }) => (
-          <div key={labelKey} className="card p-5 animate-slide-in-up">
-            <div className="flex items-center gap-3 mb-3">
-              <div className="p-2 rounded-2xl" style={{ background: `rgba(var(--pc-accent-rgb), 0.08)`, color: accent, }}>
-                <Icon className="h-5 w-5" />
-              </div>
-              <span className="text-xs uppercase tracking-wider font-medium" style={{ color: "var(--pc-text-muted)" }}>{t(labelKey)}</span>
-            </div>
-            <p className="text-lg font-semibold truncate capitalize" style={{ color: "var(--pc-text-primary)" }}>{getValue(status)}</p>
-            <p className="text-sm truncate" style={{ color: "var(--pc-text-muted)" }}>{getSub(status)}</p>
-          </div>
-        ))}
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 stagger-children">
-        {/* Cost Widget */}
-        <div className="card p-5 animate-slide-in-up">
-          <div className="flex items-center gap-2 mb-5">
-            <DollarSign className="h-5 w-5" style={{ color: "var(--pc-accent)" }} />
-            <h2 className="text-sm font-semibold uppercase tracking-wider" style={{ color: "var(--pc-text-primary)" }}>{t("dashboard.cost_overview")}</h2>
-          </div>
-          <div className="space-y-4">
-            {[
-              {
-                label: t("dashboard.session_label"),
-                value: cost.session_cost_usd,
-                color: "var(--pc-accent)",
-              },
-              {
-                label: t("dashboard.daily_label"),
-                value: cost.daily_cost_usd,
-                color: "#34d399",
-              },
-              {
-                label: t("dashboard.monthly_label"),
-                value: cost.monthly_cost_usd,
-                color: "#a78bfa",
-              },
-            ].map(({ label, value, color }) => (
-              <div key={label}>
-                <div className="flex justify-between text-sm mb-1.5">
-                  <span style={{ color: "var(--pc-text-muted)" }}>{label}</span>
-                  <span
-                    className="font-medium font-mono"
-                    style={{ color: "var(--pc-text-primary)" }}
-                  >
-                    {formatUSD(value)}
-                  </span>
-                </div>
-                <div
-                  className="w-full h-1.5 rounded-full overflow-hidden"
-                  style={{ background: "var(--pc-hover)" }}
-                >
-                  <div
-                    className="h-full rounded-full progress-bar-animated transition-all duration-700 ease-out"
-                    style={{
-                      width: `${Math.max((value / maxCost) * 100, 2)}%`,
-                      background: color,
-                    }}
-                  />
-                </div>
-              </div>
-            ))}
-          </div>
-          <div
-            className="mt-5 pt-4 border-t flex justify-between text-sm"
-            style={{ borderColor: "var(--pc-border)" }}
-          >
-            <span style={{ color: "var(--pc-text-muted)" }}>
-              {t("dashboard.total_tokens_label")}
-            </span>
-            <span className="font-mono" style={{ color: "var(--pc-text-primary)" }}>
-              {cost.total_tokens.toLocaleString()}
-            </span>
-          </div>
-          <div className="flex justify-between text-sm mt-1">
-            <span style={{ color: "var(--pc-text-muted)" }}>
-              {t("dashboard.requests_label")}
-            </span>
-            <span className="font-mono" style={{ color: "var(--pc-text-primary)" }}>
-              {cost.request_count.toLocaleString()}
-            </span>
-          </div>
-        </div>
-
-        {/* Active Channels */}
-        <div className="card p-5 animate-slide-in-up">
-          <div className="flex items-center gap-2 mb-5">
-            <Radio className="h-5 w-5" style={{ color: "var(--pc-accent)" }} />
-            <h2
-              className="text-sm font-semibold uppercase tracking-wider"
-              style={{ color: "var(--pc-text-primary)" }}
-            >
-              {t("dashboard.channels")}
-            </h2>
-            <button
-              onClick={() => setShowAllChannels((v) => !v)}
-              className="ml-auto flex items-center gap-1 rounded-full px-2.5 py-1 text-[10px] font-medium border transition-all"
-              style={
-                showAllChannels
-                  ? {
-                      background: "rgba(var(--pc-accent-rgb), 0.1)",
-                      borderColor: "rgba(var(--pc-accent-rgb), 0.3)",
-                      color: "var(--pc-accent-light)",
-                    }
-                  : {
-                      background: "rgba(0, 230, 138, 0.08)",
-                      borderColor: "rgba(0, 230, 138, 0.25)",
-                      color: "#34d399",
-                    }
-              }
-              aria-label={
-                showAllChannels
-                  ? t("dashboard.filter_active")
-                  : t("dashboard.filter_all")
-              }
-            >
-              {showAllChannels
-                ? t("dashboard.filter_all")
-                : t("dashboard.filter_active")}
-            </button>
-          </div>
-          <div className="space-y-2 overflow-y-auto max-h-48 pr-1">
-            {Object.entries(status.channels).length === 0 ? (
-              <p className="text-sm" style={{ color: "var(--pc-text-faint)" }}>
-                {t("dashboard.no_channels")}
-              </p>
-            ) : (() => {
-              const entries = Object.entries(status.channels).filter(
-                ([, active]) => showAllChannels || active
-              );
-              if (entries.length === 0) {
-                return (
-                  <p className="text-sm" style={{ color: "var(--pc-text-faint)" }}>
-                    {t("dashboard.no_active_channels")}
-                  </p>
-                );
-              }
-              return entries.map(([name, active]) => (
-                <div
-                  key={name}
-                  className="flex items-center justify-between py-2.5 px-3 rounded-xl transition-all"
-                  style={{ background: "var(--pc-bg-elevated)" }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.background = "var(--pc-hover)";
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.background = "var(--pc-bg-elevated)";
-                  }}
-                >
-                  <span
-                    className="text-sm font-medium capitalize"
-                    style={{ color: "var(--pc-text-primary)" }}
-                  >
-                    {name}
-                  </span>
-                  <div className="flex items-center gap-2">
-                    <span
-                      className="status-dot"
-                      style={
-                        active
-                          ? {
-                              background: "var(--color-status-success)",
-                              boxShadow: "0 0 6px var(--color-status-success)",
-                            }
-                          : { background: "var(--pc-text-faint)" }
-                      }
-                    />
-                    <span className="text-xs" style={{ color: "var(--pc-text-muted)" }}>
-                      {active ? t("dashboard.active") : t("dashboard.inactive")}
-                    </span>
-                  </div>
-                </div>
-              ));
-            })()}
-          </div>
-        </div>
-
-        <div className="card p-5 animate-slide-in-up">
-          <div className="flex items-center gap-2 mb-5">
-            <Activity className="h-5 w-5" style={{ color: "var(--pc-accent)" }} />
-            <h2
-              className="text-sm font-semibold uppercase tracking-wider"
-              style={{ color: "var(--pc-text-primary)" }}
-            >
-              {t("dashboard.component_health")}
-            </h2>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            {Object.entries(status.health.components).length === 0 ? (
-              <p
-                className="text-sm col-span-2"
-                style={{ color: "var(--pc-text-faint)" }}
-              >
-                {t("dashboard.no_components")}
-              </p>
-            ) : (
-              Object.entries(status.health.components).map(([name, comp]) => (
-                <div
-                  key={name}
-                  className="rounded-2xl p-3 transition-all"
-                  style={{
-                    border: `1px solid ${healthBorder(comp.status)}`,
-                    background: healthBg(comp.status),
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.transform = "scale(1.02)";
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.transform = "scale(1)";
-                  }}
-                >
-                  <div className="flex items-center gap-2 mb-1">
-                    <span
-                      className="status-dot"
-                      style={{
-                        background: healthColor(comp.status),
-                        boxShadow: `0 0 6px ${healthColor(comp.status)}`,
-                      }}
-                    />
-                    <span
-                      className="text-sm font-medium truncate capitalize"
-                      style={{ color: "var(--pc-text-primary)" }}
-                    >
-                      {name}
-                    </span>
-                  </div>
-                  <p className="text-xs capitalize" style={{ color: "var(--pc-text-muted)" }}>
-                    {comp.status}
-                  </p>
-                  {comp.restart_count > 0 && (
-                    <p
-                      className="text-xs mt-1"
-                      style={{ color: "var(--color-status-warning)" }}
-                    >
-                      {t("dashboard.restarts")}: {comp.restart_count}
-                    </p>
-                  )}
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-      </div>
-    </>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Sessions Tab
-// ---------------------------------------------------------------------------
-
-function SessionsTab() {
-  const [sessions, setSessions] = useState<Session[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [selectedSession, setSelectedSession] = useState<Session | null>(null);
-
-  const { events } = useSSE({
-    filterTypes: ['session_update', 'session_created', 'session_closed'],
-    autoConnect: true,
-  });
-
-  const loadSessions = useCallback(() => {
-    getSessions()
-      .then((data) => {
-        setSessions(data);
-        setLoading(false);
-      })
-      .catch((err) => {
-        setError(err.message);
-        setLoading(false);
-      });
-  }, []);
-
-  useEffect(() => {
-    loadSessions();
-  }, [loadSessions]);
-
-  // React to SSE events for real-time updates
-  useEffect(() => {
-    if (events.length === 0) return;
-    loadSessions();
-  }, [events.length, loadSessions]);
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-48">
-        <div className="flex items-center gap-3">
-          <div
-            className="h-6 w-6 border-2 rounded-full animate-spin"
-            style={{ borderColor: "var(--pc-border)", borderTopColor: "var(--pc-accent)" }}
-          />
-          <span className="text-sm" style={{ color: "var(--pc-text-muted)" }}>
-            {t("dashboard.loading_sessions")}
-          </span>
-        </div>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div
-        className="rounded-2xl border p-4"
-        style={{ background: "rgba(239, 68, 68, 0.08)", borderColor: "rgba(239, 68, 68, 0.2)", color: "#f87171" }}
+    <section className="electric-card motion-rise">
+      <button
+        type="button"
+        onClick={() => onToggle(sectionKey)}
+        aria-expanded={isOpen}
+        className="group flex w-full items-center justify-between gap-4 rounded-xl px-4 py-4 text-left md:px-5"
       >
-        {t("dashboard.load_sessions_error")}: {error}
-      </div>
-    );
-  }
-
-  return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-      {/* Session List */}
-      <div className="lg:col-span-2 card p-5 animate-slide-in-up">
-        <div className="flex items-center gap-2 mb-5">
-          <Users className="h-5 w-5" style={{ color: "var(--pc-accent)" }} />
-          <h2
-            className="text-sm font-semibold uppercase tracking-wider"
-            style={{ color: "var(--pc-text-primary)" }}
-          >
-            {t("dashboard.sessions_title")}
-          </h2>
-          <span
-            className="ml-auto text-xs font-mono px-2 py-0.5 rounded-full"
-            style={{ background: "rgba(var(--pc-accent-rgb), 0.1)", color: "var(--pc-accent)" }}
-          >
-            {sessions.length}
-          </span>
-        </div>
-
-        {sessions.length === 0 ? (
-          <p className="text-sm py-8 text-center" style={{ color: "var(--pc-text-faint)" }}>
-            {t("dashboard.no_sessions")}
-          </p>
-        ) : (
-          <div className="space-y-2 overflow-y-auto max-h-96">
-            {sessions.map((session) => (
-              <button
-                key={session.id}
-                onClick={() => setSelectedSession(session)}
-                className="w-full text-left flex items-center justify-between py-3 px-4 rounded-xl transition-all"
-                style={{
-                  background: selectedSession?.id === session.id
-                    ? "rgba(var(--pc-accent-rgb), 0.08)"
-                    : "var(--pc-bg-elevated)",
-                  border: selectedSession?.id === session.id
-                    ? "1px solid rgba(var(--pc-accent-rgb), 0.2)"
-                    : "1px solid transparent",
-                }}
-                onMouseEnter={(e) => {
-                  if (selectedSession?.id !== session.id) {
-                    e.currentTarget.style.background = "var(--pc-hover)";
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  if (selectedSession?.id !== session.id) {
-                    e.currentTarget.style.background = "var(--pc-bg-elevated)";
-                  }
-                }}
-              >
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span
-                      className="text-sm font-medium font-mono truncate"
-                      style={{ color: "var(--pc-text-primary)" }}
-                    >
-                      {session.id.slice(0, 8)}...
-                    </span>
-                    <span
-                      className="text-[10px] uppercase font-medium px-2 py-0.5 rounded-full"
-                      style={{
-                        background: `${sessionStatusColor(session.status)}15`,
-                        color: sessionStatusColor(session.status),
-                      }}
-                    >
-                      {session.status}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-3 text-xs" style={{ color: "var(--pc-text-muted)" }}>
-                    <span className="flex items-center gap-1">
-                      <Hash className="h-3 w-3" />
-                      {session.channel}
-                    </span>
-                    <span className="flex items-center gap-1">
-                      <MessageSquare className="h-3 w-3" />
-                      {session.message_count}
-                    </span>
-                    <span>{formatRelative(session.last_activity)}</span>
-                  </div>
-                </div>
-                <ChevronRight
-                  className="h-4 w-4 flex-shrink-0"
-                  style={{ color: "var(--pc-text-faint)" }}
-                />
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* Session Details Panel */}
-      <div className="card p-5 animate-slide-in-up">
-        <div className="flex items-center gap-2 mb-5">
-          <Activity className="h-5 w-5" style={{ color: "var(--pc-accent)" }} />
-          <h2
-            className="text-sm font-semibold uppercase tracking-wider"
-            style={{ color: "var(--pc-text-primary)" }}
-          >
-            {t("dashboard.session_details")}
-          </h2>
-        </div>
-
-        {selectedSession ? (
-          <div className="space-y-4">
-            {[
-              { label: t("dashboard.session_id"), value: selectedSession.id },
-              { label: t("dashboard.session_channel"), value: selectedSession.channel },
-              { label: t("dashboard.session_started"), value: formatTime(selectedSession.started_at) },
-              { label: t("dashboard.session_last_activity"), value: formatRelative(selectedSession.last_activity) },
-              { label: t("dashboard.session_status"), value: selectedSession.status },
-              { label: t("dashboard.session_messages"), value: String(selectedSession.message_count) },
-            ].map(({ label, value }) => (
-              <div key={label}>
-                <p className="text-xs uppercase tracking-wider mb-1" style={{ color: "var(--pc-text-faint)" }}>
-                  {label}
-                </p>
-                <p
-                  className="text-sm font-medium capitalize truncate"
-                  style={{ color: "var(--pc-text-primary)" }}
-                >
-                  {value}
-                </p>
-              </div>
-            ))}
-
-            <div
-              className="pt-3 mt-3 border-t"
-              style={{ borderColor: "var(--pc-border)" }}
-            >
-              <div
-                className="flex items-center gap-2"
-              >
-                <span
-                  className="status-dot"
-                  style={{
-                    background: sessionStatusColor(selectedSession.status),
-                    boxShadow: `0 0 6px ${sessionStatusColor(selectedSession.status)}`,
-                  }}
-                />
-                <span className="text-xs capitalize" style={{ color: "var(--pc-text-muted)" }}>
-                  {selectedSession.status}
-                </span>
-              </div>
-            </div>
-          </div>
-        ) : (
-          <p className="text-sm py-8 text-center" style={{ color: "var(--pc-text-faint)" }}>
-            {t("dashboard.session_history")}
-          </p>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Channels Tab
-// ---------------------------------------------------------------------------
-
-function ChannelsTab() {
-  const [channels, setChannels] = useState<ChannelDetail[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const { events } = useSSE({
-    filterTypes: ['channel_update', 'channel_status'],
-    autoConnect: true,
-  });
-
-  const loadChannels = useCallback(() => {
-    getChannels()
-      .then((data) => {
-        setChannels(data);
-        setLoading(false);
-      })
-      .catch((err) => {
-        setError(err.message);
-        setLoading(false);
-      });
-  }, []);
-
-  useEffect(() => {
-    loadChannels();
-  }, [loadChannels]);
-
-  // React to SSE events for real-time updates
-  useEffect(() => {
-    if (events.length === 0) return;
-    loadChannels();
-  }, [events.length, loadChannels]);
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-48">
         <div className="flex items-center gap-3">
-          <div
-            className="h-6 w-6 border-2 rounded-full animate-spin"
-            style={{ borderColor: "var(--pc-border)", borderTopColor: "var(--pc-accent)" }}
-          />
-          <span className="text-sm" style={{ color: "var(--pc-text-muted)" }}>
-            {t("dashboard.loading_channels")}
-          </span>
+          <div className="electric-icon h-10 w-10 rounded-xl">
+            <Icon className="h-5 w-5" />
+          </div>
+          <div>
+            <h2 className="text-base font-semibold text-white">{title}</h2>
+            <p className="text-xs uppercase tracking-[0.13em] text-[#7ea5eb]">{subtitle}</p>
+          </div>
         </div>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
+        <ChevronDown
+          className={[
+            'h-5 w-5 text-[#7ea5eb] transition-transform duration-300',
+            isOpen ? 'rotate-180' : 'rotate-0',
+          ].join(' ')}
+        />
+      </button>
       <div
-        className="rounded-2xl border p-4"
-        style={{ background: "rgba(239, 68, 68, 0.08)", borderColor: "rgba(239, 68, 68, 0.2)", color: "#f87171" }}
+        className={[
+          'grid overflow-hidden transition-[grid-template-rows,opacity] duration-300 ease-out',
+          isOpen ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0',
+        ].join(' ')}
       >
-        {t("dashboard.load_channels_error")}: {error}
+        <div className="min-h-0 border-t border-[#18356f] px-4 pb-4 pt-4 md:px-5">{children}</div>
       </div>
-    );
-  }
-
-  if (channels.length === 0) {
-    return (
-      <div className="card p-5 animate-slide-in-up">
-        <p className="text-sm py-8 text-center" style={{ color: "var(--pc-text-faint)" }}>
-          {t("dashboard.no_channels_detail")}
-        </p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 stagger-children">
-      {channels.map((channel) => (
-        <div
-          key={channel.name}
-          className="card p-5 animate-slide-in-up transition-all"
-          style={{
-            border: `1px solid ${healthBorder(channel.health)}`,
-            background: healthBg(channel.health),
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.transform = "translateY(-2px)";
-            e.currentTarget.style.boxShadow = `0 4px 12px ${healthBorder(channel.health)}`;
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.transform = "translateY(0)";
-            e.currentTarget.style.boxShadow = "none";
-          }}
-        >
-          {/* Header */}
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-3">
-              <div
-                className="p-2 rounded-2xl"
-                style={{ background: `rgba(var(--pc-accent-rgb), 0.08)`, color: "var(--pc-accent)" }}
-              >
-                <Radio className="h-5 w-5" />
-              </div>
-              <div>
-                <h3
-                  className="text-sm font-semibold capitalize"
-                  style={{ color: "var(--pc-text-primary)" }}
-                >
-                  {channel.name}
-                </h3>
-                <span className="text-xs" style={{ color: "var(--pc-text-muted)" }}>
-                  {channel.type}
-                </span>
-              </div>
-            </div>
-            <span
-              className="status-dot"
-              style={{
-                background: healthColor(channel.health),
-                boxShadow: `0 0 6px ${healthColor(channel.health)}`,
-              }}
-            />
-          </div>
-
-          {/* Status Badge */}
-          <div className="flex items-center gap-2 mb-3">
-            <span
-              className="text-[10px] uppercase font-medium px-2 py-0.5 rounded-full"
-              style={{
-                background: channel.status === 'active'
-                  ? 'rgba(0, 230, 138, 0.1)'
-                  : channel.status === 'error'
-                    ? 'rgba(255, 68, 102, 0.1)'
-                    : 'rgba(var(--pc-accent-rgb), 0.08)',
-                color: channel.status === 'active'
-                  ? '#34d399'
-                  : channel.status === 'error'
-                    ? '#f87171'
-                    : 'var(--pc-text-muted)',
-              }}
-            >
-              {channel.status}
-            </span>
-            <span
-              className="text-[10px] uppercase font-medium px-2 py-0.5 rounded-full"
-              style={{
-                background: channel.enabled
-                  ? 'rgba(0, 230, 138, 0.1)'
-                  : 'rgba(255, 68, 102, 0.1)',
-                color: channel.enabled ? '#34d399' : '#f87171',
-              }}
-            >
-              {channel.enabled ? t("dashboard.channel_enabled") : t("dashboard.channel_disabled")}
-            </span>
-          </div>
-
-          {/* Stats */}
-          <div
-            className="pt-3 border-t space-y-2"
-            style={{ borderColor: "var(--pc-border)" }}
-          >
-            <div className="flex justify-between text-xs">
-              <span style={{ color: "var(--pc-text-muted)" }}>{t("dashboard.channel_messages")}</span>
-              <span className="font-mono" style={{ color: "var(--pc-text-primary)" }}>
-                {channel.message_count.toLocaleString()}
-              </span>
-            </div>
-            <div className="flex justify-between text-xs">
-              <span style={{ color: "var(--pc-text-muted)" }}>{t("dashboard.channel_last_message")}</span>
-              <span className="font-mono" style={{ color: "var(--pc-text-primary)" }}>
-                {channel.last_message_at ? formatRelative(channel.last_message_at) : t("dashboard.never")}
-              </span>
-            </div>
-            <div className="flex justify-between text-xs">
-              <span style={{ color: "var(--pc-text-muted)" }}>{t("dashboard.health")}</span>
-              <span className="capitalize" style={{ color: healthColor(channel.health) }}>
-                {channel.health}
-              </span>
-            </div>
-          </div>
-        </div>
-      ))}
-    </div>
+    </section>
   );
 }
-
-// ---------------------------------------------------------------------------
-// Main Dashboard Component
-// ---------------------------------------------------------------------------
 
 export default function Dashboard() {
   const [status, setStatus] = useState<StatusResponse | null>(null);
   const [cost, setCost] = useState<CostSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [showAllChannels, setShowAllChannels] = useState(false);
-  const [activeTab, setActiveTab] = useState<TabId>('overview');
+  const [sectionsOpen, setSectionsOpen] = useState<DashboardSectionState>({
+    cost: true,
+    channels: true,
+    health: true,
+  });
 
   useEffect(() => {
     Promise.all([getStatus(), getCost()])
-      .then(([s, c]) => {
-        setStatus(s);
-        setCost(c);
+      .then(([statusPayload, costPayload]) => {
+        setStatus(statusPayload);
+        setCost(costPayload);
       })
-      .catch((err) => setError(err.message));
+      .catch((err: unknown) => {
+        const message = err instanceof Error ? err.message : 'Unknown dashboard load error';
+        setError(message);
+      });
   }, []);
+
+  const toggleSection = (section: DashboardSectionKey) => {
+    setSectionsOpen((prev) => ({
+      ...prev,
+      [section]: !prev[section],
+    }));
+  };
 
   if (error) {
     return (
-      <div className="p-6 animate-fade-in">
-        <div className="rounded-2xl border p-4" style={{ background: "rgba(239, 68, 68, 0.08)", borderColor: "rgba(239, 68, 68, 0.2)", color: "#f87171", }}>
-          {t("dashboard.load_error")}: {error}
-        </div>
+      <div className="electric-card p-5 text-rose-200">
+        <h2 className="text-lg font-semibold text-rose-100">Dashboard load failed</h2>
+        <p className="mt-2 text-sm text-rose-200/90">{error}</p>
       </div>
     );
   }
 
   if (!status || !cost) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <div className="h-8 w-8 border-2 rounded-full animate-spin" style={{ borderColor: "var(--pc-border)", borderTopColor: "var(--pc-accent)", }}/>
+      <div className="flex h-64 items-center justify-center">
+        <div className="electric-loader h-12 w-12 rounded-full" />
       </div>
     );
   }
 
-  return (
-    <div className="p-6 space-y-6 animate-fade-in">
-      {/* Tab Navigation */}
-      <div
-        className="flex items-center gap-1 p-1 rounded-2xl"
-        style={{ background: "var(--pc-bg-elevated)" }}
-      >
-        {TABS.map(({ id, labelKey, icon: Icon }) => (
-          <button
-            key={id}
-            onClick={() => setActiveTab(id)}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-all"
-            style={
-              activeTab === id
-                ? {
-                    background: "var(--pc-bg-primary)",
-                    color: "var(--pc-accent)",
-                    boxShadow: "0 1px 3px rgba(0, 0, 0, 0.1)",
-                  }
-                : {
-                    background: "transparent",
-                    color: "var(--pc-text-muted)",
-                  }
-            }
-            onMouseEnter={(e) => {
-              if (activeTab !== id) {
-                e.currentTarget.style.color = "var(--pc-text-primary)";
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (activeTab !== id) {
-                e.currentTarget.style.color = "var(--pc-text-muted)";
-              }
-            }}
-          >
-            <Icon className="h-4 w-4" />
-            {t(labelKey)}
-          </button>
-        ))}
-      </div>
+  const maxCost = Math.max(cost.session_cost_usd, cost.daily_cost_usd, cost.monthly_cost_usd, 0.001);
 
-      {/* Tab Content */}
-      {activeTab === 'overview' && (
-        <OverviewTab
-          status={status}
-          cost={cost}
-          showAllChannels={showAllChannels}
-          setShowAllChannels={setShowAllChannels}
-        />
-      )}
-      {activeTab === 'sessions' && <SessionsTab />}
-      {activeTab === 'channels' && <ChannelsTab />}
+  return (
+    <div className="space-y-5 md:space-y-6">
+      <section className="hero-panel motion-rise">
+        <div className="relative z-10 flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <p className="text-xs uppercase tracking-[0.22em] text-[#8fb8ff]">ZeroClaw Command Deck</p>
+            <h1 className="mt-2 text-2xl font-semibold tracking-[0.03em] text-white md:text-3xl">
+              Electric Runtime Dashboard
+            </h1>
+            <p className="mt-2 max-w-2xl text-sm text-[#b3cbf8] md:text-base">
+              Real-time telemetry, cost pulse, and operations status in a single collapsible surface.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="status-pill">
+              <Sparkles className="h-3.5 w-3.5" />
+              Live Gateway
+            </span>
+            <span className="status-pill">
+              <ShieldCheck className="h-3.5 w-3.5" />
+              {status.paired ? 'Paired' : 'Unpaired'}
+            </span>
+          </div>
+        </div>
+      </section>
+
+      <section className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <article className="electric-card motion-rise motion-delay-1 p-4">
+          <div className="metric-head">
+            <Cpu className="h-4 w-4" />
+            <span>Provider / Model</span>
+          </div>
+          <p className="metric-value mt-3">{status.provider ?? 'Unknown'}</p>
+          <p className="metric-sub mt-1 truncate">{status.model}</p>
+        </article>
+
+        <article className="electric-card motion-rise motion-delay-2 p-4">
+          <div className="metric-head">
+            <Clock3 className="h-4 w-4" />
+            <span>Uptime</span>
+          </div>
+          <p className="metric-value mt-3">{formatUptime(status.uptime_seconds)}</p>
+          <p className="metric-sub mt-1">Since last restart</p>
+        </article>
+
+        <article className="electric-card motion-rise motion-delay-3 p-4">
+          <div className="metric-head">
+            <Globe2 className="h-4 w-4" />
+            <span>Gateway Port</span>
+          </div>
+          <p className="metric-value mt-3">:{status.gateway_port}</p>
+          <p className="metric-sub mt-1">{status.locale}</p>
+        </article>
+
+        <article className="electric-card motion-rise motion-delay-4 p-4">
+          <div className="metric-head">
+            <Database className="h-4 w-4" />
+            <span>Memory Backend</span>
+          </div>
+          <p className="metric-value mt-3 capitalize">{status.memory_backend}</p>
+          <p className="metric-sub mt-1">{status.paired ? 'Pairing active' : 'No paired devices'}</p>
+        </article>
+      </section>
+
+      <div className="space-y-4">
+        <CollapsibleSection
+          title="Cost Pulse"
+          subtitle="Session, daily, and monthly runtime spend"
+          icon={DollarSign}
+          sectionKey="cost"
+          openState={sectionsOpen}
+          onToggle={toggleSection}
+        >
+          <div className="space-y-4">
+            {[
+              { label: 'Session', value: cost.session_cost_usd },
+              { label: 'Daily', value: cost.daily_cost_usd },
+              { label: 'Monthly', value: cost.monthly_cost_usd },
+            ].map(({ label, value }) => (
+              <div key={label}>
+                <div className="mb-1.5 flex items-center justify-between text-sm">
+                  <span className="text-[#9bb8ec]">{label}</span>
+                  <span className="font-semibold text-white">{formatUSD(value)}</span>
+                </div>
+                <div className="h-2.5 overflow-hidden rounded-full bg-[#061230]">
+                  <div
+                    className="electric-progress h-full rounded-full"
+                    style={{ width: `${Math.max((value / maxCost) * 100, 3)}%` }}
+                  />
+                </div>
+              </div>
+            ))}
+
+            <div className="grid grid-cols-2 gap-3 pt-2">
+              <div className="metric-pill">
+                <span>Total Tokens</span>
+                <strong>{cost.total_tokens.toLocaleString()}</strong>
+              </div>
+              <div className="metric-pill">
+                <span>Requests</span>
+                <strong>{cost.request_count.toLocaleString()}</strong>
+              </div>
+            </div>
+          </div>
+        </CollapsibleSection>
+
+        <CollapsibleSection
+          title="Channel Activity"
+          subtitle="Live integrations and route connectivity"
+          icon={Radio}
+          sectionKey="channels"
+          openState={sectionsOpen}
+          onToggle={toggleSection}
+        >
+          {Object.entries(status.channels).length === 0 ? (
+            <p className="text-sm text-[#8aa8df]">No channels configured.</p>
+          ) : (
+            <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+              {Object.entries(status.channels).map(([name, active]) => (
+                <div
+                  key={name}
+                  className="rounded-xl border border-[#1d3770] bg-[#05112c]/90 px-3 py-2.5"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm capitalize text-white">{name}</span>
+                    <span className="flex items-center gap-2 text-xs text-[#8baee7]">
+                      <span
+                        className={[
+                          'inline-block h-2.5 w-2.5 rounded-full',
+                          active ? 'bg-emerald-400 shadow-[0_0_12px_0_rgba(52,211,153,0.8)]' : 'bg-slate-500',
+                        ].join(' ')}
+                      />
+                      {active ? 'Active' : 'Inactive'}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </CollapsibleSection>
+
+        <CollapsibleSection
+          title="Component Health"
+          subtitle="Runtime heartbeat and restart awareness"
+          icon={Activity}
+          sectionKey="health"
+          openState={sectionsOpen}
+          onToggle={toggleSection}
+        >
+          {Object.entries(status.health.components).length === 0 ? (
+            <p className="text-sm text-[#8aa8df]">No component health is currently available.</p>
+          ) : (
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+              {Object.entries(status.health.components).map(([name, component]) => (
+                <div
+                  key={name}
+                  className={[
+                    'rounded-xl border bg-[#05112c]/80 px-3 py-3',
+                    healthBorder(component.status),
+                  ].join(' ')}
+                >
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-semibold capitalize text-white">{name}</p>
+                    <span className={['inline-block h-2.5 w-2.5 rounded-full', healthColor(component.status)].join(' ')} />
+                  </div>
+                  <p className="mt-1 text-xs uppercase tracking-[0.12em] text-[#87a9e5]">
+                    {component.status}
+                  </p>
+                  {component.restart_count > 0 && (
+                    <p className="mt-2 text-xs text-amber-300">
+                      Restarts: {component.restart_count}
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </CollapsibleSection>
+      </div>
     </div>
   );
 }

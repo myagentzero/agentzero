@@ -103,7 +103,7 @@ Channels: `telegram` (4.6k), `discord`, `slack`, `whatsapp`, `whatsapp_web`, `ma
 Tool categories:
 - **File/Shell**: `shell`, `file_read`, `file_write`, `file_edit`, `glob_search`, `content_search`
 - **Memory**: `memory_store`, `memory_recall`, `memory_forget`
-- **Web**: `browser`, `browser_open`, `web_fetch`, `web_search_tool`, `http_request`
+- **Web**: `browser`, `web_fetch`, `web_search_tool`, `http_request`
 - **Scheduling**: `cron_add`, `cron_list`, `cron_remove`, `cron_update`, `cron_run`, `cron_runs`, `schedule`
 - **Delegation**: `delegate` (sub-agent spawning), `composio` (OAuth integrations)
 - **Hardware**: `hardware_board_info`, `hardware_memory_map`, `hardware_memory_read`

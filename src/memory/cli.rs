@@ -1,10 +1,10 @@
 use super::traits::{Memory, MemoryCategory};
 use super::{
-    classify_memory_backend, create_memory_for_migration, effective_memory_backend_name,
-    MemoryBackendKind,
+    MemoryBackendKind, classify_memory_backend, create_memory_for_migration,
+    effective_memory_backend_name,
 };
 use crate::config::Config;
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use console::style;
 
 /// Handle `zeroclaw memory <subcommand>` CLI commands.
@@ -17,9 +17,18 @@ pub async fn handle_command(command: crate::MemoryCommands, config: &Config) -> 
             offset,
         } => handle_list(config, category, session, limit, offset).await,
         crate::MemoryCommands::Get { key } => handle_get(config, &key).await,
+        crate::MemoryCommands::Store {
+            key,
+            content,
+            category,
+            session,
+        } => handle_store(config, &key, &content, &category, session.as_deref()).await,
         crate::MemoryCommands::Stats => handle_stats(config).await,
         crate::MemoryCommands::Clear { key, category, yes } => {
             handle_clear(config, key, category, yes).await
+        }
+        crate::MemoryCommands::Reindex { yes, progress } => {
+            handle_reindex(config, yes, progress).await
         }
     }
 }
@@ -28,7 +37,7 @@ pub async fn handle_command(command: crate::MemoryCommands, config: &Config) -> 
 ///
 /// CLI commands (list/get/stats/clear) never use vector search, so we skip
 /// embedding provider initialisation for local backends by using the
-/// migration factory.
+/// migration factory.  Postgres still needs its full connection config.
 fn create_cli_memory(config: &Config) -> Result<Box<dyn Memory>> {
     let backend = effective_memory_backend_name(
         &config.memory.backend,
@@ -86,6 +95,25 @@ async fn handle_list(
         println!("\n  Use --offset {} to see the next page.", offset + limit);
     }
 
+    Ok(())
+}
+
+async fn handle_store(
+    config: &Config,
+    key: &str,
+    content: &str,
+    category: &str,
+    session: Option<&str>,
+) -> Result<()> {
+    let mem = create_cli_memory(config)?;
+    let cat = parse_category(category);
+    mem.store(key, content, cat.clone(), session).await?;
+    println!(
+        "{} Stored memory: {} [{}]",
+        style("✓").green().bold(),
+        style(key).white().bold(),
+        cat,
+    );
     Ok(())
 }
 
@@ -261,6 +289,75 @@ async fn handle_clear_key(mem: &dyn Memory, key: &str, yes: bool) -> Result<()> 
     if mem.forget(&target).await? {
         println!("{} Deleted key: {target}", style("✓").green().bold());
     }
+
+    Ok(())
+}
+
+/// Rebuild embeddings for all memories using current embedding configuration.
+async fn handle_reindex(config: &Config, yes: bool, progress: bool) -> Result<()> {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    // Reindex requires full memory backend with embeddings
+    let mem = super::create_memory(&config.memory, &config.workspace_dir, None)?;
+
+    // Get total count for confirmation
+    let total = mem.count().await?;
+
+    if total == 0 {
+        println!("No memories to reindex.");
+        return Ok(());
+    }
+
+    println!(
+        "\n{} Found {} memories to reindex.",
+        style("ℹ").blue().bold(),
+        style(total).cyan().bold()
+    );
+    println!(
+        "  This will clear the embedding cache and recompute all embeddings\n  using the current embedding provider configuration.\n"
+    );
+
+    if !yes {
+        let confirmed = dialoguer::Confirm::new()
+            .with_prompt("  Proceed with reindex?")
+            .default(false)
+            .interact()?;
+        if !confirmed {
+            println!("Aborted.");
+            return Ok(());
+        }
+    }
+
+    println!("\n{} Reindexing memories...\n", style("⟳").yellow().bold());
+
+    // Create progress callback if enabled
+    let callback: Option<Box<dyn Fn(usize, usize) + Send + Sync>> = if progress {
+        let last_percent = Arc::new(AtomicUsize::new(0));
+        Some(Box::new(move |current, total| {
+            let percent = (current * 100) / total.max(1);
+            let last = last_percent.load(Ordering::Relaxed);
+            // Only print every 10%
+            if percent >= last + 10 || current == total {
+                last_percent.store(percent, Ordering::Relaxed);
+                eprint!("\r  Progress: {current}/{total} ({percent}%)");
+                if current == total {
+                    eprintln!();
+                }
+            }
+        }))
+    } else {
+        None
+    };
+
+    // Perform reindex
+    let reindexed = mem.reindex(callback).await?;
+
+    println!(
+        "\n{} Reindexed {} memories successfully.",
+        style("✓").green().bold(),
+        style(reindexed).cyan().bold()
+    );
 
     Ok(())
 }

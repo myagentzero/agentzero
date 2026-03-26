@@ -44,7 +44,7 @@ fn default_auto_integrate() -> bool {
     true
 }
 fn default_sources() -> Vec<String> {
-    vec!["github".into(), "clawhub".into()]
+    vec!["github".into()]
 }
 fn default_scan_interval() -> u64 {
     24
@@ -137,7 +137,11 @@ impl SkillForge {
         let mut candidates: Vec<ScoutResult> = Vec::new();
 
         for src in &self.config.sources {
-            let source: ScoutSource = src.parse().unwrap(); // Infallible
+            // ScoutSource::from_str has Err = Infallible and never returns Err.
+            let source: ScoutSource = match src.parse() {
+                Ok(source) => source,
+                Err(never) => match never {},
+            };
             match source {
                 ScoutSource::GitHub => {
                     let scout = GitHubScout::new(self.config.github_token.clone());
@@ -150,12 +154,6 @@ impl SkillForge {
                             warn!(error = %e, "GitHub scout failed, continuing with other sources");
                         }
                     }
-                }
-                ScoutSource::ClawHub | ScoutSource::HuggingFace => {
-                    info!(
-                        source = src.as_str(),
-                        "Source not yet implemented — skipping"
-                    );
                 }
             }
         }
@@ -250,6 +248,6 @@ mod tests {
         assert!(cfg.auto_integrate);
         assert_eq!(cfg.scan_interval_hours, 24);
         assert!((cfg.min_score - 0.7).abs() < f64::EPSILON);
-        assert_eq!(cfg.sources, vec!["github", "clawhub"]);
+        assert_eq!(cfg.sources, vec!["github"]);
     }
 }

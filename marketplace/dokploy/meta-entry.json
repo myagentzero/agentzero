@@ -5,9 +5,9 @@
   "description": "Fast, small, and fully autonomous AI personal assistant infrastructure. Deploy anywhere, swap anything. 100% Rust.",
   "logo": "zeroclaw.png",
   "links": {
-    "github": "https://github.com/zeroclaw-labs/zeroclaw",
+    "github": "https://github.com/myagentzero/zeroclaw",
     "website": "https://zeroclaw.com/",
-    "docs": "https://github.com/zeroclaw-labs/zeroclaw#readme"
+    "docs": "https://github.com/myagentzero/zeroclaw#readme"
   },
   "tags": ["ai", "self-hosted"]
 }

@@ -34,6 +34,9 @@ pub fn text_response(text: &str) -> ChatResponse {
         tool_calls: vec![],
         usage: None,
         reasoning_content: None,
+        quota_metadata: None,
+        stop_reason: None,
+        raw_stop_reason: None,
     }
 }
 
@@ -44,6 +47,9 @@ pub fn tool_response(calls: Vec<ToolCall>) -> ChatResponse {
         tool_calls: calls,
         usage: None,
         reasoning_content: None,
+        quota_metadata: None,
+        stop_reason: None,
+        raw_stop_reason: None,
     }
 }
 
@@ -131,12 +137,7 @@ impl StaticMemoryLoader {
 
 #[async_trait]
 impl MemoryLoader for StaticMemoryLoader {
-    async fn load_context(
-        &self,
-        _memory: &dyn Memory,
-        _user_message: &str,
-        _session_id: Option<&str>,
-    ) -> Result<String> {
+    async fn load_context(&self, _memory: &dyn Memory, _user_message: &str) -> Result<String> {
         Ok(self.context.clone())
     }
 }

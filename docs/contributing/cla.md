@@ -26,7 +26,7 @@ terms of this CLA.
 - **"You"** means the individual or legal entity submitting a Contribution.
 
 - **"ZeroClaw Labs"** means the maintainers and organization responsible
-  for the ZeroClaw project at https://github.com/zeroclaw-labs/zeroclaw.
+  for the ZeroClaw project at https://github.com/myagentzero/zeroclaw.
 
 ---
 
@@ -124,7 +124,7 @@ and a maintainer will follow up.
 ## 10. Questions
 
 If you have questions about this CLA, open an issue at:
-https://github.com/zeroclaw-labs/zeroclaw/issues
+https://github.com/myagentzero/zeroclaw/issues
 
 ---
 

@@ -1,267 +1,358 @@
-//! Multi-stage retrieval pipeline.
-//!
-//! Wraps a `Memory` trait object with staged retrieval:
-//! - **Stage 1 (Hot cache):** In-memory LRU of recent recall results.
-//! - **Stage 2 (FTS):** FTS5 keyword search with optional early-return.
-//! - **Stage 3 (Vector):** Vector similarity search + hybrid merge.
-//!
-//! Configurable via `[memory]` settings: `retrieval_stages`, `fts_early_return_score`.
-
 use super::traits::{Memory, MemoryEntry};
-use parking_lot::Mutex;
-use std::collections::HashMap;
-use std::sync::Arc;
-use std::time::{Duration, Instant};
 
-/// A cached recall result.
-struct CachedResult {
-    entries: Vec<MemoryEntry>,
-    created_at: Instant,
-}
+/// Minimum message length (chars) to trigger keyword expansion query.
+const MIN_EXPANSION_LENGTH: usize = 30;
 
-/// Multi-stage retrieval pipeline configuration.
-#[derive(Debug, Clone)]
-pub struct RetrievalConfig {
-    /// Ordered list of stages: "cache", "fts", "vector".
-    pub stages: Vec<String>,
-    /// FTS score above which to early-return without vector stage.
-    pub fts_early_return_score: f64,
-    /// Max entries in the hot cache.
-    pub cache_max_entries: usize,
-    /// TTL for cached results.
-    pub cache_ttl: Duration,
-}
+/// Minimum word length to keep in keyword extraction.
+const MIN_KEYWORD_LENGTH: usize = 4;
 
-impl Default for RetrievalConfig {
-    fn default() -> Self {
-        Self {
-            stages: vec!["cache".into(), "fts".into(), "vector".into()],
-            fts_early_return_score: 0.85,
-            cache_max_entries: 256,
-            cache_ttl: Duration::from_secs(300),
-        }
-    }
-}
+/// Enhanced memory retrieval with multi-query expansion.
+///
+/// 1. Runs the primary recall with the full query.
+/// 2. For long messages, extracts significant keywords and runs a second recall,
+///    merging results (deduplicated by key, keeping the higher score).
+/// 3. Returns the top `limit` entries sorted by score descending.
+pub async fn enhanced_recall(
+    mem: &dyn Memory,
+    query: &str,
+    limit: usize,
+    session_id: Option<&str>,
+) -> anyhow::Result<Vec<MemoryEntry>> {
+    // Primary recall with full query
+    let mut results = mem.recall(query, limit, session_id).await?;
 
-/// Multi-stage retrieval pipeline wrapping a `Memory` backend.
-pub struct RetrievalPipeline {
-    memory: Arc<dyn Memory>,
-    config: RetrievalConfig,
-    hot_cache: Mutex<HashMap<String, CachedResult>>,
-}
-
-impl RetrievalPipeline {
-    pub fn new(memory: Arc<dyn Memory>, config: RetrievalConfig) -> Self {
-        Self {
-            memory,
-            config,
-            hot_cache: Mutex::new(HashMap::new()),
-        }
-    }
-
-    /// Build a cache key from query parameters.
-    fn cache_key(
-        query: &str,
-        limit: usize,
-        session_id: Option<&str>,
-        namespace: Option<&str>,
-    ) -> String {
-        format!(
-            "{}:{}:{}:{}",
-            query,
-            limit,
-            session_id.unwrap_or(""),
-            namespace.unwrap_or("")
-        )
-    }
-
-    /// Check the hot cache for a previous result.
-    fn check_cache(&self, key: &str) -> Option<Vec<MemoryEntry>> {
-        let cache = self.hot_cache.lock();
-        if let Some(cached) = cache.get(key) {
-            if cached.created_at.elapsed() < self.config.cache_ttl {
-                return Some(cached.entries.clone());
+    // Multi-query expansion for long messages
+    if query.len() >= MIN_EXPANSION_LENGTH {
+        let keywords = extract_keywords(query);
+        if !keywords.is_empty() && keywords != query.trim() {
+            if let Ok(extra) = mem.recall(&keywords, limit, session_id).await {
+                merge_entries(&mut results, extra);
             }
         }
-        None
     }
 
-    /// Store a result in the hot cache with LRU eviction.
-    fn store_in_cache(&self, key: String, entries: Vec<MemoryEntry>) {
-        let mut cache = self.hot_cache.lock();
+    // Sort by score descending, take top `limit`
+    results.sort_by(|a, b| {
+        b.score
+            .unwrap_or(0.0)
+            .partial_cmp(&a.score.unwrap_or(0.0))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    results.truncate(limit);
 
-        // LRU eviction: remove oldest entries if at capacity
-        if cache.len() >= self.config.cache_max_entries {
-            let oldest_key = cache
-                .iter()
-                .min_by_key(|(_, v)| v.created_at)
-                .map(|(k, _)| k.clone());
-            if let Some(k) = oldest_key {
-                cache.remove(&k);
+    Ok(results)
+}
+
+/// Extract significant keywords (length >= 4) from a message.
+fn extract_keywords(msg: &str) -> String {
+    msg.split_whitespace()
+        .filter_map(|w| {
+            let clean = w.trim_matches(|c: char| !c.is_alphanumeric());
+            if clean.len() >= MIN_KEYWORD_LENGTH {
+                Some(clean)
+            } else {
+                None
             }
-        }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
 
-        cache.insert(
-            key,
-            CachedResult {
-                entries,
-                created_at: Instant::now(),
-            },
-        );
-    }
-
-    /// Execute the multi-stage retrieval pipeline.
-    pub async fn recall(
-        &self,
-        query: &str,
-        limit: usize,
-        session_id: Option<&str>,
-        namespace: Option<&str>,
-        since: Option<&str>,
-        until: Option<&str>,
-    ) -> anyhow::Result<Vec<MemoryEntry>> {
-        let ck = Self::cache_key(query, limit, session_id, namespace);
-
-        for stage in &self.config.stages {
-            match stage.as_str() {
-                "cache" => {
-                    if let Some(cached) = self.check_cache(&ck) {
-                        tracing::debug!("retrieval pipeline: cache hit for '{query}'");
-                        return Ok(cached);
-                    }
-                }
-                "fts" | "vector" => {
-                    // Both FTS and vector are handled by the backend's recall method
-                    // which already does hybrid merge. We delegate to it.
-                    let results = if let Some(ns) = namespace {
-                        self.memory
-                            .recall_namespaced(ns, query, limit, session_id, since, until)
-                            .await?
-                    } else {
-                        self.memory
-                            .recall(query, limit, session_id, since, until)
-                            .await?
-                    };
-
-                    if !results.is_empty() {
-                        // Check for FTS early-return: if top score exceeds threshold
-                        // and we're in the FTS stage, we can skip further stages
-                        if stage == "fts" {
-                            if let Some(top_score) = results.first().and_then(|e| e.score) {
-                                if top_score >= self.config.fts_early_return_score {
-                                    tracing::debug!(
-                                        "retrieval pipeline: FTS early return (score={top_score:.3})"
-                                    );
-                                    self.store_in_cache(ck, results.clone());
-                                    return Ok(results);
-                                }
-                            }
-                        }
-
-                        self.store_in_cache(ck, results.clone());
-                        return Ok(results);
-                    }
-                }
-                other => {
-                    tracing::warn!("retrieval pipeline: unknown stage '{other}', skipping");
-                }
+/// Merge extra entries into results, deduplicating by key (keep highest score).
+fn merge_entries(results: &mut Vec<MemoryEntry>, extra: Vec<MemoryEntry>) {
+    for entry in extra {
+        if let Some(existing) = results.iter_mut().find(|r| r.key == entry.key) {
+            if entry.score.unwrap_or(0.0) > existing.score.unwrap_or(0.0) {
+                existing.score = entry.score;
             }
+        } else {
+            results.push(entry);
         }
-
-        // No results from any stage
-        Ok(Vec::new())
-    }
-
-    /// Invalidate the hot cache (e.g. after a store operation).
-    pub fn invalidate_cache(&self) {
-        self.hot_cache.lock().clear();
-    }
-
-    /// Get the number of entries in the hot cache.
-    pub fn cache_size(&self) -> usize {
-        self.hot_cache.lock().len()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::memory::NoneMemory;
+    use crate::memory::traits::MemoryCategory;
+    use async_trait::async_trait;
 
-    #[tokio::test]
-    async fn pipeline_returns_empty_from_none_backend() {
-        let memory = Arc::new(NoneMemory::new());
-        let pipeline = RetrievalPipeline::new(memory, RetrievalConfig::default());
-
-        let results = pipeline
-            .recall("test", 10, None, None, None, None)
-            .await
-            .unwrap();
-        assert!(results.is_empty());
-    }
-
-    #[tokio::test]
-    async fn pipeline_cache_invalidation() {
-        let memory = Arc::new(NoneMemory::new());
-        let pipeline = RetrievalPipeline::new(memory, RetrievalConfig::default());
-
-        // Force a cache entry
-        let ck = RetrievalPipeline::cache_key("test", 10, None, None);
-        pipeline.store_in_cache(ck, vec![]);
-
-        assert_eq!(pipeline.cache_size(), 1);
-        pipeline.invalidate_cache();
-        assert_eq!(pipeline.cache_size(), 0);
+    #[test]
+    fn extract_keywords_filters_short_words() {
+        assert_eq!(
+            extract_keywords("I want to use PostgreSQL for the database"),
+            "want PostgreSQL database"
+        );
     }
 
     #[test]
-    fn cache_key_includes_all_params() {
-        let k1 = RetrievalPipeline::cache_key("hello", 10, Some("sess-a"), Some("ns1"));
-        let k2 = RetrievalPipeline::cache_key("hello", 10, Some("sess-b"), Some("ns1"));
-        let k3 = RetrievalPipeline::cache_key("hello", 10, Some("sess-a"), Some("ns2"));
+    fn extract_keywords_strips_punctuation() {
+        // trim_matches strips non-alphanumeric from both ends:
+        // "config?" -> "config", "settings." -> "settings", "what's" stays (apostrophe is internal)
+        assert_eq!(
+            extract_keywords("what's the config? check settings."),
+            "what's config check settings"
+        );
+    }
 
-        assert_ne!(k1, k2);
-        assert_ne!(k1, k3);
+    #[test]
+    fn extract_keywords_empty_for_short_words() {
+        assert_eq!(extract_keywords("I am ok"), "");
+    }
+
+    #[test]
+    fn merge_entries_deduplicates_by_key_keeping_higher_score() {
+        let mut results = vec![MemoryEntry {
+            id: "1".into(),
+            key: "db".into(),
+            content: "PostgreSQL".into(),
+            category: MemoryCategory::Core,
+            timestamp: "now".into(),
+            session_id: None,
+            score: Some(0.6),
+        }];
+        let extra = vec![
+            MemoryEntry {
+                id: "1b".into(),
+                key: "db".into(),
+                content: "PostgreSQL".into(),
+                category: MemoryCategory::Core,
+                timestamp: "now".into(),
+                session_id: None,
+                score: Some(0.9), // higher
+            },
+            MemoryEntry {
+                id: "2".into(),
+                key: "lang".into(),
+                content: "Rust".into(),
+                category: MemoryCategory::Core,
+                timestamp: "now".into(),
+                session_id: None,
+                score: Some(0.7),
+            },
+        ];
+        merge_entries(&mut results, extra);
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].score, Some(0.9)); // upgraded
+        assert_eq!(results[1].key, "lang"); // new entry added
+    }
+
+    struct MockMemory {
+        primary: Vec<MemoryEntry>,
+        keyword: Vec<MemoryEntry>,
+        fail_primary: bool,
+        fail_keyword: bool,
+        call_count: std::sync::atomic::AtomicUsize,
+    }
+
+    #[async_trait]
+    impl Memory for MockMemory {
+        async fn store(
+            &self,
+            _k: &str,
+            _c: &str,
+            _cat: MemoryCategory,
+            _s: Option<&str>,
+        ) -> anyhow::Result<()> {
+            Ok(())
+        }
+        async fn recall(
+            &self,
+            _query: &str,
+            _limit: usize,
+            _s: Option<&str>,
+        ) -> anyhow::Result<Vec<MemoryEntry>> {
+            // First call returns primary results, second call returns keyword results
+            let n = self
+                .call_count
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if n == 0 {
+                if self.fail_primary {
+                    Err(anyhow::anyhow!("primary recall failed"))
+                } else {
+                    Ok(self.primary.clone())
+                }
+            } else {
+                if self.fail_keyword {
+                    Err(anyhow::anyhow!("keyword recall failed"))
+                } else {
+                    Ok(self.keyword.clone())
+                }
+            }
+        }
+        async fn get(&self, _k: &str) -> anyhow::Result<Option<MemoryEntry>> {
+            Ok(None)
+        }
+        async fn list(
+            &self,
+            _c: Option<&MemoryCategory>,
+            _s: Option<&str>,
+        ) -> anyhow::Result<Vec<MemoryEntry>> {
+            Ok(vec![])
+        }
+        async fn forget(&self, _k: &str) -> anyhow::Result<bool> {
+            Ok(true)
+        }
+        async fn count(&self) -> anyhow::Result<usize> {
+            Ok(0)
+        }
+        async fn health_check(&self) -> bool {
+            true
+        }
+        fn name(&self) -> &str {
+            "mock"
+        }
     }
 
     #[tokio::test]
-    async fn pipeline_caches_results() {
-        let memory = Arc::new(NoneMemory::new());
-        let config = RetrievalConfig {
-            stages: vec!["cache".into()],
-            ..Default::default()
+    async fn enhanced_recall_merges_primary_and_keyword_results() {
+        let mem = MockMemory {
+            primary: vec![MemoryEntry {
+                id: "1".into(),
+                key: "db".into(),
+                content: "PostgreSQL".into(),
+                category: MemoryCategory::Core,
+                timestamp: "now".into(),
+                session_id: None,
+                score: Some(0.7),
+            }],
+            keyword: vec![MemoryEntry {
+                id: "2".into(),
+                key: "lang".into(),
+                content: "Rust".into(),
+                category: MemoryCategory::Conversation,
+                timestamp: "now".into(),
+                session_id: None,
+                score: Some(0.6),
+            }],
+            fail_primary: false,
+            fail_keyword: false,
+            call_count: std::sync::atomic::AtomicUsize::new(0),
         };
-        let pipeline = RetrievalPipeline::new(memory, config);
 
-        // First call: cache miss, no results
-        let results = pipeline
-            .recall("test", 10, None, None, None, None)
-            .await
-            .unwrap();
-        assert!(results.is_empty());
+        // Long query triggers expansion
+        let query = "what database and programming language should we use for this project";
+        let results = enhanced_recall(&mem, query, 5, None).await.unwrap();
 
-        // Manually insert a cache entry
-        let ck = RetrievalPipeline::cache_key("cached_query", 5, None, None);
-        let fake_entry = MemoryEntry {
-            id: "1".into(),
-            key: "k".into(),
-            content: "cached content".into(),
-            category: crate::memory::MemoryCategory::Core,
-            timestamp: "now".into(),
-            session_id: None,
-            score: Some(0.9),
-            namespace: "default".into(),
-            importance: None,
-            superseded_by: None,
+        assert_eq!(results.len(), 2);
+        // "db" has higher score (0.7), ranked first
+        assert_eq!(results[0].key, "db");
+        assert_eq!(results[0].score, Some(0.7));
+        // "lang" from keyword expansion
+        assert_eq!(results[1].key, "lang");
+        assert_eq!(results[1].score, Some(0.6));
+    }
+
+    #[tokio::test]
+    async fn enhanced_recall_skips_expansion_for_short_query() {
+        let mem = MockMemory {
+            primary: vec![MemoryEntry {
+                id: "1".into(),
+                key: "db".into(),
+                content: "PostgreSQL".into(),
+                category: MemoryCategory::Core,
+                timestamp: "now".into(),
+                session_id: None,
+                score: Some(0.7),
+            }],
+            keyword: vec![MemoryEntry {
+                id: "2".into(),
+                key: "lang".into(),
+                content: "Rust".into(),
+                category: MemoryCategory::Conversation,
+                timestamp: "now".into(),
+                session_id: None,
+                score: Some(0.6),
+            }],
+            fail_primary: false,
+            fail_keyword: false,
+            call_count: std::sync::atomic::AtomicUsize::new(0),
         };
-        pipeline.store_in_cache(ck, vec![fake_entry]);
 
-        // Cache hit
-        let results = pipeline
-            .recall("cached_query", 5, None, None, None, None)
-            .await
-            .unwrap();
+        // Short query — no expansion, so "keyword" recall is what gets returned
+        // (because our mock returns keyword results for short queries)
+        let results = enhanced_recall(&mem, "database?", 5, None).await.unwrap();
+
+        // Only keyword results returned (mock behavior), no merge
         assert_eq!(results.len(), 1);
-        assert_eq!(results[0].content, "cached content");
+    }
+
+    #[tokio::test]
+    async fn enhanced_recall_respects_limit() {
+        let mem = MockMemory {
+            primary: (0..10)
+                .map(|i| MemoryEntry {
+                    id: format!("{i}"),
+                    key: format!("key_{i}"),
+                    content: format!("val_{i}"),
+                    category: MemoryCategory::Conversation,
+                    timestamp: "now".into(),
+                    session_id: None,
+                    score: Some(0.5 + i as f64 * 0.01),
+                })
+                .collect(),
+            keyword: vec![],
+            fail_primary: false,
+            fail_keyword: false,
+            call_count: std::sync::atomic::AtomicUsize::new(0),
+        };
+
+        let results = enhanced_recall(
+            &mem,
+            "a very long query that definitely triggers keyword expansion for testing purposes",
+            3,
+            None,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(results.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn enhanced_recall_propagates_primary_recall_errors() {
+        let mem = MockMemory {
+            primary: vec![],
+            keyword: vec![],
+            fail_primary: true,
+            fail_keyword: false,
+            call_count: std::sync::atomic::AtomicUsize::new(0),
+        };
+
+        let err = enhanced_recall(&mem, "long enough query to trigger expansion", 5, None)
+            .await
+            .expect_err("expected primary recall error to propagate");
+        assert!(err.to_string().contains("primary recall failed"));
+    }
+
+    #[tokio::test]
+    async fn enhanced_recall_tolerates_keyword_recall_errors() {
+        let mem = MockMemory {
+            primary: vec![MemoryEntry {
+                id: "1".into(),
+                key: "db".into(),
+                content: "PostgreSQL".into(),
+                category: MemoryCategory::Core,
+                timestamp: "now".into(),
+                session_id: None,
+                score: Some(0.7),
+            }],
+            keyword: vec![],
+            fail_primary: false,
+            fail_keyword: true,
+            call_count: std::sync::atomic::AtomicUsize::new(0),
+        };
+
+        let results = enhanced_recall(
+            &mem,
+            "what database and programming language should we use for this project",
+            5,
+            None,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].key, "db");
     }
 }

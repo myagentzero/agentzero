@@ -1,37 +1,25 @@
 [workspace]
-members = [".", "crates/robot-kit", "crates/aardvark-sys", "apps/tauri"]
+members = [
+    ".",
+    "crates/robot-kit",
+    "crates/zeroclaw-types",
+    "crates/zeroclaw-core",
+]
 resolver = "2"
 
 [package]
-name = "zeroclawlabs"
-version = "0.6.4"
-edition = "2021"
-authors = ["theonlyhennygod"]
+name = "zeroclaw"
+version = "0.2.0"
+edition = "2024"
+build = "build.rs"
+authors = ["zeroclaw"]
 license = "MIT OR Apache-2.0"
 description = "Zero overhead. Zero compromise. 100% Rust. The fastest, smallest AI assistant."
-repository = "https://github.com/zeroclaw-labs/zeroclaw"
+repository = "https://github.com/myagentzero/zeroclaw"
 readme = "README.md"
 keywords = ["ai", "agent", "cli", "assistant", "chatbot"]
 categories = ["command-line-utilities", "api-bindings"]
 rust-version = "1.87"
-include = [
-  "/src/**/*",
-  "/build.rs",
-  "/Cargo.toml",
-  "/Cargo.lock",
-  "/LICENSE*",
-  "/README.md",
-  "/web/dist/**/*",
-  "/tool_descriptions/**/*",
-]
-
-[[bin]]
-name = "zeroclaw"
-path = "src/main.rs"
-
-[lib]
-name = "zeroclaw"
-path = "src/lib.rs"
 
 [dependencies]
 # CLI - minimal and fast
@@ -46,12 +34,11 @@ tokio-stream = { version = "0.1.18", default-features = false, features = ["fs",
 # HTTP client - minimal features
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "blocking", "multipart", "stream", "socks"] }
 
-# Matrix client + E2EE decryption
-matrix-sdk = { version = "0.16", optional = true, default-features = false, features = ["e2e-encryption", "rustls-tls", "markdown", "sqlite"] }
-
 # Serialization
 serde = { version = "1.0", default-features = false, features = ["derive"] }
 serde_json = { version = "1.0", default-features = false, features = ["std"] }
+serde_ignored = "0.1"
+serde_yaml = "0.9"
 
 # Config
 directories = "6.0"
@@ -63,10 +50,10 @@ schemars = "1.2"
 
 # Logging - minimal
 tracing = { version = "0.1", default-features = false }
-tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "ansi", "env-filter"] }
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "ansi", "env-filter", "chrono"] }
 
-# Observability - Prometheus metrics (optional; requires AtomicU64, unavailable on 32-bit)
-prometheus = { version = "0.14", default-features = false, optional = true }
+# Observability - Prometheus metrics
+prometheus = { version = "0.14", default-features = false }
 
 # Base64 encoding (screenshots, image data)
 base64 = "0.22"
@@ -75,31 +62,26 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png"]
 # URL encoding for web search
 urlencoding = "2.1"
 
-# HTML to plain text conversion (web_fetch tool)
+# HTML to plain text / markdown conversion (web_fetch tool)
 nanohtml2text = "0.2"
+html2md = { package = "fast_html2md", version = "0.0.58", optional = true }
+
+# Zip archive extraction
+zip = { version = "8.1", default-features = false, features = ["deflate"] }
+
+# XML parsing (DOCX text extraction)
+quick-xml = "0.37"
 
 # Optional Rust-native browser automation backend
 fantoccini = { version = "0.22.1", optional = true, default-features = false, features = ["rustls-tls"] }
 
-# Progress bars (update pipeline)
-indicatif = "0.18"
-
-# Temp files (update pipeline rollback)
-tempfile = "3.26"
-
-# Tar/gzip extraction (update pipeline)
-flate2 = "1.1"
-tar = "0.4"
-
-# Zip extraction for ClawhHub / OpenClaw registry installers
-zip = { version = "8.1", default-features = false, features = ["deflate-flate2"] }
+# Optional in-process WASM runtime for sandboxed tool execution
+wasmi = { version = "1.0.9", optional = true, default-features = true }
 
 # Error handling
 anyhow = "1.0"
 thiserror = "2.0"
-
-# Aardvark I2C/SPI/GPIO USB adapter (Total Phase) — stub when SDK absent
-aardvark-sys = { path = "crates/aardvark-sys", version = "0.1.0" }
+aho-corasick = "1.1"
 
 # UUID generation
 uuid = { version = "1.22", default-features = false, features = ["v4", "std"] }
@@ -115,9 +97,6 @@ hex = "0.4"
 # CSPRNG for secure token generation
 rand = "0.10"
 
-# Portable atomic fallbacks for targets without native 64-bit atomics
-portable-atomic = "1"
-
 # serde-big-array for wa-rs storage (large array serialization)
 serde-big-array = { version = "0.5", optional = true }
 
@@ -130,7 +109,7 @@ async-trait = "0.1"
 # HMAC-SHA256 (Zhipu/GLM JWT auth)
 ring = "0.17"
 
-# Protobuf encode/decode (Lark WS frame codec, WhatsApp storage)
+# Protobuf encode/decode (WS frame codec, WhatsApp storage)
 prost = { version = "0.14", default-features = false, features = ["derive"], optional = true }
 
 # Memory / persistence
@@ -141,7 +120,10 @@ cron = "0.15"
 
 # Interactive CLI prompts
 dialoguer = { version = "0.12", features = ["fuzzy-select"] }
+rustyline = "17.0"
 console = "0.16"
+crossterm = "0.29"
+ratatui = { version = "0.29", default-features = false, features = ["crossterm"] }
 
 # Hardware discovery (device path globbing)
 glob = "0.3"
@@ -149,15 +131,15 @@ glob = "0.3"
 # Binary discovery (init system detection)
 which = "8.0"
 
-# WebSocket client channels (Discord/Lark/DingTalk/Nostr)
+# Temporary directory creation (for self-update)
+tempfile = "3.14"
+
+# WebSocket client channels (Discord)
 tokio-tungstenite = { version = "0.29", features = ["rustls-tls-webpki-roots"] }
-tokio-socks = "0.5"
 futures-util = { version = "0.3", default-features = false, features = ["sink"] }
-nostr-sdk = { version = "0.44", default-features = false, features = ["nip04", "nip59"], optional = true }
 regex = "1.10"
 hostname = "0.4.2"
 rustls = "0.23"
-rustls-pemfile = "2"
 rustls-pki-types = "1.14.0"
 tokio-rustls = "0.26.4"
 webpki-roots = "1.0.6"
@@ -169,9 +151,7 @@ async-imap = { version = "0.11",features = ["runtime-tokio"], default-features =
 
 # HTTP server (gateway) — replaces raw TCP for proper HTTP/1.1 compliance
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio", "query", "ws", "macros"] }
-hyper = { version = "1", features = ["http1", "server"] }
-hyper-util = { version = "0.1", features = ["tokio", "server-auto", "server-graceful"] }
-tower = { version = "0.5", default-features = false, features = ["util"] }
+tower = { version = "0.5", default-features = false }
 tower-http = { version = "0.6", default-features = false, features = ["limit", "timeout"] }
 http-body-util = "0.1"
 
@@ -187,6 +167,11 @@ opentelemetry = { version = "0.31", default-features = false, features = ["trace
 opentelemetry_sdk = { version = "0.31", default-features = false, features = ["trace", "metrics"], optional = true }
 opentelemetry-otlp = { version = "0.31", default-features = false, features = ["trace", "metrics", "http-proto", "reqwest-blocking-client", "reqwest-rustls-webpki-roots"], optional = true }
 
+# WASM runtime for plugin execution
+# Keep this on a RustSec-patched line that remains compatible with the
+# workspace rust-version = "1.87".
+wasmtime = { version = "36.0.6", default-features = false, features = ["runtime", "cranelift"] }
+
 # Serial port for peripheral communication (STM32, etc.)
 tokio-serial = { version = "5", default-features = false, optional = true }
 
@@ -200,12 +185,11 @@ probe-rs = { version = "0.31", optional = true }
 
 # PDF extraction for datasheet RAG (optional, enable with --features rag-pdf)
 pdf-extract = { version = "0.10", optional = true }
+tempfile = "3.14"
 
-# WASM plugin runtime (extism)
-extism = { version = "1.20", optional = true }
-
-# Cross-platform audio capture for voice wake word detection (optional, enable with --features voice-wake)
-cpal = { version = "0.15", optional = true }
+# WASM plugin runtime (optional, enable with --features wasm-tools)
+# Uses WASI stdio protocol — tools read JSON from stdin, write JSON to stdout.
+wasmtime-wasi = { version = "36.0.6", optional = true, default-features = false, features = ["preview1"] }
 
 # Terminal QR rendering for WhatsApp Web pairing flow.
 qrcode = { version = "0.14", optional = true }
@@ -229,63 +213,37 @@ landlock = { version = "0.4", optional = true }
 libc = "0.2"
 
 [features]
-default = ["observability-prometheus", "skill-creation"]
-channel-nostr = ["dep:nostr-sdk"]
+# Keep default minimal for widest host compatibility (including macOS 10.15).
+default = []
 hardware = ["nusb", "tokio-serial"]
-channel-matrix = ["dep:matrix-sdk"]
-channel-lark = ["dep:prost"]
-channel-feishu = ["channel-lark"]  # Alias for Feishu users (Lark and Feishu are the same platform)
-observability-prometheus = ["dep:prometheus"]
 observability-otel = ["dep:opentelemetry", "dep:opentelemetry_sdk", "dep:opentelemetry-otlp"]
 peripheral-rpi = ["rppal"]
 # Browser backend feature alias used by cfg(feature = "browser-native")
 browser-native = ["dep:fantoccini"]
 # Backward-compatible alias for older invocations
 fantoccini = ["browser-native"]
+# In-process WASM runtime (capability-based sandbox)
+runtime-wasm = ["dep:wasmi"]
 # Sandbox feature aliases used by cfg(feature = "sandbox-*")
 sandbox-landlock = ["dep:landlock"]
 sandbox-bubblewrap = []
 # Backward-compatible alias for older invocations
 landlock = ["sandbox-landlock"]
-# Prometheus metrics observer (requires 64-bit atomics; disable on 32-bit targets)
-metrics = ["observability-prometheus"]
 # probe = probe-rs for Nucleo memory read (adds ~50 deps; optional)
 probe = ["dep:probe-rs"]
 # rag-pdf = PDF ingestion for datasheet RAG
 rag-pdf = ["dep:pdf-extract"]
 # skill-creation = Autonomous skill creation from successful multi-step tasks
 skill-creation = []
+# wasm-tools = WASM plugin engine for dynamically-loaded tool packages (WASI stdio protocol)
+# Runtime implementation is active on Linux/macOS/Windows; unsupported targets use stubs.
+wasm-tools = ["dep:wasmtime-wasi"]
 # whatsapp-web = Native WhatsApp Web client with custom rusqlite storage backend
 whatsapp-web = ["dep:wa-rs", "dep:wa-rs-core", "dep:wa-rs-binary", "dep:wa-rs-proto", "dep:wa-rs-ureq-http", "dep:wa-rs-tokio-transport", "dep:serde-big-array", "dep:prost", "dep:qrcode"]
-# voice-wake = Voice wake word detection via microphone (cpal)
-voice-wake = ["dep:cpal"]
-# WASM plugin system (extism-based)
-plugins-wasm = ["dep:extism"]
-# WebAuthn / FIDO2 hardware key authentication
-webauthn = []
-# Meta-feature for CI: all features except those requiring system C libraries
-# not available on standard CI runners (e.g., voice-wake needs libasound2-dev).
-ci-all = [
-    "channel-nostr",
-    "hardware",
-    "channel-matrix",
-    "channel-lark",
-    "observability-prometheus",
-    "observability-otel",
-    "peripheral-rpi",
-    "browser-native",
-    "sandbox-landlock",
-    "sandbox-bubblewrap",
-    "probe",
-    "rag-pdf",
-    "skill-creation",
-    "whatsapp-web",
-    "plugins-wasm",
-]
-
-[profile.dev]
-incremental = true
-opt-level = 1
+# Optional provider feature flags used by cfg(feature = "...") guards.
+# Keep disabled by default to preserve current runtime behavior.
+firecrawl = []
+web-fetch-html2md = ["dep:html2md"]
 
 [profile.release]
 opt-level = "z"      # Optimize for size
@@ -297,13 +255,9 @@ panic = "abort"      # Reduce binary size
 
 [profile.release-fast]
 inherits = "release"
-codegen-units = 8    # Parallel codegen for faster builds on powerful machines (16GB+ RAM recommended)
-                     # Use: cargo build --profile release-fast
-
-[profile.ci]
-inherits = "release"
-lto = "thin"         # Much faster than fat LTO; still catches release-mode issues
-codegen-units = 16   # Full parallelism for CI runners
+# Keep release-fast under CI binary size safeguard (20MB hard gate).
+# Using 1 codegen unit preserves release-level size characteristics.
+codegen-units = 1
 
 [profile.dist]
 inherits = "release"
@@ -314,27 +268,10 @@ strip = true
 panic = "abort"
 
 [dev-dependencies]
-tempfile = "3.26"
+tempfile = "3.14"
 criterion = { version = "0.8", features = ["async_tokio"] }
 wiremock = "0.6"
 scopeguard = "1.2"
-rcgen = "0.13"
-
-[[test]]
-name = "component"
-path = "tests/test_component.rs"
-
-[[test]]
-name = "integration"
-path = "tests/test_integration.rs"
-
-[[test]]
-name = "system"
-path = "tests/test_system.rs"
-
-[[test]]
-name = "live"
-path = "tests/test_live.rs"
 
 [[bench]]
 name = "agent_benchmarks"

@@ -1,44 +1,32 @@
-# EditorConfig is awesome: https://EditorConfig.org
+# EditorConfig — https://editorconfig.org
+# Provides consistent formatting defaults across editors and platforms.
 
-# top-most EditorConfig file
 root = true
 
-# All files
 [*]
-indent_style = space
-indent_size = 2
-end_of_line = lf
 charset = utf-8
-trim_trailing_whitespace = true
+end_of_line = lf
 insert_final_newline = true
-
-# Rust files - match rustfmt.toml
-[*.rs]
+trim_trailing_whitespace = true
+indent_style = space
 indent_size = 4
-max_line_length = 100
 
-# Markdown files
 [*.md]
+# Trailing whitespace is significant in Markdown (line breaks).
 trim_trailing_whitespace = false
-max_line_length = 80
 
-# TOML files
-[*.toml]
-indent_size = 2
+[*.go]
+indent_style = tab
 
-# YAML files
 [*.{yml,yaml}]
 indent_size = 2
 
-# Python files
-[*.py]
-indent_size = 4
-max_line_length = 100
-
-# Shell scripts
-[*.{sh,bash}]
+[*.toml]
 indent_size = 2
 
-# JSON files
-[*.json]
+[Dockerfile]
+indent_size = 4
+
+[*.nix]
+indent_style = space
 indent_size = 2

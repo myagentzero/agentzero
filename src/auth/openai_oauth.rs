@@ -7,13 +7,14 @@ use chrono::Utc;
 use reqwest::Client;
 use serde::Deserialize;
 use std::collections::BTreeMap;
+use std::fmt::Write;
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
 // Re-export for external use (used by main.rs)
 #[allow(unused_imports)]
-pub use crate::auth::oauth_common::{generate_pkce_state, PkceState};
+pub use crate::auth::oauth_common::{PkceState, generate_pkce_state};
 
 pub const OPENAI_OAUTH_CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
 pub const OPENAI_OAUTH_AUTHORIZE_URL: &str = "https://auth.openai.com/oauth/authorize";
@@ -296,7 +297,26 @@ pub fn parse_code_from_redirect(input: &str, expected_state: Option<&str>) -> Re
     if let Some(expected_state) = expected_state {
         if let Some(got) = params.get("state") {
             if got != expected_state {
-                anyhow::bail!("OAuth state mismatch");
+                let mut err_msg = format!(
+                    "OAuth state mismatch (expected length={}, got length={})",
+                    expected_state.len(),
+                    got.len()
+                );
+
+                // Add helpful hint if truncation detected
+                if let Some(hint) =
+                    crate::auth::oauth_common::detect_url_truncation(input, expected_state.len())
+                {
+                    let _ = write!(
+                        &mut err_msg,
+                        "\n\n💡 Tip: {}\n   \
+                        Try copying ONLY the authorization code instead of the full URL.\n   \
+                        The code looks like: eyJh...",
+                        hint
+                    );
+                }
+
+                anyhow::bail!(err_msg);
             }
         } else if is_callback_payload {
             anyhow::bail!("Missing OAuth state in callback");
@@ -336,16 +356,6 @@ pub fn extract_account_id_from_jwt(token: &str) -> Option<String> {
     }
 
     None
-}
-
-pub fn extract_expiry_from_jwt(token: &str) -> Option<chrono::DateTime<Utc>> {
-    let payload = token.split('.').nth(1)?;
-    let decoded = base64::engine::general_purpose::URL_SAFE_NO_PAD
-        .decode(payload)
-        .ok()?;
-    let claims: serde_json::Value = serde_json::from_slice(&decoded).ok()?;
-    let exp = claims.get("exp").and_then(|v| v.as_i64())?;
-    chrono::DateTime::<Utc>::from_timestamp(exp, 0)
 }
 
 async fn parse_token_response(response: reqwest::Response) -> Result<TokenSet> {
@@ -419,9 +429,10 @@ mod tests {
             Some("xyz"),
         )
         .unwrap_err();
-        assert!(err
-            .to_string()
-            .contains("OpenAI OAuth error: access_denied"));
+        assert!(
+            err.to_string()
+                .contains("OpenAI OAuth error: access_denied")
+        );
     }
 
     #[test]

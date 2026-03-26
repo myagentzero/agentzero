@@ -1,32 +1,33 @@
-use crate::cli_input::Input;
-#[cfg(feature = "channel-nostr")]
-use crate::config::schema::{default_nostr_relays, NostrConfig};
-use crate::config::schema::{
-    DingTalkConfig, IrcConfig, LarkReceiveMode, LinqConfig, NextcloudTalkConfig, QQConfig,
-    SignalConfig, StreamMode, WhatsAppChatPolicy, WhatsAppConfig, WhatsAppWebMode,
-};
+use crate::config::schema::{IrcConfig, ProgressMode, SignalConfig, StreamMode, WhatsAppConfig};
 use crate::config::{
     AutonomyConfig, BrowserConfig, ChannelsConfig, ComposioConfig, Config, DiscordConfig,
-    HeartbeatConfig, IMessageConfig, LarkConfig, MatrixConfig, MemoryConfig, ObservabilityConfig,
-    RuntimeConfig, SecretsConfig, SlackConfig, StorageConfig, TelegramConfig, WebhookConfig,
+    HeartbeatConfig, HttpRequestConfig, HttpRequestCredentialProfile, IdentityConfig, MemoryConfig,
+    ObservabilityConfig, RuntimeConfig, SecretsConfig, SlackConfig, StorageConfig, TelegramConfig,
+    WebFetchConfig, WebSearchConfig, WebhookConfig,
 };
 use crate::hardware::{self, HardwareConfig};
+use crate::identity::{
+    default_aieos_identity_path, generate_default_aieos_json, selectable_identity_backends,
+};
 use crate::memory::{
-    default_memory_backend_key, memory_backend_profile, selectable_memory_backends,
+    MemoryBackendKind, classify_memory_backend, default_memory_backend_key, memory_backend_profile,
+    selectable_memory_backends,
 };
 use crate::providers::{
-    canonical_china_provider_name, is_glm_alias, is_glm_cn_alias, is_minimax_alias,
-    is_moonshot_alias, is_qianfan_alias, is_qwen_alias, is_qwen_oauth_alias, is_zai_alias,
-    is_zai_cn_alias,
+    canonical_china_provider_name, is_doubao_alias, is_glm_alias, is_glm_cn_alias,
+    is_minimax_alias, is_moonshot_alias, is_qianfan_alias, is_qwen_alias, is_qwen_oauth_alias,
+    is_siliconflow_alias, is_stepfun_alias, is_zai_alias, is_zai_cn_alias,
 };
-use anyhow::{bail, Context, Result};
-use console::style;
-use dialoguer::{Confirm, Select};
+use anyhow::{Context, Result, bail};
+use console::{Style, style};
+use dialoguer::theme::ColorfulTheme;
+use dialoguer::{Confirm, Input, Select};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use std::time::Duration;
 use tokio::fs;
 
@@ -63,9 +64,62 @@ const MODEL_PREVIEW_LIMIT: usize = 20;
 const MODEL_CACHE_FILE: &str = "models_cache.json";
 const MODEL_CACHE_TTL_SECS: u64 = 12 * 60 * 60;
 const CUSTOM_MODEL_SENTINEL: &str = "__custom_model__";
+const STEP_PROGRESS_BAR_WIDTH: usize = 24;
+const STEP_DIVIDER_WIDTH: usize = 62;
+const FULL_ONBOARDING_STEPS: [&str; 11] = [
+    "Workspace Setup",
+    "AI Provider & API Key",
+    "Channels",
+    "Tunnel",
+    "Tool Mode & Security",
+    "Web & Internet Tools",
+    "Hardware",
+    "Memory",
+    "Identity Backend",
+    "Project Context",
+    "Workspace Files",
+];
 
 fn has_launchable_channels(channels: &ChannelsConfig) -> bool {
     channels.channels_except_webhook().iter().any(|(_, ok)| *ok)
+}
+
+fn wizard_theme() -> &'static ColorfulTheme {
+    static THEME: OnceLock<ColorfulTheme> = OnceLock::new();
+    THEME.get_or_init(|| ColorfulTheme {
+        defaults_style: Style::new().for_stderr().cyan(),
+        prompt_style: Style::new().for_stderr().bold().white(),
+        prompt_prefix: style(">".to_string()).for_stderr().cyan().bold(),
+        prompt_suffix: style("::".to_string()).for_stderr().black().bright(),
+        success_prefix: style("✓".to_string()).for_stderr().green().bold(),
+        success_suffix: style("::".to_string()).for_stderr().black().bright(),
+        error_prefix: style("!".to_string()).for_stderr().red().bold(),
+        error_style: Style::new().for_stderr().red().bold(),
+        hint_style: Style::new().for_stderr().black().bright(),
+        values_style: Style::new().for_stderr().green().bold(),
+        active_item_style: Style::new().for_stderr().cyan().bold(),
+        inactive_item_style: Style::new().for_stderr(),
+        active_item_prefix: style("›".to_string()).for_stderr().cyan().bold(),
+        inactive_item_prefix: style(" ".to_string()).for_stderr(),
+        checked_item_prefix: style("✓".to_string()).for_stderr().green().bold(),
+        unchecked_item_prefix: style("○".to_string()).for_stderr().black().bright(),
+        picked_item_prefix: style("✓".to_string()).for_stderr().green().bold(),
+        unpicked_item_prefix: style(" ".to_string()).for_stderr(),
+        fuzzy_cursor_style: Style::new().for_stderr().black().on_white(),
+        fuzzy_match_highlight_style: Style::new().for_stderr().cyan().bold(),
+    })
+}
+
+fn print_onboarding_overview() {
+    println!("  {}", style("Wizard flow").white().bold());
+    for (idx, step) in FULL_ONBOARDING_STEPS.iter().enumerate() {
+        println!(
+            "    {} {}",
+            style(format!("{:>2}.", idx + 1)).cyan().bold(),
+            style(*step).dim()
+        );
+    }
+    println!();
 }
 
 // ── Main wizard entry point ──────────────────────────────────────
@@ -90,39 +144,53 @@ pub async fn run_wizard(force: bool) -> Result<Config> {
         style("This wizard will configure your agent in under 60 seconds.").dim()
     );
     println!();
+    print_onboarding_overview();
 
-    print_step(1, 9, "Workspace Setup");
+    print_step(1, 11, "Workspace Setup");
     let (workspace_dir, config_path) = setup_workspace().await?;
     match resolve_interactive_onboarding_mode(&config_path, force)? {
         InteractiveOnboardingMode::FullOnboarding => {}
         InteractiveOnboardingMode::UpdateProviderOnly => {
-            return Box::pin(run_provider_update_wizard(&workspace_dir, &config_path)).await;
+            let config = run_provider_update_wizard(&workspace_dir, &config_path).await?;
+            return Ok(config);
         }
     }
 
-    print_step(2, 9, "AI Provider & API Key");
+    print_step(2, 11, "AI Provider & API Key");
     let (provider, api_key, model, provider_api_url) = setup_provider(&workspace_dir).await?;
 
-    print_step(3, 9, "Channels (How You Talk to ZeroClaw)");
+    print_step(3, 11, "Channels (How You Talk to ZeroClaw)");
     let channels_config = setup_channels()?;
 
-    print_step(4, 9, "Tunnel (Expose to Internet)");
+    print_step(4, 11, "Tunnel (Expose to Internet)");
     let tunnel_config = setup_tunnel()?;
 
-    print_step(5, 9, "Tool Mode & Security");
+    print_step(5, 11, "Tool Mode & Security");
     let (composio_config, secrets_config) = setup_tool_mode()?;
 
-    print_step(6, 9, "Hardware (Physical World)");
+    print_step(6, 11, "Web & Internet Tools");
+    let (web_search_config, web_fetch_config, http_request_config) = setup_web_tools()?;
+
+    print_step(7, 11, "Hardware (Physical World)");
     let hardware_config = setup_hardware()?;
 
-    print_step(7, 9, "Memory Configuration");
+    print_step(8, 11, "Memory Configuration");
     let memory_config = setup_memory()?;
 
-    print_step(8, 9, "Project Context (Personalize Your Agent)");
+    print_step(9, 11, "Identity Backend");
+    let identity_config = setup_identity_backend()?;
+
+    print_step(10, 11, "Project Context (Personalize Your Agent)");
     let project_ctx = setup_project_context()?;
 
-    print_step(9, 9, "Workspace Files");
-    scaffold_workspace(&workspace_dir, &project_ctx, &memory_config.backend).await?;
+    print_step(11, 11, "Workspace Files");
+    scaffold_workspace(
+        &workspace_dir,
+        &project_ctx,
+        &memory_config.backend,
+        &identity_config,
+    )
+    .await?;
 
     // ── Build config ──
     // Defaults: SQLite memory, supervised autonomy, workspace-scoped, native runtime
@@ -135,84 +203,56 @@ pub async fn run_wizard(force: bool) -> Result<Config> {
             Some(api_key)
         },
         api_url: provider_api_url,
-        api_path: None,
         default_provider: Some(provider),
+        provider_api: None,
         default_model: Some(model),
         model_providers: std::collections::HashMap::new(),
+        provider: crate::config::ProviderConfig::default(),
         default_temperature: 0.7,
-        provider_timeout_secs: 120,
-        provider_max_tokens: None,
-        extra_headers: std::collections::HashMap::new(),
         observability: ObservabilityConfig::default(),
         autonomy: AutonomyConfig::default(),
-        trust: crate::trust::TrustConfig::default(),
-        backup: crate::config::BackupConfig::default(),
-        data_retention: crate::config::DataRetentionConfig::default(),
-        cloud_ops: crate::config::CloudOpsConfig::default(),
-        conversational_ai: crate::config::ConversationalAiConfig::default(),
         security: crate::config::SecurityConfig::default(),
-        security_ops: crate::config::SecurityOpsConfig::default(),
         runtime: RuntimeConfig::default(),
+        research: crate::config::ResearchPhaseConfig::default(),
         reliability: crate::config::ReliabilityConfig::default(),
         scheduler: crate::config::schema::SchedulerConfig::default(),
+        coordination: crate::config::CoordinationConfig::default(),
         agent: crate::config::schema::AgentConfig::default(),
-        pacing: crate::config::PacingConfig::default(),
         skills: crate::config::SkillsConfig::default(),
         pipeline: crate::config::PipelineConfig::default(),
         model_routes: Vec::new(),
         embedding_routes: Vec::new(),
         heartbeat: HeartbeatConfig::default(),
         cron: crate::config::CronConfig::default(),
+        goal_loop: crate::config::schema::GoalLoopConfig::default(),
         channels_config,
         memory: memory_config, // User-selected memory backend
         storage: StorageConfig::default(),
         tunnel: tunnel_config,
         gateway: crate::config::GatewayConfig::default(),
         composio: composio_config,
-        microsoft365: crate::config::Microsoft365Config::default(),
         secrets: secrets_config,
         browser: BrowserConfig::default(),
-        browser_delegate: crate::tools::browser_delegate::BrowserDelegateConfig::default(),
-        http_request: crate::config::HttpRequestConfig::default(),
+        http_request: http_request_config,
         multimodal: crate::config::MultimodalConfig::default(),
-        media_pipeline: crate::config::MediaPipelineConfig::default(),
-        web_fetch: crate::config::WebFetchConfig::default(),
-        link_enricher: crate::config::LinkEnricherConfig::default(),
-        text_browser: crate::config::TextBrowserConfig::default(),
-        web_search: crate::config::WebSearchConfig::default(),
-        project_intel: crate::config::ProjectIntelConfig::default(),
-        google_workspace: crate::config::GoogleWorkspaceConfig::default(),
+        web_fetch: web_fetch_config,
+        web_search: web_search_config,
         proxy: crate::config::ProxyConfig::default(),
-        identity: crate::config::IdentityConfig::default(),
+        identity: identity_config,
         cost: crate::config::CostConfig::default(),
+        economic: crate::config::EconomicConfig::default(),
         peripherals: crate::config::PeripheralsConfig::default(),
-        delegate: crate::config::DelegateToolConfig::default(),
         agents: std::collections::HashMap::new(),
-        swarms: std::collections::HashMap::new(),
         hooks: crate::config::HooksConfig::default(),
+        plugins: crate::config::PluginsConfig::default(),
         hardware: hardware_config,
         query_classification: crate::config::QueryClassificationConfig::default(),
         transcription: crate::config::TranscriptionConfig::default(),
-        tts: crate::config::TtsConfig::default(),
-        mcp: crate::config::McpConfig::default(),
-        nodes: crate::config::NodesConfig::default(),
-        workspace: crate::config::WorkspaceConfig::default(),
+        agents_ipc: crate::config::AgentsIpcConfig::default(),
+        mcp: crate::config::schema::McpConfig::default(),
+        model_support_vision: None,
+        wasm: crate::config::WasmConfig::default(),
         notion: crate::config::NotionConfig::default(),
-        jira: crate::config::JiraConfig::default(),
-        node_transport: crate::config::NodeTransportConfig::default(),
-        knowledge: crate::config::KnowledgeConfig::default(),
-        linkedin: crate::config::LinkedInConfig::default(),
-        image_gen: crate::config::ImageGenConfig::default(),
-        plugins: crate::config::PluginsConfig::default(),
-        locale: None,
-        verifiable_intent: crate::config::VerifiableIntentConfig::default(),
-        claude_code: crate::config::ClaudeCodeConfig::default(),
-        claude_code_runner: crate::config::ClaudeCodeRunnerConfig::default(),
-        codex_cli: crate::config::CodexCliConfig::default(),
-        gemini_cli: crate::config::GeminiCliConfig::default(),
-        opencode_cli: crate::config::OpenCodeCliConfig::default(),
-        sop: crate::config::SopConfig::default(),
-        shell_tool: crate::config::ShellToolConfig::default(),
     };
 
     println!(
@@ -237,7 +277,7 @@ pub async fn run_wizard(force: bool) -> Result<Config> {
     let has_channels = has_launchable_channels(&config.channels_config);
 
     if has_channels && config.api_key.is_some() {
-        let launch: bool = Confirm::new()
+        let launch: bool = Confirm::with_theme(wizard_theme())
             .with_prompt(format!(
                 "  {} Launch channels now? (connected channels → AI → reply)",
                 style("🚀").cyan()
@@ -254,7 +294,8 @@ pub async fn run_wizard(force: bool) -> Result<Config> {
             );
             println!();
             // Signal to main.rs to call start_channels after wizard returns
-            std::env::set_var("ZEROCLAW_AUTOSTART_CHANNELS", "1");
+            // SAFETY: called during single-threaded onboarding before the async runtime is active.
+            unsafe { std::env::set_var("ZEROCLAW_AUTOSTART_CHANNELS", "1") };
         }
     }
 
@@ -272,7 +313,7 @@ pub async fn run_channels_repair_wizard() -> Result<Config> {
     );
     println!();
 
-    let mut config = Box::pin(Config::load_or_init()).await?;
+    let mut config = Config::load_or_init().await?;
 
     print_step(1, 1, "Channels (How You Talk to ZeroClaw)");
     config.channels_config = setup_channels()?;
@@ -289,7 +330,7 @@ pub async fn run_channels_repair_wizard() -> Result<Config> {
     let has_channels = has_launchable_channels(&config.channels_config);
 
     if has_channels && config.api_key.is_some() {
-        let launch: bool = Confirm::new()
+        let launch: bool = Confirm::with_theme(wizard_theme())
             .with_prompt(format!(
                 "  {} Launch channels now? (connected channels → AI → reply)",
                 style("🚀").cyan()
@@ -306,7 +347,8 @@ pub async fn run_channels_repair_wizard() -> Result<Config> {
             );
             println!();
             // Signal to main.rs to call start_channels after wizard returns
-            std::env::set_var("ZEROCLAW_AUTOSTART_CHANNELS", "1");
+            // SAFETY: called during single-threaded onboarding before the async runtime is active.
+            unsafe { std::env::set_var("ZEROCLAW_AUTOSTART_CHANNELS", "1") };
         }
     }
 
@@ -352,7 +394,7 @@ async fn run_provider_update_wizard(workspace_dir: &Path, config_path: &Path) ->
 
     let has_channels = has_launchable_channels(&config.channels_config);
     if has_channels && config.api_key.is_some() {
-        let launch: bool = Confirm::new()
+        let launch: bool = Confirm::with_theme(wizard_theme())
             .with_prompt(format!(
                 "  {} Launch channels now? (connected channels → AI → reply)",
                 style("🚀").cyan()
@@ -368,7 +410,8 @@ async fn run_provider_update_wizard(workspace_dir: &Path, config_path: &Path) ->
                 style("Starting channel server...").white().bold()
             );
             println!();
-            std::env::set_var("ZEROCLAW_AUTOSTART_CHANNELS", "1");
+            // SAFETY: called during single-threaded onboarding before the async runtime is active.
+            unsafe { std::env::set_var("ZEROCLAW_AUTOSTART_CHANNELS", "1") };
         }
     }
 
@@ -395,7 +438,8 @@ fn apply_provider_update(
 // ── Quick setup (zero prompts) ───────────────────────────────────
 
 /// Non-interactive setup: generates a sensible default config instantly.
-/// Use `zeroclaw onboard` or `zeroclaw onboard --api-key sk-... --provider openrouter --memory sqlite|lucid`.
+/// Use `zeroclaw onboard` or `zeroclaw onboard --api-key sk-... --provider openrouter --memory sqlite|lucid|cortex-mem`.
+/// Use `zeroclaw onboard --interactive` for the full wizard.
 fn backend_key_from_choice(choice: usize) -> &'static str {
     selectable_memory_backends()
         .get(choice)
@@ -417,7 +461,6 @@ fn memory_config_defaults_for_backend(backend: &str) -> MemoryConfig {
         embedding_dimensions: 1536,
         vector_weight: 0.7,
         keyword_weight: 0.3,
-        search_mode: crate::config::SearchMode::default(),
         min_relevance_score: 0.4,
         embedding_cache_size: if profile.uses_sqlite_hygiene {
             10000
@@ -428,20 +471,11 @@ fn memory_config_defaults_for_backend(backend: &str) -> MemoryConfig {
         response_cache_enabled: false,
         response_cache_ttl_minutes: 60,
         response_cache_max_entries: 5_000,
-        response_cache_hot_entries: 256,
         snapshot_enabled: false,
         snapshot_on_hygiene: false,
         auto_hydrate: true,
-        retrieval_stages: vec!["cache".into(), "fts".into(), "vector".into()],
-        rerank_enabled: false,
-        rerank_threshold: 5,
-        fts_early_return_score: 0.85,
-        default_namespace: "default".into(),
-        conflict_threshold: 0.85,
-        audit_enabled: false,
-        audit_retention_days: 30,
-        policy: crate::config::MemoryPolicyConfig::default(),
         sqlite_open_timeout_secs: None,
+        sqlite_journal_mode: "wal".to_string(),
         qdrant: crate::config::QdrantConfig::default(),
     }
 }
@@ -453,27 +487,31 @@ pub async fn run_quick_setup(
     model_override: Option<&str>,
     memory_backend: Option<&str>,
     force: bool,
+    no_totp: bool,
 ) -> Result<Config> {
     let home = directories::UserDirs::new()
         .map(|u| u.home_dir().to_path_buf())
         .context("Could not find home directory")?;
 
-    Box::pin(run_quick_setup_with_home(
+    let config = run_quick_setup_with_home(
         credential_override,
         provider,
         model_override,
         memory_backend,
         force,
+        no_totp,
         &home,
-    ))
-    .await
+    )
+    .await?;
+
+    Ok(config)
 }
 
 fn resolve_quick_setup_dirs_with_home(home: &Path) -> (PathBuf, PathBuf) {
     if let Ok(custom_config_dir) = std::env::var("ZEROCLAW_CONFIG_DIR") {
         let trimmed = custom_config_dir.trim();
         if !trimmed.is_empty() {
-            let config_dir = PathBuf::from(shellexpand::tilde(trimmed).as_ref());
+            let config_dir = PathBuf::from(trimmed);
             return (config_dir.clone(), config_dir.join("workspace"));
         }
     }
@@ -481,56 +519,14 @@ fn resolve_quick_setup_dirs_with_home(home: &Path) -> (PathBuf, PathBuf) {
     if let Ok(custom_workspace) = std::env::var("ZEROCLAW_WORKSPACE") {
         let trimmed = custom_workspace.trim();
         if !trimmed.is_empty() {
-            let expanded = shellexpand::tilde(trimmed);
             return crate::config::schema::resolve_config_dir_for_workspace(&PathBuf::from(
-                expanded.as_ref(),
+                trimmed,
             ));
         }
     }
 
     let config_dir = home.join(".zeroclaw");
     (config_dir.clone(), config_dir.join("workspace"))
-}
-
-fn homebrew_prefix_for_exe(exe: &Path) -> Option<&'static str> {
-    let exe = exe.to_string_lossy();
-    if exe == "/opt/homebrew/bin/zeroclaw"
-        || exe.starts_with("/opt/homebrew/Cellar/zeroclaw/")
-        || exe.starts_with("/opt/homebrew/opt/zeroclaw/")
-    {
-        return Some("/opt/homebrew");
-    }
-
-    if exe == "/usr/local/bin/zeroclaw"
-        || exe.starts_with("/usr/local/Cellar/zeroclaw/")
-        || exe.starts_with("/usr/local/opt/zeroclaw/")
-    {
-        return Some("/usr/local");
-    }
-
-    None
-}
-
-fn quick_setup_homebrew_service_note(
-    config_path: &Path,
-    workspace_dir: &Path,
-    exe: &Path,
-) -> Option<String> {
-    let prefix = homebrew_prefix_for_exe(exe)?;
-    let service_root = Path::new(prefix).join("var").join("zeroclaw");
-    let service_config = service_root.join("config.toml");
-    let service_workspace = service_root.join("workspace");
-
-    if config_path == service_config || workspace_dir == service_workspace {
-        return None;
-    }
-
-    Some(format!(
-        "Homebrew service note: `brew services` uses {} (config {}) by default. Your onboarding just wrote {}. If you plan to run ZeroClaw as a service, copy or link this workspace first.",
-        service_workspace.display(),
-        service_config.display(),
-        config_path.display(),
-    ))
 }
 
 #[allow(clippy::too_many_lines)]
@@ -540,6 +536,7 @@ async fn run_quick_setup_with_home(
     model_override: Option<&str>,
     memory_backend: Option<&str>,
     force: bool,
+    no_totp: bool,
     home: &Path,
 ) -> Result<Config> {
     println!("{}", style(BANNER).cyan().bold());
@@ -570,7 +567,7 @@ async fn run_quick_setup_with_home(
     // Create memory config based on backend choice
     let memory_config = memory_config_defaults_for_backend(&memory_backend_name);
 
-    let config = Config {
+    let mut config = Config {
         workspace_dir: workspace_dir.clone(),
         config_path: config_path.clone(),
         api_key: credential_override.map(|c| {
@@ -579,85 +576,60 @@ async fn run_quick_setup_with_home(
             s
         }),
         api_url: None,
-        api_path: None,
         default_provider: Some(provider_name.clone()),
+        provider_api: None,
         default_model: Some(model.clone()),
         model_providers: std::collections::HashMap::new(),
+        provider: crate::config::ProviderConfig::default(),
         default_temperature: 0.7,
-        provider_timeout_secs: 120,
-        provider_max_tokens: None,
-        extra_headers: std::collections::HashMap::new(),
         observability: ObservabilityConfig::default(),
         autonomy: AutonomyConfig::default(),
-        trust: crate::trust::TrustConfig::default(),
-        backup: crate::config::BackupConfig::default(),
-        data_retention: crate::config::DataRetentionConfig::default(),
-        cloud_ops: crate::config::CloudOpsConfig::default(),
-        conversational_ai: crate::config::ConversationalAiConfig::default(),
         security: crate::config::SecurityConfig::default(),
-        security_ops: crate::config::SecurityOpsConfig::default(),
         runtime: RuntimeConfig::default(),
+        research: crate::config::ResearchPhaseConfig::default(),
         reliability: crate::config::ReliabilityConfig::default(),
         scheduler: crate::config::schema::SchedulerConfig::default(),
+        coordination: crate::config::CoordinationConfig::default(),
         agent: crate::config::schema::AgentConfig::default(),
-        pacing: crate::config::PacingConfig::default(),
         skills: crate::config::SkillsConfig::default(),
         pipeline: crate::config::PipelineConfig::default(),
         model_routes: Vec::new(),
         embedding_routes: Vec::new(),
         heartbeat: HeartbeatConfig::default(),
         cron: crate::config::CronConfig::default(),
+        goal_loop: crate::config::schema::GoalLoopConfig::default(),
         channels_config: ChannelsConfig::default(),
         memory: memory_config,
         storage: StorageConfig::default(),
         tunnel: crate::config::TunnelConfig::default(),
         gateway: crate::config::GatewayConfig::default(),
         composio: ComposioConfig::default(),
-        microsoft365: crate::config::Microsoft365Config::default(),
         secrets: SecretsConfig::default(),
         browser: BrowserConfig::default(),
-        browser_delegate: crate::tools::browser_delegate::BrowserDelegateConfig::default(),
         http_request: crate::config::HttpRequestConfig::default(),
         multimodal: crate::config::MultimodalConfig::default(),
-        media_pipeline: crate::config::MediaPipelineConfig::default(),
         web_fetch: crate::config::WebFetchConfig::default(),
-        link_enricher: crate::config::LinkEnricherConfig::default(),
-        text_browser: crate::config::TextBrowserConfig::default(),
         web_search: crate::config::WebSearchConfig::default(),
-        project_intel: crate::config::ProjectIntelConfig::default(),
-        google_workspace: crate::config::GoogleWorkspaceConfig::default(),
         proxy: crate::config::ProxyConfig::default(),
         identity: crate::config::IdentityConfig::default(),
         cost: crate::config::CostConfig::default(),
+        economic: crate::config::EconomicConfig::default(),
         peripherals: crate::config::PeripheralsConfig::default(),
-        delegate: crate::config::DelegateToolConfig::default(),
         agents: std::collections::HashMap::new(),
-        swarms: std::collections::HashMap::new(),
         hooks: crate::config::HooksConfig::default(),
+        plugins: crate::config::PluginsConfig::default(),
         hardware: crate::config::HardwareConfig::default(),
         query_classification: crate::config::QueryClassificationConfig::default(),
         transcription: crate::config::TranscriptionConfig::default(),
-        tts: crate::config::TtsConfig::default(),
-        mcp: crate::config::McpConfig::default(),
-        nodes: crate::config::NodesConfig::default(),
-        workspace: crate::config::WorkspaceConfig::default(),
+        agents_ipc: crate::config::AgentsIpcConfig::default(),
+        mcp: crate::config::schema::McpConfig::default(),
+        model_support_vision: None,
+        wasm: crate::config::WasmConfig::default(),
         notion: crate::config::NotionConfig::default(),
-        jira: crate::config::JiraConfig::default(),
-        node_transport: crate::config::NodeTransportConfig::default(),
-        knowledge: crate::config::KnowledgeConfig::default(),
-        linkedin: crate::config::LinkedInConfig::default(),
-        image_gen: crate::config::ImageGenConfig::default(),
-        plugins: crate::config::PluginsConfig::default(),
-        locale: None,
-        verifiable_intent: crate::config::VerifiableIntentConfig::default(),
-        claude_code: crate::config::ClaudeCodeConfig::default(),
-        claude_code_runner: crate::config::ClaudeCodeRunnerConfig::default(),
-        codex_cli: crate::config::CodexCliConfig::default(),
-        gemini_cli: crate::config::GeminiCliConfig::default(),
-        opencode_cli: crate::config::OpenCodeCliConfig::default(),
-        sop: crate::config::SopConfig::default(),
-        shell_tool: crate::config::ShellToolConfig::default(),
     };
+    if no_totp {
+        config.security.otp.enabled = false;
+    }
 
     config.save().await?;
     persist_workspace_selection(&config.config_path).await?;
@@ -671,7 +643,13 @@ async fn run_quick_setup_with_home(
             "Be warm, natural, and clear. Use occasional relevant emojis (1-2 max) and avoid robotic phrasing."
                 .into(),
     };
-    scaffold_workspace(&workspace_dir, &default_ctx, &memory_backend_name).await?;
+    scaffold_workspace(
+        &workspace_dir,
+        &default_ctx,
+        &config.memory.backend,
+        &config.identity,
+    )
+    .await?;
 
     println!(
         "  {} Workspace:  {}",
@@ -700,7 +678,11 @@ async fn run_quick_setup_with_home(
     println!(
         "  {} Security:   {}",
         style("✓").green().bold(),
-        style("Supervised (workspace-scoped)").green()
+        if no_totp {
+            style("Supervised (workspace-scoped), TOTP disabled (--no-totp)").yellow()
+        } else {
+            style("Supervised (workspace-scoped), TOTP enabled").green()
+        }
     );
     println!(
         "  {} Memory:     {} (auto-save: {})",
@@ -738,15 +720,15 @@ async fn run_quick_setup_with_home(
         style("Config saved:").white().bold(),
         style(config_path.display()).green()
     );
-    if cfg!(target_os = "macos") {
-        if let Ok(exe) = std::env::current_exe() {
-            if let Some(note) =
-                quick_setup_homebrew_service_note(&config_path, &workspace_dir, &exe)
-            {
-                println!();
-                println!("  {}", style(note).yellow());
-            }
-        }
+    if no_totp {
+        println!(
+            "  {} {}",
+            style("⚠").yellow().bold(),
+            style(
+                "TOTP is disabled by operator choice. This reduces protection for sensitive actions."
+            )
+            .yellow()
+        );
     }
     println!();
     println!("  {}", style("Next steps:").white().bold());
@@ -773,6 +755,13 @@ async fn run_quick_setup_with_home(
         } else {
             let env_var = provider_env_var(&provider_name);
             println!("    1. Set your API key:  export {env_var}=\"sk-...\"");
+            let fallback_env_vars = provider_env_var_fallbacks(&provider_name);
+            if !fallback_env_vars.is_empty() {
+                println!(
+                    "       Alternate accepted env var(s): {}",
+                    fallback_env_vars.join(", ")
+                );
+            }
             println!("    2. Or edit:           ~/.zeroclaw/config.toml");
             println!("    3. Chat:              zeroclaw agent -m \"Hello!\"");
             println!("    4. Gateway:           zeroclaw gateway");
@@ -793,6 +782,9 @@ fn canonical_provider_name(provider_name: &str) -> &str {
     }
 
     if let Some(canonical) = canonical_china_provider_name(provider_name) {
+        if canonical == "doubao" {
+            return "volcengine";
+        }
         return canonical;
     }
 
@@ -805,6 +797,7 @@ fn canonical_provider_name(provider_name: &str) -> &str {
         "kimi_coding" | "kimi_for_coding" => "kimi-code",
         "nvidia-nim" | "build.nvidia.com" => "nvidia",
         "aws-bedrock" => "bedrock",
+        "samba-nova" => "sambanova",
         "llama.cpp" => "llamacpp",
         _ => provider_name,
     }
@@ -826,20 +819,19 @@ fn allows_unauthenticated_model_fetch(provider_name: &str) -> bool {
 }
 
 /// Pick a sensible default model for the given provider.
-const MINIMAX_ONBOARD_MODELS: [(&str, &str); 7] = [
-    (
-        "MiniMax-M2.7",
-        "MiniMax M2.7 (latest flagship, recommended)",
-    ),
-    ("MiniMax-M2.7-highspeed", "MiniMax M2.7 High-Speed (faster)"),
-    ("MiniMax-M2.5", "MiniMax M2.5 (stable)"),
+const MINIMAX_ONBOARD_MODELS: [(&str, &str); 5] = [
+    ("MiniMax-M2.5", "MiniMax M2.5 (latest, recommended)"),
     ("MiniMax-M2.5-highspeed", "MiniMax M2.5 High-Speed (faster)"),
-    ("MiniMax-M2.1", "MiniMax M2.1 (previous gen)"),
+    ("MiniMax-M2.1", "MiniMax M2.1 (stable)"),
     ("MiniMax-M2.1-highspeed", "MiniMax M2.1 High-Speed (faster)"),
     ("MiniMax-M2", "MiniMax M2 (legacy)"),
 ];
 
 fn default_model_for_provider(provider: &str) -> String {
+    if provider == "qwen-coding-plan" {
+        return "qwen3-coder-plus".into();
+    }
+
     match canonical_provider_name(provider) {
         "anthropic" => "claude-sonnet-4-5-20250929".into(),
         "openai" => "gpt-5.2".into(),
@@ -851,27 +843,51 @@ fn default_model_for_provider(provider: &str) -> String {
         "xai" => "grok-4-1-fast-reasoning".into(),
         "perplexity" => "sonar-pro".into(),
         "fireworks" => "accounts/fireworks/models/llama-v3p3-70b-instruct".into(),
-        "novita" => "minimax/minimax-m2.7".into(),
+        "novita" => "minimax/minimax-m2.5".into(),
         "together-ai" => "meta-llama/Llama-3.3-70B-Instruct-Turbo".into(),
         "cohere" => "command-a-03-2025".into(),
+        "ai21" => "jamba-1.5-large".into(),
+        "cerebras" => "llama3.1-70b".into(),
+        "sambanova" => "Meta-Llama-3.3-70B-Instruct".into(),
+        "replicate" => "meta/meta-llama-3-70b-instruct".into(),
         "moonshot" => "kimi-k2.5".into(),
+        "stepfun" => "step-3.5-flash".into(),
+        "hunyuan" => "hunyuan-t1-latest".into(),
         "glm" | "zai" => "glm-5".into(),
-        "minimax" => "MiniMax-M2.7".into(),
+        "minimax" => "MiniMax-M2.5".into(),
         "qwen" => "qwen-plus".into(),
+        "volcengine" => "doubao-1-5-pro-32k-250115".into(),
+        "siliconflow" => "Pro/zai-org/GLM-4.7".into(),
         "qwen-code" => "qwen3-coder-plus".into(),
         "ollama" => "llama3.2".into(),
         "llamacpp" => "ggml-org/gpt-oss-20b-GGUF".into(),
-        "sglang" | "vllm" | "osaurus" | "opencode-go" => "default".into(),
+        "sglang" | "vllm" | "osaurus" | "copilot" => "default".into(),
         "gemini" => "gemini-2.5-pro".into(),
         "kimi-code" => "kimi-for-coding".into(),
         "bedrock" => "anthropic.claude-sonnet-4-5-20250929-v1:0".into(),
         "nvidia" => "meta/llama-3.3-70b-instruct".into(),
-        "avian" => "deepseek/deepseek-v3.2".into(),
         _ => "anthropic/claude-sonnet-4.6".into(),
     }
 }
 
 fn curated_models_for_provider(provider_name: &str) -> Vec<(String, String)> {
+    if provider_name == "qwen-coding-plan" {
+        return vec![
+            (
+                "qwen3-coder-plus".to_string(),
+                "Qwen3 Coder Plus (recommended for coding workflows)".to_string(),
+            ),
+            (
+                "qwen3.5-plus".to_string(),
+                "Qwen3.5 Plus (reasoning + coding)".to_string(),
+            ),
+            (
+                "qwen3-max-2026-01-23".to_string(),
+                "Qwen3 Max (high-capability coding model)".to_string(),
+            ),
+        ];
+    }
+
     match canonical_provider_name(provider_name) {
         "openrouter" => vec![
             (
@@ -936,6 +952,10 @@ fn curated_models_for_provider(provider_name: &str) -> Vec<(String, String)> {
             ),
         ],
         "openai-codex" => vec![
+            (
+                "gpt-5.3-codex".to_string(),
+                "GPT-5.3 Codex (latest codex generation)".to_string(),
+            ),
             (
                 "gpt-5-codex".to_string(),
                 "GPT-5 Codex (recommended)".to_string(),
@@ -1006,6 +1026,20 @@ fn curated_models_for_provider(provider_name: &str) -> Vec<(String, String)> {
                 "DeepSeek Reasoner (mapped to V3.2 thinking)".to_string(),
             ),
         ],
+        "hunyuan" => vec![
+            (
+                "hunyuan-t1-latest".to_string(),
+                "Hunyuan T1 (deep reasoning, latest)".to_string(),
+            ),
+            (
+                "hunyuan-turbo-latest".to_string(),
+                "Hunyuan Turbo (fast, general purpose)".to_string(),
+            ),
+            (
+                "hunyuan-pro".to_string(),
+                "Hunyuan Pro (high quality)".to_string(),
+            ),
+        ],
         "xai" => vec![
             (
                 "grok-4-1-fast-reasoning".to_string(),
@@ -1046,16 +1080,10 @@ fn curated_models_for_provider(provider_name: &str) -> Vec<(String, String)> {
                 "Mixtral 8x22B".to_string(),
             ),
         ],
-        "novita" => vec![
-            (
-                "minimax/minimax-m2.7".to_string(),
-                "MiniMax M2.7 (latest flagship)".to_string(),
-            ),
-            (
-                "minimax/minimax-m2.5".to_string(),
-                "MiniMax M2.5".to_string(),
-            ),
-        ],
+        "novita" => vec![(
+            "minimax/minimax-m2.5".to_string(),
+            "MiniMax M2.5".to_string(),
+        )],
         "together-ai" => vec![
             (
                 "meta-llama/Llama-3.3-70B-Instruct-Turbo".to_string(),
@@ -1084,6 +1112,46 @@ fn curated_models_for_provider(provider_name: &str) -> Vec<(String, String)> {
                 "Command R (stable fast baseline)".to_string(),
             ),
         ],
+        "ai21" => vec![
+            (
+                "jamba-1.5-large".to_string(),
+                "Jamba 1.5 Large (recommended)".to_string(),
+            ),
+            (
+                "jamba-1.5-mini".to_string(),
+                "Jamba 1.5 Mini (faster, lower cost)".to_string(),
+            ),
+        ],
+        "cerebras" => vec![
+            (
+                "llama3.1-70b".to_string(),
+                "Llama 3.1 70B (Cerebras fast inference)".to_string(),
+            ),
+            (
+                "llama3.1-8b".to_string(),
+                "Llama 3.1 8B (lower latency)".to_string(),
+            ),
+        ],
+        "sambanova" => vec![
+            (
+                "Meta-Llama-3.3-70B-Instruct".to_string(),
+                "Meta Llama 3.3 70B Instruct (recommended)".to_string(),
+            ),
+            (
+                "DeepSeek-R1".to_string(),
+                "DeepSeek R1 (reasoning-focused)".to_string(),
+            ),
+        ],
+        "replicate" => vec![
+            (
+                "meta/meta-llama-3-70b-instruct".to_string(),
+                "Llama 3 70B Instruct (recommended)".to_string(),
+            ),
+            (
+                "deepseek-ai/deepseek-v3".to_string(),
+                "DeepSeek V3 (strong value)".to_string(),
+            ),
+        ],
         "kimi-code" => vec![
             (
                 "kimi-for-coding".to_string(),
@@ -1108,6 +1176,24 @@ fn curated_models_for_provider(provider_name: &str) -> Vec<(String, String)> {
                 "Kimi K2 0905 Preview (strong coding)".to_string(),
             ),
         ],
+        "stepfun" => vec![
+            (
+                "step-3.5-flash".to_string(),
+                "Step 3.5 Flash (recommended default)".to_string(),
+            ),
+            (
+                "step-3".to_string(),
+                "Step 3 (flagship reasoning)".to_string(),
+            ),
+            (
+                "step-2-mini".to_string(),
+                "Step 2 Mini (balanced and fast)".to_string(),
+            ),
+            (
+                "step-1o-turbo-vision".to_string(),
+                "Step 1o Turbo Vision (multimodal)".to_string(),
+            ),
+        ],
         "glm" | "zai" => vec![
             ("glm-5".to_string(), "GLM-5 (high reasoning)".to_string()),
             (
@@ -1121,16 +1207,8 @@ fn curated_models_for_provider(provider_name: &str) -> Vec<(String, String)> {
         ],
         "minimax" => vec![
             (
-                "MiniMax-M2.7".to_string(),
-                "MiniMax M2.7 (latest flagship)".to_string(),
-            ),
-            (
-                "MiniMax-M2.7-highspeed".to_string(),
-                "MiniMax M2.7 High-Speed (fast)".to_string(),
-            ),
-            (
                 "MiniMax-M2.5".to_string(),
-                "MiniMax M2.5 (stable)".to_string(),
+                "MiniMax M2.5 (latest flagship)".to_string(),
             ),
             (
                 "MiniMax-M2.5-highspeed".to_string(),
@@ -1138,7 +1216,7 @@ fn curated_models_for_provider(provider_name: &str) -> Vec<(String, String)> {
             ),
             (
                 "MiniMax-M2.1".to_string(),
-                "MiniMax M2.1 (previous gen)".to_string(),
+                "MiniMax M2.1 (strong coding/reasoning)".to_string(),
             ),
         ],
         "qwen" => vec![
@@ -1154,6 +1232,31 @@ fn curated_models_for_provider(provider_name: &str) -> Vec<(String, String)> {
                 "qwen-turbo".to_string(),
                 "Qwen Turbo (fast and cost-efficient)".to_string(),
             ),
+        ],
+        "volcengine" => vec![
+            (
+                "doubao-1-5-pro-32k-250115".to_string(),
+                "Doubao 1.5 Pro 32K (official sample model)".to_string(),
+            ),
+            (
+                "doubao-seed-1-6-250615".to_string(),
+                "Doubao Seed 1.6 (reasoning flagship)".to_string(),
+            ),
+            (
+                "deepseek-v3.2".to_string(),
+                "DeepSeek V3.2 (available in ARK catalog)".to_string(),
+            ),
+        ],
+        "siliconflow" => vec![
+            (
+                "Pro/zai-org/GLM-4.7".to_string(),
+                "GLM-4.7 Pro (official API example)".to_string(),
+            ),
+            (
+                "Pro/deepseek-ai/DeepSeek-V3.2".to_string(),
+                "DeepSeek V3.2 Pro".to_string(),
+            ),
+            ("Qwen/Qwen3-32B".to_string(), "Qwen3 32B".to_string()),
         ],
         "qwen-code" => vec![
             (
@@ -1203,21 +1306,6 @@ fn curated_models_for_provider(provider_name: &str) -> Vec<(String, String)> {
             (
                 "z-ai/glm-5".to_string(),
                 "GLM-5 (high reasoning)".to_string(),
-            ),
-        ],
-        "avian" => vec![
-            (
-                "deepseek/deepseek-v3.2".to_string(),
-                "DeepSeek V3.2 (164K context, recommended)".to_string(),
-            ),
-            (
-                "moonshotai/kimi-k2.5".to_string(),
-                "Kimi K2.5 (131K context)".to_string(),
-            ),
-            ("z-ai/glm-5".to_string(), "GLM-5 (131K context)".to_string()),
-            (
-                "minimax/minimax-m2.5".to_string(),
-                "MiniMax M2.5 (1M context)".to_string(),
             ),
         ],
         "ollama" => vec![
@@ -1307,6 +1395,10 @@ fn curated_models_for_provider(provider_name: &str) -> Vec<(String, String)> {
                 "Gemini 2.5 Flash-Lite (lowest cost)".to_string(),
             ),
         ],
+        "copilot" => vec![(
+            "default".to_string(),
+            "Copilot default model (recommended)".to_string(),
+        )],
         _ => vec![("default".to_string(), "Default model".to_string())],
     }
 }
@@ -1334,27 +1426,36 @@ fn supports_live_model_fetch(provider_name: &str) -> bool {
             | "vllm"
             | "osaurus"
             | "astrai"
-            | "avian"
             | "venice"
             | "fireworks"
             | "novita"
             | "cohere"
+            | "ai21"
+            | "cerebras"
+            | "sambanova"
+            | "replicate"
             | "moonshot"
+            | "stepfun"
             | "glm"
             | "zai"
             | "qwen"
+            | "volcengine"
+            | "siliconflow"
             | "nvidia"
-            | "opencode-go"
     )
 }
 
 fn models_endpoint_for_provider(provider_name: &str) -> Option<&'static str> {
     match provider_name {
+        "qwen-coding-plan" => Some("https://coding.dashscope.aliyuncs.com/v1/models"),
         "qwen-intl" => Some("https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models"),
         "dashscope-us" => Some("https://dashscope-us.aliyuncs.com/compatible-mode/v1/models"),
         "moonshot-cn" | "kimi-cn" => Some("https://api.moonshot.cn/v1/models"),
         "glm-cn" | "bigmodel" => Some("https://open.bigmodel.cn/api/paas/v4/models"),
         "zai-cn" | "z.ai-cn" => Some("https://open.bigmodel.cn/api/coding/paas/v4/models"),
+        "volcengine" | "ark" | "doubao" | "doubao-cn" => {
+            Some("https://ark.cn-beijing.volces.com/api/v3/models")
+        }
         _ => match canonical_provider_name(provider_name) {
             "openai-codex" | "openai" => Some("https://api.openai.com/v1/models"),
             "venice" => Some("https://api.venice.ai/api/v1/models"),
@@ -1366,25 +1467,29 @@ fn models_endpoint_for_provider(provider_name: &str) -> Option<&'static str> {
             "fireworks" => Some("https://api.fireworks.ai/inference/v1/models"),
             "novita" => Some("https://api.novita.ai/openai/v1/models"),
             "cohere" => Some("https://api.cohere.com/compatibility/v1/models"),
+            "ai21" => Some("https://api.ai21.com/studio/v1/models"),
+            "cerebras" => Some("https://api.cerebras.ai/v1/models"),
+            "sambanova" => Some("https://api.sambanova.ai/v1/models"),
+            "replicate" => Some("https://api.replicate.com/v1/models"),
             "moonshot" => Some("https://api.moonshot.ai/v1/models"),
+            "stepfun" => Some("https://api.stepfun.com/v1/models"),
             "glm" => Some("https://api.z.ai/api/paas/v4/models"),
             "zai" => Some("https://api.z.ai/api/coding/paas/v4/models"),
             "qwen" => Some("https://dashscope.aliyuncs.com/compatible-mode/v1/models"),
+            "siliconflow" => Some("https://api.siliconflow.cn/v1/models"),
             "nvidia" => Some("https://integrate.api.nvidia.com/v1/models"),
             "astrai" => Some("https://as-trai.com/v1/models"),
-            "avian" => Some("https://api.avian.io/v1/models"),
             "llamacpp" => Some("http://localhost:8080/v1/models"),
             "sglang" => Some("http://localhost:30000/v1/models"),
             "vllm" => Some("http://localhost:8000/v1/models"),
             "osaurus" => Some("http://localhost:1337/v1/models"),
-            "opencode-go" => Some("https://opencode.ai/zen/go/v1/models"),
             _ => None,
         },
     }
 }
 
-fn build_model_fetch_client() -> Result<reqwest::Client> {
-    reqwest::Client::builder()
+fn build_model_fetch_client() -> Result<reqwest::blocking::Client> {
+    reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(8))
         .connect_timeout(Duration::from_secs(4))
         .build()
@@ -1467,7 +1572,7 @@ fn parse_ollama_model_ids(payload: &Value) -> Vec<String> {
     normalize_model_ids(ids)
 }
 
-async fn fetch_openai_compatible_models(
+fn fetch_openai_compatible_models(
     endpoint: &str,
     api_key: Option<&str>,
     allow_unauthenticated: bool,
@@ -1483,17 +1588,15 @@ async fn fetch_openai_compatible_models(
 
     let payload: Value = request
         .send()
-        .await
-        .and_then(reqwest::Response::error_for_status)
+        .and_then(reqwest::blocking::Response::error_for_status)
         .with_context(|| format!("model fetch failed: GET {endpoint}"))?
         .json()
-        .await
         .context("failed to parse model list response")?;
 
     Ok(parse_openai_compatible_model_ids(&payload))
 }
 
-async fn fetch_openrouter_models(api_key: Option<&str>) -> Result<Vec<String>> {
+fn fetch_openrouter_models(api_key: Option<&str>) -> Result<Vec<String>> {
     let client = build_model_fetch_client()?;
     let mut request = client.get("https://openrouter.ai/api/v1/models");
     if let Some(api_key) = api_key {
@@ -1502,17 +1605,15 @@ async fn fetch_openrouter_models(api_key: Option<&str>) -> Result<Vec<String>> {
 
     let payload: Value = request
         .send()
-        .await
-        .and_then(reqwest::Response::error_for_status)
+        .and_then(reqwest::blocking::Response::error_for_status)
         .context("model fetch failed: GET https://openrouter.ai/api/v1/models")?
         .json()
-        .await
         .context("failed to parse OpenRouter model list response")?;
 
     Ok(parse_openai_compatible_model_ids(&payload))
 }
 
-async fn fetch_anthropic_models(api_key: Option<&str>) -> Result<Vec<String>> {
+fn fetch_anthropic_models(api_key: Option<&str>) -> Result<Vec<String>> {
     let Some(api_key) = api_key else {
         bail!("Anthropic model fetch requires API key or OAuth token");
     };
@@ -1532,24 +1633,22 @@ async fn fetch_anthropic_models(api_key: Option<&str>) -> Result<Vec<String>> {
 
     let response = request
         .send()
-        .await
         .context("model fetch failed: GET https://api.anthropic.com/v1/models")?;
 
     let status = response.status();
     if !status.is_success() {
-        let body = response.text().await.unwrap_or_default();
+        let body = response.text().unwrap_or_default();
         bail!("Anthropic model list request failed (HTTP {status}): {body}");
     }
 
     let payload: Value = response
         .json()
-        .await
         .context("failed to parse Anthropic model list response")?;
 
     Ok(parse_openai_compatible_model_ids(&payload))
 }
 
-async fn fetch_gemini_models(api_key: Option<&str>) -> Result<Vec<String>> {
+fn fetch_gemini_models(api_key: Option<&str>) -> Result<Vec<String>> {
     let Some(api_key) = api_key else {
         bail!("Gemini model fetch requires API key");
     };
@@ -1559,26 +1658,22 @@ async fn fetch_gemini_models(api_key: Option<&str>) -> Result<Vec<String>> {
         .get("https://generativelanguage.googleapis.com/v1beta/models")
         .query(&[("key", api_key), ("pageSize", "200")])
         .send()
-        .await
-        .and_then(reqwest::Response::error_for_status)
+        .and_then(reqwest::blocking::Response::error_for_status)
         .context("model fetch failed: GET Gemini models")?
         .json()
-        .await
         .context("failed to parse Gemini model list response")?;
 
     Ok(parse_gemini_model_ids(&payload))
 }
 
-async fn fetch_ollama_models() -> Result<Vec<String>> {
+fn fetch_ollama_models() -> Result<Vec<String>> {
     let client = build_model_fetch_client()?;
     let payload: Value = client
         .get("http://localhost:11434/api/tags")
         .send()
-        .await
-        .and_then(reqwest::Response::error_for_status)
+        .and_then(reqwest::blocking::Response::error_for_status)
         .context("model fetch failed: GET http://localhost:11434/api/tags")?
         .json()
-        .await
         .context("failed to parse Ollama model list response")?;
 
     Ok(parse_ollama_model_ids(&payload))
@@ -1663,7 +1758,7 @@ fn resolve_live_models_endpoint(
     models_endpoint_for_provider(provider_name).map(str::to_string)
 }
 
-async fn fetch_live_models_for_provider(
+fn fetch_live_models_for_provider(
     provider_name: &str,
     api_key: &str,
     provider_api_url: Option<&str>,
@@ -1675,29 +1770,16 @@ async fn fetch_live_models_for_provider(
         if provider_name == "ollama" && !ollama_remote {
             None
         } else {
-            std::env::var(provider_env_var(provider_name))
-                .ok()
-                .or_else(|| {
-                    // Anthropic also accepts OAuth setup-tokens via ANTHROPIC_OAUTH_TOKEN
-                    if provider_name == "anthropic" {
-                        std::env::var("ANTHROPIC_OAUTH_TOKEN").ok()
-                    } else if provider_name == "minimax" {
-                        std::env::var("MINIMAX_OAUTH_TOKEN").ok()
-                    } else {
-                        None
-                    }
-                })
-                .map(|value| value.trim().to_string())
-                .filter(|value| !value.is_empty())
+            resolve_provider_api_key_from_env(provider_name)
         }
     } else {
         Some(api_key.trim().to_string())
     };
 
     let models = match provider_name {
-        "openrouter" => fetch_openrouter_models(api_key.as_deref()).await?,
-        "anthropic" => fetch_anthropic_models(api_key.as_deref()).await?,
-        "gemini" => fetch_gemini_models(api_key.as_deref()).await?,
+        "openrouter" => fetch_openrouter_models(api_key.as_deref())?,
+        "anthropic" => fetch_anthropic_models(api_key.as_deref())?,
+        "gemini" => fetch_gemini_models(api_key.as_deref())?,
         "ollama" => {
             if ollama_remote {
                 // Remote Ollama endpoints can serve cloud-routed models.
@@ -1711,13 +1793,12 @@ async fn fetch_live_models_for_provider(
                     "qwen3-coder-next:cloud".to_string(),
                     "qwen3-coder:480b:cloud".to_string(),
                     "kimi-k2.5:cloud".to_string(),
-                    "minimax-m2.7:cloud".to_string(),
+                    "minimax-m2.5:cloud".to_string(),
                     "deepseek-v3.1:671b:cloud".to_string(),
                 ]
             } else {
                 // Local endpoints should not surface cloud-only suffixes.
-                fetch_ollama_models()
-                    .await?
+                fetch_ollama_models()?
                     .into_iter()
                     .filter(|model_id| !model_id.ends_with(":cloud"))
                     .collect()
@@ -1729,8 +1810,11 @@ async fn fetch_live_models_for_provider(
             {
                 let allow_unauthenticated =
                     allows_unauthenticated_model_fetch(requested_provider_name);
-                fetch_openai_compatible_models(&endpoint, api_key.as_deref(), allow_unauthenticated)
-                    .await?
+                fetch_openai_compatible_models(
+                    &endpoint,
+                    api_key.as_deref(),
+                    allow_unauthenticated,
+                )?
             } else {
                 Vec::new()
             }
@@ -1958,8 +2042,7 @@ pub async fn run_models_refresh(
 
     let api_key = config.api_key.clone().unwrap_or_default();
 
-    match fetch_live_models_for_provider(&provider_name, &api_key, config.api_url.as_deref()).await
-    {
+    match fetch_live_models_for_provider(&provider_name, &api_key, config.api_url.as_deref()) {
         Ok(models) if !models.is_empty() => {
             cache_live_models_for_provider(&config.workspace_dir, &provider_name, &models).await?;
             println!(
@@ -2151,17 +2234,28 @@ pub async fn run_models_refresh_all(config: &Config, force: bool) -> Result<()> 
 // ── Step helpers ─────────────────────────────────────────────────
 
 fn print_step(current: u8, total: u8, title: &str) {
+    let total = total.max(1);
+    let completed = current
+        .saturating_sub(1)
+        .min(total)
+        .saturating_mul(STEP_PROGRESS_BAR_WIDTH as u8)
+        / total;
+    let completed = usize::from(completed);
+    let remaining = STEP_PROGRESS_BAR_WIDTH.saturating_sub(completed);
+    let progress = format!("[{}{}]", "=".repeat(completed), ".".repeat(remaining));
+
     println!();
     println!(
-        "  {} {}",
+        "  {} {} {}",
         style(format!("[{current}/{total}]")).cyan().bold(),
+        style(progress).cyan(),
         style(title).white().bold()
     );
-    println!("  {}", style("─".repeat(50)).dim());
+    println!("  {}", style("─".repeat(STEP_DIVIDER_WIDTH)).dim());
 }
 
 fn print_bullet(text: &str) {
-    println!("  {} {}", style("›").cyan(), text);
+    println!("  {} {}", style("•").cyan().bold(), text);
 }
 
 fn resolve_interactive_onboarding_mode(
@@ -2194,7 +2288,7 @@ fn resolve_interactive_onboarding_mode(
         "Cancel",
     ];
 
-    let mode = Select::new()
+    let mode = Select::with_theme(wizard_theme())
         .with_prompt(format!(
             "  Existing config found at {}. Select setup mode",
             config_path.display()
@@ -2224,51 +2318,40 @@ fn ensure_onboard_overwrite_allowed(config_path: &Path, force: bool) -> Result<(
         return Ok(());
     }
 
-    #[cfg(test)]
-    {
+    if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
         bail!(
-            "Refusing to overwrite existing config at {} in test mode. Re-run with --force if overwrite is intentional.",
+            "Refusing to overwrite existing config at {} in non-interactive mode. Re-run with --force if overwrite is intentional.",
             config_path.display()
         );
     }
 
-    #[cfg(not(test))]
-    {
-        if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
-            bail!(
-                "Refusing to overwrite existing config at {} in non-interactive mode. Re-run with --force if overwrite is intentional.",
-                config_path.display()
-            );
-        }
+    let confirmed = Confirm::with_theme(wizard_theme())
+        .with_prompt(format!(
+            "  Existing config found at {}. Re-running onboarding will overwrite config.toml and may create missing workspace files (including BOOTSTRAP.md). Continue?",
+            config_path.display()
+        ))
+        .default(false)
+        .interact()?;
 
-        let confirmed = Confirm::new()
-            .with_prompt(format!(
-                "  Existing config found at {}. Re-running onboarding will overwrite config.toml and may create missing workspace files (including BOOTSTRAP.md). Continue?",
-                config_path.display()
-            ))
-            .default(false)
-            .interact()?;
-
-        if !confirmed {
-            bail!("Onboarding canceled: existing configuration was left unchanged.");
-        }
-
-        Ok(())
+    if !confirmed {
+        bail!("Onboarding canceled: existing configuration was left unchanged.");
     }
+
+    Ok(())
 }
 
 async fn persist_workspace_selection(config_path: &Path) -> Result<()> {
     let config_dir = config_path
         .parent()
         .context("Config path must have a parent directory")?;
-    crate::config::schema::persist_active_workspace_config_dir(config_dir)
-        .await
-        .with_context(|| {
-            format!(
-                "Failed to persist active workspace selection for {}",
-                config_dir.display()
-            )
-        })
+    if let Err(error) = crate::config::schema::persist_active_workspace_config_dir(config_dir).await
+    {
+        tracing::warn!(
+            config_dir = %config_dir.display(),
+            "Could not persist active workspace marker; continuing without marker: {error}"
+        );
+    }
+    Ok(())
 }
 
 // ── Step 1: Workspace ────────────────────────────────────────────
@@ -2282,7 +2365,7 @@ async fn setup_workspace() -> Result<(PathBuf, PathBuf)> {
         style(default_workspace_dir.display()).green()
     ));
 
-    let use_default = Confirm::new()
+    let use_default = Confirm::with_theme(wizard_theme())
         .with_prompt("  Use default workspace location?")
         .default(true)
         .interact()?;
@@ -2290,7 +2373,7 @@ async fn setup_workspace() -> Result<(PathBuf, PathBuf)> {
     let (config_dir, workspace_dir) = if use_default {
         (default_config_dir, default_workspace_dir)
     } else {
-        let custom: String = Input::new()
+        let custom: String = Input::with_theme(wizard_theme())
             .with_prompt("  Enter workspace path")
             .interact_text()?;
         let expanded = shellexpand::tilde(&custom).to_string();
@@ -2318,7 +2401,7 @@ async fn setup_workspace() -> Result<(PathBuf, PathBuf)> {
 async fn setup_provider(workspace_dir: &Path) -> Result<(String, String, String, Option<String>)> {
     // ── Tier selection ──
     let tiers = vec![
-        "⭐ Recommended (OpenRouter, Venice, Anthropic, OpenAI, Gemini)",
+        "⭐ Recommended (OpenRouter, Venice, Anthropic, OpenAI, Gemini, GitHub Copilot)",
         "⚡ Fast inference (Groq, Fireworks, Together AI, NVIDIA NIM)",
         "🌐 Gateway / proxy (Vercel AI, Cloudflare AI, Amazon Bedrock)",
         "🔬 Specialized (Moonshot/Kimi, GLM/Zhipu, MiniMax, Qwen/DashScope, Qianfan, Z.AI, Synthetic, OpenCode Zen, Cohere)",
@@ -2326,7 +2409,7 @@ async fn setup_provider(workspace_dir: &Path) -> Result<(String, String, String,
         "🔧 Custom — bring your own OpenAI-compatible API",
     ];
 
-    let tier_idx = Select::new()
+    let tier_idx = Select::with_theme(wizard_theme())
         .with_prompt("  Select provider category")
         .items(&tiers)
         .default(0)
@@ -2345,6 +2428,10 @@ async fn setup_provider(workspace_dir: &Path) -> Result<(String, String, String,
                 "openai-codex",
                 "OpenAI Codex (ChatGPT subscription OAuth, no API key)",
             ),
+            (
+                "copilot",
+                "GitHub Copilot — OAuth device flow (Copilot subscription)",
+            ),
             ("deepseek", "DeepSeek — V3 & R1 (affordable)"),
             ("mistral", "Mistral — Large & Codestral"),
             ("xai", "xAI — Grok 3 & 4"),
@@ -2360,6 +2447,9 @@ async fn setup_provider(workspace_dir: &Path) -> Result<(String, String, String,
             ("novita", "Novita AI — affordable open-source inference"),
             ("together-ai", "Together AI — open-source model hosting"),
             ("nvidia", "NVIDIA NIM — DeepSeek, Llama, & more"),
+            ("cerebras", "Cerebras — low-latency hosted inference"),
+            ("sambanova", "SambaNova — enterprise hosted inference"),
+            ("replicate", "Replicate — hosted open-source models"),
         ],
         2 => vec![
             ("vercel", "Vercel AI Gateway"),
@@ -2367,10 +2457,6 @@ async fn setup_provider(workspace_dir: &Path) -> Result<(String, String, String,
             (
                 "astrai",
                 "Astrai — compliant AI routing (PII stripping, cost optimization)",
-            ),
-            (
-                "avian",
-                "Avian — OpenAI-compatible inference (DeepSeek, Kimi, GLM, MiniMax)",
             ),
             ("bedrock", "Amazon Bedrock — AWS managed models"),
         ],
@@ -2388,6 +2474,7 @@ async fn setup_provider(workspace_dir: &Path) -> Result<(String, String, String,
                 "moonshot-intl",
                 "Moonshot — Kimi API (international endpoint)",
             ),
+            ("stepfun", "StepFun — Step AI OpenAI-compatible endpoint"),
             ("glm", "GLM — ChatGLM / Zhipu (international endpoint)"),
             ("glm-cn", "GLM — ChatGLM / Zhipu (China endpoint)"),
             (
@@ -2396,15 +2483,25 @@ async fn setup_provider(workspace_dir: &Path) -> Result<(String, String, String,
             ),
             ("minimax-cn", "MiniMax — China endpoint (api.minimaxi.com)"),
             ("qwen", "Qwen — DashScope China endpoint"),
+            (
+                "qwen-coding-plan",
+                "Qwen — DashScope coding plan endpoint (coding.dashscope.aliyuncs.com)",
+            ),
             ("qwen-intl", "Qwen — DashScope international endpoint"),
             ("qwen-us", "Qwen — DashScope US endpoint"),
+            ("hunyuan", "Hunyuan — Tencent large models (T1, Turbo, Pro)"),
             ("qianfan", "Qianfan — Baidu AI models (China endpoint)"),
+            ("volcengine", "Volcengine ARK — Doubao model family"),
+            (
+                "siliconflow",
+                "SiliconFlow — OpenAI-compatible hosted models",
+            ),
             ("zai", "Z.AI — global coding endpoint"),
             ("zai-cn", "Z.AI — China coding endpoint (open.bigmodel.cn)"),
             ("synthetic", "Synthetic — Synthetic AI models"),
             ("opencode", "OpenCode Zen — code-focused AI"),
-            ("opencode-go", "OpenCode Go — Subsidized code-focused AI"),
             ("cohere", "Cohere — Command R+ & embeddings"),
+            ("ai21", "AI21 Labs — Jamba model family"),
         ],
         4 => local_provider_choices(),
         _ => vec![], // Custom — handled below
@@ -2422,7 +2519,7 @@ async fn setup_provider(workspace_dir: &Path) -> Result<(String, String, String,
         print_bullet("Examples: LiteLLM, LocalAI, vLLM, text-generation-webui, LM Studio, etc.");
         println!();
 
-        let base_url: String = Input::new()
+        let base_url: String = Input::with_theme(wizard_theme())
             .with_prompt("  API base URL (e.g. http://localhost:1234 or https://my-api.com)")
             .interact_text()?;
 
@@ -2431,14 +2528,14 @@ async fn setup_provider(workspace_dir: &Path) -> Result<(String, String, String,
             anyhow::bail!("Custom provider requires a base URL.");
         }
 
-        let api_key: String = Input::new()
+        let api_key: String = Input::with_theme(wizard_theme())
             .with_prompt("  API key (or Enter to skip if not needed)")
             .allow_empty(true)
             .interact_text()?;
 
-        let model: String = Input::new()
+        let model: String = Input::with_theme(wizard_theme())
             .with_prompt("  Model name (e.g. llama3, gpt-4o, mistral)")
-            .default("default")
+            .default("default".into())
             .interact_text()?;
 
         let provider_name = format!("custom:{base_url}");
@@ -2455,7 +2552,7 @@ async fn setup_provider(workspace_dir: &Path) -> Result<(String, String, String,
 
     let provider_labels: Vec<&str> = providers.iter().map(|(_, label)| *label).collect();
 
-    let provider_idx = Select::new()
+    let provider_idx = Select::with_theme(wizard_theme())
         .with_prompt("  Select your AI provider")
         .items(&provider_labels)
         .default(0)
@@ -2466,15 +2563,15 @@ async fn setup_provider(workspace_dir: &Path) -> Result<(String, String, String,
     // ── API key / endpoint ──
     let mut provider_api_url: Option<String> = None;
     let api_key = if provider_name == "ollama" {
-        let use_remote_ollama = Confirm::new()
+        let use_remote_ollama = Confirm::with_theme(wizard_theme())
             .with_prompt("  Use a remote Ollama endpoint (for example Ollama Cloud)?")
             .default(false)
             .interact()?;
 
         if use_remote_ollama {
-            let raw_url: String = Input::new()
+            let raw_url: String = Input::with_theme(wizard_theme())
                 .with_prompt("  Remote Ollama endpoint URL")
-                .default("https://ollama.com")
+                .default("https://ollama.com".into())
                 .interact_text()?;
 
             let normalized_url = normalize_ollama_endpoint_url(&raw_url);
@@ -2501,7 +2598,7 @@ async fn setup_provider(workspace_dir: &Path) -> Result<(String, String, String,
                 style(":cloud").yellow()
             ));
 
-            let key: String = Input::new()
+            let key: String = Input::with_theme(wizard_theme())
                 .with_prompt("  API key for remote Ollama endpoint (or Enter to skip)")
                 .allow_empty(true)
                 .interact_text()?;
@@ -2519,9 +2616,9 @@ async fn setup_provider(workspace_dir: &Path) -> Result<(String, String, String,
             String::new()
         }
     } else if matches!(provider_name, "llamacpp" | "llama.cpp") {
-        let raw_url: String = Input::new()
+        let raw_url: String = Input::with_theme(wizard_theme())
             .with_prompt("  llama.cpp server endpoint URL")
-            .default("http://localhost:8080/v1")
+            .default("http://localhost:8080/v1".into())
             .interact_text()?;
 
         let normalized_url = raw_url.trim().trim_end_matches('/').to_string();
@@ -2536,7 +2633,7 @@ async fn setup_provider(workspace_dir: &Path) -> Result<(String, String, String,
         ));
         print_bullet("No API key needed unless your llama.cpp server is started with --api-key.");
 
-        let key: String = Input::new()
+        let key: String = Input::with_theme(wizard_theme())
             .with_prompt("  API key for llama.cpp server (or Enter to skip)")
             .allow_empty(true)
             .interact_text()?;
@@ -2550,9 +2647,9 @@ async fn setup_provider(workspace_dir: &Path) -> Result<(String, String, String,
 
         key
     } else if provider_name == "sglang" {
-        let raw_url: String = Input::new()
+        let raw_url: String = Input::with_theme(wizard_theme())
             .with_prompt("  SGLang server endpoint URL")
-            .default("http://localhost:30000/v1")
+            .default("http://localhost:30000/v1".into())
             .interact_text()?;
 
         let normalized_url = raw_url.trim().trim_end_matches('/').to_string();
@@ -2567,7 +2664,7 @@ async fn setup_provider(workspace_dir: &Path) -> Result<(String, String, String,
         ));
         print_bullet("No API key needed unless your SGLang server requires authentication.");
 
-        let key: String = Input::new()
+        let key: String = Input::with_theme(wizard_theme())
             .with_prompt("  API key for SGLang server (or Enter to skip)")
             .allow_empty(true)
             .interact_text()?;
@@ -2581,9 +2678,9 @@ async fn setup_provider(workspace_dir: &Path) -> Result<(String, String, String,
 
         key
     } else if provider_name == "vllm" {
-        let raw_url: String = Input::new()
+        let raw_url: String = Input::with_theme(wizard_theme())
             .with_prompt("  vLLM server endpoint URL")
-            .default("http://localhost:8000/v1")
+            .default("http://localhost:8000/v1".into())
             .interact_text()?;
 
         let normalized_url = raw_url.trim().trim_end_matches('/').to_string();
@@ -2598,7 +2695,7 @@ async fn setup_provider(workspace_dir: &Path) -> Result<(String, String, String,
         ));
         print_bullet("No API key needed unless your vLLM server requires authentication.");
 
-        let key: String = Input::new()
+        let key: String = Input::with_theme(wizard_theme())
             .with_prompt("  API key for vLLM server (or Enter to skip)")
             .allow_empty(true)
             .interact_text()?;
@@ -2612,9 +2709,9 @@ async fn setup_provider(workspace_dir: &Path) -> Result<(String, String, String,
 
         key
     } else if provider_name == "osaurus" {
-        let raw_url: String = Input::new()
+        let raw_url: String = Input::with_theme(wizard_theme())
             .with_prompt("  Osaurus server endpoint URL")
-            .default("http://localhost:1337/v1")
+            .default("http://localhost:1337/v1".into())
             .interact_text()?;
 
         let normalized_url = raw_url.trim().trim_end_matches('/').to_string();
@@ -2629,7 +2726,7 @@ async fn setup_provider(workspace_dir: &Path) -> Result<(String, String, String,
         ));
         print_bullet("No API key needed unless your Osaurus server requires authentication.");
 
-        let key: String = Input::new()
+        let key: String = Input::with_theme(wizard_theme())
             .with_prompt("  API key for Osaurus server (or Enter to skip)")
             .allow_empty(true)
             .interact_text()?;
@@ -2639,6 +2736,24 @@ async fn setup_provider(workspace_dir: &Path) -> Result<(String, String, String,
                 "No API key provided. Set {} later only if your server requires authentication.",
                 style("OSAURUS_API_KEY").yellow()
             ));
+        }
+
+        key
+    } else if canonical_provider_name(provider_name) == "copilot" {
+        print_bullet("GitHub Copilot uses GitHub OAuth device flow.");
+        print_bullet("Press Enter to keep setup keyless and authenticate on first run.");
+        print_bullet("Optional: paste a GitHub token now to skip the first-run device prompt.");
+        println!();
+
+        let key: String = Input::with_theme(wizard_theme())
+            .with_prompt("  Paste your GitHub token (optional; Enter = device flow)")
+            .allow_empty(true)
+            .interact_text()?;
+
+        if key.trim().is_empty() {
+            print_bullet(
+                "No token provided. ZeroClaw will open the GitHub device login flow on first use.",
+            );
         }
 
         key
@@ -2652,7 +2767,7 @@ async fn setup_provider(workspace_dir: &Path) -> Result<(String, String, String,
             print_bullet("ZeroClaw will reuse your existing Gemini CLI authentication.");
             println!();
 
-            let use_cli: bool = dialoguer::Confirm::new()
+            let use_cli: bool = dialoguer::Confirm::with_theme(wizard_theme())
                 .with_prompt("  Use existing Gemini CLI authentication?")
                 .default(true)
                 .interact()?;
@@ -2665,7 +2780,7 @@ async fn setup_provider(workspace_dir: &Path) -> Result<(String, String, String,
                 String::new() // Empty key = will use CLI tokens
             } else {
                 print_bullet("Get your API key at: https://aistudio.google.com/app/apikey");
-                Input::new()
+                Input::with_theme(wizard_theme())
                     .with_prompt("  Paste your Gemini API key")
                     .allow_empty(true)
                     .interact_text()?
@@ -2681,7 +2796,7 @@ async fn setup_provider(workspace_dir: &Path) -> Result<(String, String, String,
             print_bullet("Or run `gemini` CLI to authenticate (tokens will be reused).");
             println!();
 
-            Input::new()
+            Input::with_theme(wizard_theme())
                 .with_prompt("  Paste your Gemini API key (or press Enter to skip)")
                 .allow_empty(true)
                 .interact_text()?
@@ -2709,7 +2824,7 @@ async fn setup_provider(workspace_dir: &Path) -> Result<(String, String, String,
             print_bullet("Or run `claude setup-token` to get an OAuth setup-token.");
             println!();
 
-            let key: String = Input::new()
+            let key: String = Input::with_theme(wizard_theme())
                 .with_prompt("  Paste your API key or setup-token (or press Enter to skip)")
                 .allow_empty(true)
                 .interact_text()?;
@@ -2741,7 +2856,7 @@ async fn setup_provider(workspace_dir: &Path) -> Result<(String, String, String,
             print_bullet("You can also set QWEN_OAUTH_TOKEN directly.");
             println!();
 
-            let key: String = Input::new()
+            let key: String = Input::with_theme(wizard_theme())
                 .with_prompt(
                     "  Paste your Qwen OAuth token (or press Enter to auto-detect cached OAuth)",
                 )
@@ -2776,6 +2891,12 @@ async fn setup_provider(workspace_dir: &Path) -> Result<(String, String, String,
             "https://help.aliyun.com/zh/model-studio/developer-reference/get-api-key"
         } else if is_qianfan_alias(provider_name) {
             "https://cloud.baidu.com/doc/WENXINWORKSHOP/s/7lm0vxo78"
+        } else if is_doubao_alias(provider_name) {
+            "https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey"
+        } else if is_siliconflow_alias(provider_name) {
+            "https://cloud.siliconflow.cn/account/ak"
+        } else if is_stepfun_alias(provider_name) {
+            "https://platform.stepfun.com/interface-key"
         } else {
             match provider_name {
                 "openrouter" => "https://openrouter.ai/keys",
@@ -2790,13 +2911,16 @@ async fn setup_provider(workspace_dir: &Path) -> Result<(String, String, String,
                 "perplexity" => "https://www.perplexity.ai/settings/api",
                 "xai" => "https://console.x.ai",
                 "cohere" => "https://dashboard.cohere.com/api-keys",
+                "ai21" => "https://studio.ai21.com/account/api-key",
+                "cerebras" => "https://cloud.cerebras.ai/platform/api-keys",
+                "sambanova" | "samba-nova" => "https://cloud.sambanova.ai/apis",
+                "replicate" => "https://replicate.com/account/api-tokens",
                 "vercel" => "https://vercel.com/account/tokens",
                 "cloudflare" => "https://dash.cloudflare.com/profile/api-tokens",
                 "nvidia" | "nvidia-nim" | "build.nvidia.com" => "https://build.nvidia.com/",
                 "bedrock" => "https://console.aws.amazon.com/iam",
                 "gemini" => "https://aistudio.google.com/app/apikey",
                 "astrai" => "https://as-trai.com",
-                "avian" => "https://avian.io",
                 _ => "",
             }
         };
@@ -2832,17 +2956,26 @@ async fn setup_provider(workspace_dir: &Path) -> Result<(String, String, String,
             print_bullet("You can also set it later via env var or config file.");
             println!();
 
-            let key: String = Input::new()
+            let key: String = Input::with_theme(wizard_theme())
                 .with_prompt("  Paste your API key (or press Enter to skip)")
                 .allow_empty(true)
                 .interact_text()?;
 
             if key.is_empty() {
                 let env_var = provider_env_var(provider_name);
-                print_bullet(&format!(
-                    "Skipped. Set {} or edit config.toml later.",
-                    style(env_var).yellow()
-                ));
+                let fallback_env_vars = provider_env_var_fallbacks(provider_name);
+                if fallback_env_vars.is_empty() {
+                    print_bullet(&format!(
+                        "Skipped. Set {} or edit config.toml later.",
+                        style(env_var).yellow()
+                    ));
+                } else {
+                    print_bullet(&format!(
+                        "Skipped. Set {} (fallback: {}) or edit config.toml later.",
+                        style(env_var).yellow(),
+                        style(fallback_env_vars.join(", ")).yellow()
+                    ));
+                }
             }
 
             key
@@ -2862,13 +2995,7 @@ async fn setup_provider(workspace_dir: &Path) -> Result<(String, String, String,
             allows_unauthenticated_model_fetch(provider_name) && !ollama_remote;
         let has_api_key = !api_key.trim().is_empty()
             || ((canonical_provider != "ollama" || ollama_remote)
-                && std::env::var(provider_env_var(provider_name))
-                    .ok()
-                    .is_some_and(|value| !value.trim().is_empty()))
-            || (provider_name == "minimax"
-                && std::env::var("MINIMAX_OAUTH_TOKEN")
-                    .ok()
-                    .is_some_and(|value| !value.trim().is_empty()));
+                && provider_has_env_api_key(provider_name));
 
         if canonical_provider == "ollama" && ollama_remote && !has_api_key {
             print_bullet(&format!(
@@ -2898,7 +3025,7 @@ async fn setup_provider(workspace_dir: &Path) -> Result<(String, String, String,
                 ));
             }
 
-            let should_fetch_now = Confirm::new()
+            let should_fetch_now = Confirm::with_theme(wizard_theme())
                 .with_prompt(if live_options.is_some() {
                     "  Refresh models from provider now?"
                 } else {
@@ -2912,9 +3039,7 @@ async fn setup_provider(workspace_dir: &Path) -> Result<(String, String, String,
                     provider_name,
                     &api_key,
                     provider_api_url.as_deref(),
-                )
-                .await
-                {
+                ) {
                     Ok(live_model_ids) if !live_model_ids.is_empty() => {
                         cache_live_models_for_provider(
                             workspace_dir,
@@ -2984,7 +3109,7 @@ async fn setup_provider(workspace_dir: &Path) -> Result<(String, String, String,
             format!("Curated starter list ({})", model_options.len()),
         ];
 
-        let source_idx = Select::new()
+        let source_idx = Select::with_theme(wizard_theme())
             .with_prompt("  Model source")
             .items(&source_options)
             .default(0)
@@ -3012,7 +3137,7 @@ async fn setup_provider(workspace_dir: &Path) -> Result<(String, String, String,
         .map(|(model_id, label)| format!("{label} — {}", style(model_id).dim()))
         .collect();
 
-    let model_idx = Select::new()
+    let model_idx = Select::with_theme(wizard_theme())
         .with_prompt("  Select your default model")
         .items(&model_labels)
         .default(0)
@@ -3020,7 +3145,7 @@ async fn setup_provider(workspace_dir: &Path) -> Result<(String, String, String,
 
     let selected_model = model_options[model_idx].0.clone();
     let model = if selected_model == CUSTOM_MODEL_SENTINEL {
-        Input::new()
+        Input::with_theme(wizard_theme())
             .with_prompt("  Enter custom model ID")
             .default(default_model_for_provider(provider_name))
             .interact_text()?
@@ -3082,25 +3207,58 @@ fn provider_env_var(name: &str) -> &'static str {
         "novita" => "NOVITA_API_KEY",
         "perplexity" => "PERPLEXITY_API_KEY",
         "cohere" => "COHERE_API_KEY",
+        "ai21" => "AI21_API_KEY",
+        "cerebras" => "CEREBRAS_API_KEY",
+        "sambanova" | "samba-nova" => "SAMBANOVA_API_KEY",
+        "replicate" => "REPLICATE_API_TOKEN",
         "kimi-code" => "KIMI_CODE_API_KEY",
         "moonshot" => "MOONSHOT_API_KEY",
+        "stepfun" => "STEP_API_KEY",
         "glm" => "GLM_API_KEY",
         "minimax" => "MINIMAX_API_KEY",
         "qwen" => "DASHSCOPE_API_KEY",
+        "volcengine" => "ARK_API_KEY",
+        "siliconflow" => "SILICONFLOW_API_KEY",
+        "hunyuan" => "HUNYUAN_API_KEY",
         "qianfan" => "QIANFAN_API_KEY",
         "zai" => "ZAI_API_KEY",
         "synthetic" => "SYNTHETIC_API_KEY",
         "opencode" | "opencode-zen" => "OPENCODE_API_KEY",
-        "opencode-go" => "OPENCODE_GO_API_KEY",
         "vercel" | "vercel-ai" => "VERCEL_API_KEY",
         "cloudflare" | "cloudflare-ai" => "CLOUDFLARE_API_KEY",
         "bedrock" | "aws-bedrock" => "AWS_ACCESS_KEY_ID",
         "gemini" => "GEMINI_API_KEY",
         "nvidia" | "nvidia-nim" | "build.nvidia.com" => "NVIDIA_API_KEY",
         "astrai" => "ASTRAI_API_KEY",
-        "avian" => "AVIAN_API_KEY",
         _ => "API_KEY",
     }
+}
+
+fn provider_env_var_fallbacks(name: &str) -> &'static [&'static str] {
+    match canonical_provider_name(name) {
+        "anthropic" => &["ANTHROPIC_OAUTH_TOKEN"],
+        "gemini" => &["GOOGLE_API_KEY"],
+        "minimax" => &["MINIMAX_OAUTH_TOKEN"],
+        "volcengine" => &["DOUBAO_API_KEY"],
+        "stepfun" => &["STEPFUN_API_KEY"],
+        "kimi-code" => &["MOONSHOT_API_KEY"],
+        _ => &[],
+    }
+}
+
+fn resolve_provider_api_key_from_env(provider_name: &str) -> Option<String> {
+    std::iter::once(provider_env_var(provider_name))
+        .chain(provider_env_var_fallbacks(provider_name).iter().copied())
+        .find_map(|env_var| {
+            std::env::var(env_var)
+                .ok()
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+        })
+}
+
+fn provider_has_env_api_key(provider_name: &str) -> bool {
+    resolve_provider_api_key_from_env(provider_name).is_some()
 }
 
 fn provider_supports_keyless_local_usage(provider_name: &str) -> bool {
@@ -3117,6 +3275,339 @@ fn provider_supports_device_flow(provider_name: &str) -> bool {
     )
 }
 
+fn http_request_productivity_allowed_domains() -> Vec<String> {
+    vec![
+        "api.github.com".to_string(),
+        "github.com".to_string(),
+        "api.linear.app".to_string(),
+        "linear.app".to_string(),
+        "calendar.googleapis.com".to_string(),
+        "tasks.googleapis.com".to_string(),
+        "www.googleapis.com".to_string(),
+        "oauth2.googleapis.com".to_string(),
+        "api.notion.com".to_string(),
+        "api.trello.com".to_string(),
+        "api.atlassian.com".to_string(),
+    ]
+}
+
+fn parse_allowed_domains_csv(raw: &str) -> Vec<String> {
+    raw.split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(ToString::to_string)
+        .collect()
+}
+
+fn prompt_allowed_domains_for_tool(tool_name: &str) -> Result<Vec<String>> {
+    if tool_name == "http_request" {
+        let options = vec![
+            "Productivity starter allowlist (GitHub, Linear, Google, Notion, Trello, Atlassian)",
+            "Allow all public domains (*)",
+            "Custom domain list (comma-separated)",
+        ];
+        let choice = Select::with_theme(wizard_theme())
+            .with_prompt("  HTTP domain policy")
+            .items(&options)
+            .default(0)
+            .interact()?;
+
+        return match choice {
+            0 => Ok(http_request_productivity_allowed_domains()),
+            1 => Ok(vec!["*".to_string()]),
+            _ => {
+                let raw: String = Input::with_theme(wizard_theme())
+                    .with_prompt("  http_request.allowed_domains (comma-separated, '*' allows all)")
+                    .allow_empty(true)
+                    .default("api.github.com,api.linear.app,calendar.googleapis.com".to_string())
+                    .interact_text()?;
+                let domains = parse_allowed_domains_csv(&raw);
+                if domains.is_empty() {
+                    anyhow::bail!(
+                        "Custom domain list cannot be empty. Use 'Allow all public domains (*)' if that is intended."
+                    )
+                }
+                Ok(domains)
+            }
+        };
+    }
+
+    let prompt = format!(
+        "  {}.allowed_domains (comma-separated, '*' allows all)",
+        tool_name
+    );
+    let raw: String = Input::with_theme(wizard_theme())
+        .with_prompt(prompt)
+        .allow_empty(true)
+        .default("*".to_string())
+        .interact_text()?;
+
+    let domains = parse_allowed_domains_csv(&raw);
+
+    if domains.is_empty() {
+        Ok(vec!["*".to_string()])
+    } else {
+        Ok(domains)
+    }
+}
+
+fn is_valid_env_var_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    match chars.next() {
+        Some(c) if c == '_' || c.is_ascii_alphabetic() => {}
+        _ => return false,
+    }
+    chars.all(|c| c == '_' || c.is_ascii_alphanumeric())
+}
+
+fn normalize_http_request_profile_name(name: &str) -> String {
+    let normalized = name
+        .trim()
+        .to_ascii_lowercase()
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>();
+    normalized.trim_matches('-').to_string()
+}
+
+fn default_env_var_for_profile(profile_name: &str) -> String {
+    match profile_name {
+        "github" => "GITHUB_TOKEN".to_string(),
+        "linear" => "LINEAR_API_KEY".to_string(),
+        "google" => "GOOGLE_API_KEY".to_string(),
+        _ => format!(
+            "{}_TOKEN",
+            profile_name
+                .chars()
+                .map(|c| if c.is_ascii_alphanumeric() {
+                    c.to_ascii_uppercase()
+                } else {
+                    '_'
+                })
+                .collect::<String>()
+        ),
+    }
+}
+
+fn setup_http_request_credential_profiles(
+    http_request_config: &mut HttpRequestConfig,
+) -> Result<()> {
+    println!();
+    print_bullet("Optional: configure env-backed credential profiles for http_request.");
+    print_bullet(
+        "This avoids passing raw tokens in tool arguments (use credential_profile instead).",
+    );
+
+    let configure_profiles = Confirm::with_theme(wizard_theme())
+        .with_prompt("  Configure HTTP credential profiles now?")
+        .default(false)
+        .interact()?;
+    if !configure_profiles {
+        return Ok(());
+    }
+
+    loop {
+        let default_name = if http_request_config.credential_profiles.is_empty() {
+            "github".to_string()
+        } else {
+            format!(
+                "profile-{}",
+                http_request_config.credential_profiles.len() + 1
+            )
+        };
+        let raw_name: String = Input::with_theme(wizard_theme())
+            .with_prompt("  Profile name (e.g., github, linear)")
+            .default(default_name)
+            .interact_text()?;
+        let profile_name = normalize_http_request_profile_name(&raw_name);
+        if profile_name.is_empty() {
+            anyhow::bail!("Credential profile name must contain letters, numbers, '_' or '-'");
+        }
+        if http_request_config
+            .credential_profiles
+            .contains_key(&profile_name)
+        {
+            anyhow::bail!(
+                "Credential profile '{}' normalizes to '{}' which already exists. Choose a different profile name.",
+                raw_name,
+                profile_name
+            );
+        }
+
+        let env_var_default = default_env_var_for_profile(&profile_name);
+        let env_var_raw: String = Input::with_theme(wizard_theme())
+            .with_prompt("  Environment variable containing token/secret")
+            .default(env_var_default)
+            .interact_text()?;
+        let env_var = env_var_raw.trim().to_string();
+        if !is_valid_env_var_name(&env_var) {
+            anyhow::bail!(
+                "Invalid environment variable name: {env_var}. Expected [A-Za-z_][A-Za-z0-9_]*"
+            );
+        }
+
+        let header_name: String = Input::with_theme(wizard_theme())
+            .with_prompt("  Header name")
+            .default("Authorization".to_string())
+            .interact_text()?;
+        let header_name = header_name.trim().to_string();
+        if header_name.is_empty() {
+            anyhow::bail!("Header name must not be empty");
+        }
+
+        let value_prefix: String = Input::with_theme(wizard_theme())
+            .with_prompt("  Header value prefix (e.g., 'Bearer ', empty for raw token)")
+            .allow_empty(true)
+            .default("Bearer ".to_string())
+            .interact_text()?;
+
+        http_request_config.credential_profiles.insert(
+            profile_name.clone(),
+            HttpRequestCredentialProfile {
+                header_name,
+                env_var,
+                value_prefix,
+            },
+        );
+
+        println!(
+            "  {} Added credential profile: {}",
+            style("✓").green().bold(),
+            style(profile_name).green()
+        );
+
+        let add_another = Confirm::with_theme(wizard_theme())
+            .with_prompt("  Add another credential profile?")
+            .default(false)
+            .interact()?;
+        if !add_another {
+            break;
+        }
+    }
+
+    Ok(())
+}
+
+// ── Step 6: Web & Internet Tools ────────────────────────────────
+
+fn setup_web_tools() -> Result<(WebSearchConfig, WebFetchConfig, HttpRequestConfig)> {
+    print_bullet("Configure web-facing tools: search, page fetch, and HTTP requests.");
+    print_bullet("You can always change these later in config.toml.");
+    println!();
+
+    // Web search defaults to enabled with DuckDuckGo (no wizard interaction needed).
+    let web_search_config = WebSearchConfig::default();
+    println!(
+        "  {} web_search: {} (DuckDuckGo)",
+        style("✓").green().bold(),
+        style("enabled").green()
+    );
+
+    println!();
+
+    // ── Web Fetch ───────────────────────────────────────────────
+    let mut web_fetch_config = WebFetchConfig::default();
+    let enable_web_fetch = Confirm::with_theme(wizard_theme())
+        .with_prompt("  Enable web_fetch tool (fetch and read web pages)?")
+        .default(false)
+        .interact()?;
+
+    if enable_web_fetch {
+        web_fetch_config.enabled = true;
+
+        let enable_firecrawl = Confirm::with_theme(wizard_theme())
+            .with_prompt("  Enable Firecrawl fallback for JS-heavy/bot-blocked sites?")
+            .default(false)
+            .interact()?;
+
+        if enable_firecrawl {
+            web_fetch_config.firecrawl.enabled = true;
+            let key_env: String = Input::with_theme(wizard_theme())
+                .with_prompt("  Firecrawl API key env var name")
+                .default("FIRECRAWL_API_KEY".to_string())
+                .interact_text()?;
+            if !key_env.trim().is_empty() {
+                web_fetch_config.firecrawl.api_key_env = key_env.trim().to_string();
+            }
+            let url: String = Input::with_theme(wizard_theme())
+                .with_prompt(
+                    "  Firecrawl API URL (leave blank for cloud https://api.firecrawl.dev/v1)",
+                )
+                .allow_empty(true)
+                .interact_text()?;
+            if !url.trim().is_empty() {
+                web_fetch_config.firecrawl.api_url = url.trim().to_string();
+            }
+        }
+
+        println!(
+            "  {} web_fetch: enabled (allowed_domains: [\"*\"]{})",
+            style("✓").green().bold(),
+            if web_fetch_config.firecrawl.enabled {
+                ", firecrawl fallback on"
+            } else {
+                ""
+            }
+        );
+    } else {
+        println!(
+            "  {} web_fetch: {}",
+            style("✓").green().bold(),
+            style("disabled").dim()
+        );
+    }
+
+    println!();
+
+    // ── HTTP Request ────────────────────────────────────────────
+    let mut http_request_config = HttpRequestConfig::default();
+    let enable_http_request = Confirm::with_theme(wizard_theme())
+        .with_prompt("  Enable http_request tool for direct API calls?")
+        .default(false)
+        .interact()?;
+
+    if enable_http_request {
+        http_request_config.enabled = true;
+        http_request_config.allowed_domains = prompt_allowed_domains_for_tool("http_request")?;
+        setup_http_request_credential_profiles(&mut http_request_config)?;
+        println!(
+            "  {} http_request.allowed_domains = [{}]",
+            style("✓").green().bold(),
+            style(http_request_config.allowed_domains.join(", ")).green()
+        );
+        if !http_request_config.credential_profiles.is_empty() {
+            let mut names: Vec<String> = http_request_config
+                .credential_profiles
+                .keys()
+                .cloned()
+                .collect();
+            names.sort();
+            println!(
+                "  {} http_request.credential_profiles = [{}]",
+                style("✓").green().bold(),
+                style(names.join(", ")).green()
+            );
+            print_bullet(
+                "Use tool arg `credential_profile` (for example `github`) instead of raw Authorization headers.",
+            );
+        }
+    } else {
+        println!(
+            "  {} http_request: {}",
+            style("✓").green().bold(),
+            style("disabled").dim()
+        );
+    }
+
+    Ok((web_search_config, web_fetch_config, http_request_config))
+}
+
 // ── Step 5: Tool Mode & Security ────────────────────────────────
 
 fn setup_tool_mode() -> Result<(ComposioConfig, SecretsConfig)> {
@@ -3129,7 +3620,7 @@ fn setup_tool_mode() -> Result<(ComposioConfig, SecretsConfig)> {
         "Composio (managed OAuth) — 1000+ apps via OAuth, no raw keys shared",
     ];
 
-    let choice = Select::new()
+    let choice = Select::with_theme(wizard_theme())
         .with_prompt("  Select tool mode")
         .items(&options)
         .default(0)
@@ -3146,7 +3637,7 @@ fn setup_tool_mode() -> Result<(ComposioConfig, SecretsConfig)> {
         print_bullet("ZeroClaw uses Composio as a tool — your core agent stays local.");
         println!();
 
-        let api_key: String = Input::new()
+        let api_key: String = Input::with_theme(wizard_theme())
             .with_prompt("  Composio API key (or Enter to skip)")
             .allow_empty(true)
             .interact_text()?;
@@ -3183,7 +3674,7 @@ fn setup_tool_mode() -> Result<(ComposioConfig, SecretsConfig)> {
     print_bullet("ZeroClaw can encrypt API keys stored in config.toml.");
     print_bullet("A local key file protects against plaintext exposure and accidental leaks.");
 
-    let encrypt = Confirm::new()
+    let encrypt = Confirm::with_theme(wizard_theme())
         .with_prompt("  Enable encrypted secret storage?")
         .default(true)
         .interact()?;
@@ -3266,7 +3757,7 @@ fn setup_hardware() -> Result<HardwareConfig> {
 
     let recommended = hardware::recommended_wizard_default(&devices);
 
-    let choice = Select::new()
+    let choice = Select::with_theme(wizard_theme())
         .with_prompt("  How should ZeroClaw interact with the physical world?")
         .items(&options)
         .default(recommended)
@@ -3293,7 +3784,7 @@ fn setup_hardware() -> Result<HardwareConfig> {
                 })
                 .collect();
 
-            let port_idx = Select::new()
+            let port_idx = Select::with_theme(wizard_theme())
                 .with_prompt("  Multiple serial devices found — select one")
                 .items(&port_labels)
                 .default(0)
@@ -3302,9 +3793,9 @@ fn setup_hardware() -> Result<HardwareConfig> {
             hw_config.serial_port = serial_devices[port_idx].device_path.clone();
         } else if serial_devices.is_empty() {
             // User chose serial but no device discovered — ask for manual path
-            let manual_port: String = Input::new()
+            let manual_port: String = Input::with_theme(wizard_theme())
                 .with_prompt("  Serial port path (e.g. /dev/ttyUSB0)")
-                .default("/dev/ttyUSB0")
+                .default("/dev/ttyUSB0".into())
                 .interact_text()?;
             hw_config.serial_port = Some(manual_port);
         }
@@ -3317,7 +3808,7 @@ fn setup_hardware() -> Result<HardwareConfig> {
             "230400",
             "Custom",
         ];
-        let baud_idx = Select::new()
+        let baud_idx = Select::with_theme(wizard_theme())
             .with_prompt("  Serial baud rate")
             .items(&baud_options)
             .default(0)
@@ -3328,9 +3819,9 @@ fn setup_hardware() -> Result<HardwareConfig> {
             2 => 57600,
             3 => 230_400,
             4 => {
-                let custom: String = Input::new()
+                let custom: String = Input::with_theme(wizard_theme())
                     .with_prompt("  Custom baud rate")
-                    .default("115200")
+                    .default("115200".into())
                     .interact_text()?;
                 custom.parse::<u32>().unwrap_or(115_200)
             }
@@ -3342,16 +3833,16 @@ fn setup_hardware() -> Result<HardwareConfig> {
     if hw_config.transport_mode() == hardware::HardwareTransport::Probe
         && hw_config.probe_target.is_none()
     {
-        let target: String = Input::new()
+        let target: String = Input::with_theme(wizard_theme())
             .with_prompt("  Target MCU chip (e.g. STM32F411CEUx, nRF52840_xxAA)")
-            .default("STM32F411CEUx")
+            .default("STM32F411CEUx".into())
             .interact_text()?;
         hw_config.probe_target = Some(target);
     }
 
     // ── Datasheet RAG ──
     if hw_config.enabled {
-        let datasheets = Confirm::new()
+        let datasheets = Confirm::with_theme(wizard_theme())
             .with_prompt("  Enable datasheet RAG? (index PDF schematics for AI pin lookups)")
             .default(true)
             .interact()?;
@@ -3402,9 +3893,9 @@ fn setup_project_context() -> Result<ProjectContext> {
     print_bullet("Press Enter to accept defaults.");
     println!();
 
-    let user_name: String = Input::new()
+    let user_name: String = Input::with_theme(wizard_theme())
         .with_prompt("  Your name")
-        .default("User")
+        .default("User".into())
         .interact_text()?;
 
     let tz_options = vec![
@@ -3415,20 +3906,21 @@ fn setup_project_context() -> Result<ProjectContext> {
         "Europe/London (GMT/BST)",
         "Europe/Berlin (CET/CEST)",
         "Asia/Tokyo (JST)",
+        "Asia/Shanghai (CST)",
         "UTC",
         "Other (type manually)",
     ];
 
-    let tz_idx = Select::new()
+    let tz_idx = Select::with_theme(wizard_theme())
         .with_prompt("  Your timezone")
         .items(&tz_options)
         .default(0)
         .interact()?;
 
     let timezone = if tz_idx == tz_options.len() - 1 {
-        Input::new()
+        Input::with_theme(wizard_theme())
             .with_prompt("  Enter timezone (e.g. America/New_York)")
-            .default("UTC")
+            .default("UTC".into())
             .interact_text()?
     } else {
         // Extract the short label before the parenthetical
@@ -3440,9 +3932,9 @@ fn setup_project_context() -> Result<ProjectContext> {
             .to_string()
     };
 
-    let agent_name: String = Input::new()
+    let agent_name: String = Input::with_theme(wizard_theme())
         .with_prompt("  Agent name")
-        .default("ZeroClaw")
+        .default("ZeroClaw".into())
         .interact_text()?;
 
     let style_options = vec![
@@ -3455,7 +3947,7 @@ fn setup_project_context() -> Result<ProjectContext> {
         "Custom — write your own style guide",
     ];
 
-    let style_idx = Select::new()
+    let style_idx = Select::with_theme(wizard_theme())
         .with_prompt("  Communication style")
         .items(&style_options)
         .default(1)
@@ -3468,10 +3960,10 @@ fn setup_project_context() -> Result<ProjectContext> {
         3 => "Be expressive and playful when appropriate. Use relevant emojis naturally (0-2 max), and keep serious topics emoji-light.".to_string(),
         4 => "Be technical and detailed. Thorough explanations, code-first.".to_string(),
         5 => "Adapt to the situation. Default to warm and clear communication; be concise when needed, thorough when it matters.".to_string(),
-        _ => Input::new()
+        _ => Input::with_theme(wizard_theme())
             .with_prompt("  Custom communication style")
             .default(
-                "Be warm, natural, and clear. Use occasional relevant emojis (1-2 max) and avoid robotic phrasing.",
+                "Be warm, natural, and clear. Use occasional relevant emojis (1-2 max) and avoid robotic phrasing.".into(),
             )
             .interact_text()?,
     };
@@ -3505,7 +3997,7 @@ fn setup_memory() -> Result<MemoryConfig> {
         .map(|backend| backend.label)
         .collect();
 
-    let choice = Select::new()
+    let choice = Select::with_theme(wizard_theme())
         .with_prompt("  Select memory backend")
         .items(&options)
         .default(0)
@@ -3515,7 +4007,7 @@ fn setup_memory() -> Result<MemoryConfig> {
     let profile = memory_backend_profile(backend);
 
     let auto_save = profile.auto_save_default
-        && Confirm::new()
+        && Confirm::with_theme(wizard_theme())
             .with_prompt("  Auto-save conversations to memory?")
             .default(true)
             .interact()?;
@@ -3529,6 +4021,117 @@ fn setup_memory() -> Result<MemoryConfig> {
 
     let mut config = memory_config_defaults_for_backend(backend);
     config.auto_save = auto_save;
+
+    if classify_memory_backend(backend) == MemoryBackendKind::SqliteQdrantHybrid {
+        configure_hybrid_qdrant_memory(&mut config)?;
+    }
+
+    Ok(config)
+}
+
+fn configure_hybrid_qdrant_memory(config: &mut MemoryConfig) -> Result<()> {
+    print_bullet("Hybrid memory keeps local SQLite metadata and uses Qdrant for semantic ranking.");
+    print_bullet("SQLite storage path stays at the default workspace database.");
+
+    let qdrant_url_default = config
+        .qdrant
+        .url
+        .clone()
+        .unwrap_or_else(|| "http://localhost:6333".to_string());
+    let qdrant_url: String = Input::with_theme(wizard_theme())
+        .with_prompt("  Qdrant URL")
+        .default(qdrant_url_default)
+        .interact_text()?;
+    let qdrant_url = qdrant_url.trim();
+    if qdrant_url.is_empty() {
+        bail!("Qdrant URL is required for sqlite_qdrant_hybrid backend");
+    }
+    config.qdrant.url = Some(qdrant_url.to_string());
+
+    let qdrant_collection: String = Input::with_theme(wizard_theme())
+        .with_prompt("  Qdrant collection")
+        .default(config.qdrant.collection.clone())
+        .interact_text()?;
+    let qdrant_collection = qdrant_collection.trim();
+    if !qdrant_collection.is_empty() {
+        config.qdrant.collection = qdrant_collection.to_string();
+    }
+
+    let qdrant_api_key: String = Input::with_theme(wizard_theme())
+        .with_prompt("  Qdrant API key (optional, Enter to skip)")
+        .allow_empty(true)
+        .interact_text()?;
+    let qdrant_api_key = qdrant_api_key.trim();
+    config.qdrant.api_key = if qdrant_api_key.is_empty() {
+        None
+    } else {
+        Some(qdrant_api_key.to_string())
+    };
+
+    println!(
+        "  {} Qdrant: {} (collection: {}, api key: {})",
+        style("✓").green().bold(),
+        style(config.qdrant.url.as_deref().unwrap_or_default()).green(),
+        style(&config.qdrant.collection).green(),
+        if config.qdrant.api_key.is_some() {
+            style("set").green().to_string()
+        } else {
+            style("not set").dim().to_string()
+        }
+    );
+
+    Ok(())
+}
+
+fn setup_identity_backend() -> Result<IdentityConfig> {
+    print_bullet("Choose the identity format ZeroClaw should scaffold for this workspace.");
+    print_bullet("You can switch later in config.toml under [identity].");
+    println!();
+
+    let backends = selectable_identity_backends();
+    let options: Vec<String> = backends
+        .iter()
+        .map(|profile| format!("{} — {}", profile.label, profile.description))
+        .collect();
+
+    let selected = Select::with_theme(wizard_theme())
+        .with_prompt("  Select identity backend")
+        .items(&options)
+        .default(0)
+        .interact()?;
+
+    let backend = backends
+        .get(selected)
+        .context("invalid identity backend selection")?;
+
+    let config = if backend.key == "aieos" {
+        let default_path = default_aieos_identity_path().to_string();
+        println!(
+            "  {} Identity: {} ({})",
+            style("✓").green().bold(),
+            style("aieos").green(),
+            style(&default_path).dim()
+        );
+        IdentityConfig {
+            format: "aieos".into(),
+            extra_files: Vec::new(),
+            aieos_path: Some(default_path),
+            aieos_inline: None,
+        }
+    } else {
+        println!(
+            "  {} Identity: {}",
+            style("✓").green().bold(),
+            style("openclaw").green()
+        );
+        IdentityConfig {
+            format: "openclaw".into(),
+            extra_files: Vec::new(),
+            aieos_path: None,
+            aieos_inline: None,
+        }
+    };
+
     Ok(config)
 }
 
@@ -3539,20 +4142,10 @@ enum ChannelMenuChoice {
     Telegram,
     Discord,
     Slack,
-    IMessage,
-    Matrix,
     Signal,
     WhatsApp,
-    Linq,
     Irc,
     Webhook,
-    NextcloudTalk,
-    DingTalk,
-    QqOfficial,
-    Lark,
-    Feishu,
-    #[cfg(feature = "channel-nostr")]
-    Nostr,
     Done,
 }
 
@@ -3560,20 +4153,10 @@ const CHANNEL_MENU_CHOICES: &[ChannelMenuChoice] = &[
     ChannelMenuChoice::Telegram,
     ChannelMenuChoice::Discord,
     ChannelMenuChoice::Slack,
-    ChannelMenuChoice::IMessage,
-    ChannelMenuChoice::Matrix,
     ChannelMenuChoice::Signal,
     ChannelMenuChoice::WhatsApp,
-    ChannelMenuChoice::Linq,
     ChannelMenuChoice::Irc,
     ChannelMenuChoice::Webhook,
-    ChannelMenuChoice::NextcloudTalk,
-    ChannelMenuChoice::DingTalk,
-    ChannelMenuChoice::QqOfficial,
-    ChannelMenuChoice::Lark,
-    ChannelMenuChoice::Feishu,
-    #[cfg(feature = "channel-nostr")]
-    ChannelMenuChoice::Nostr,
     ChannelMenuChoice::Done,
 ];
 
@@ -3618,22 +4201,6 @@ fn setup_channels() -> Result<ChannelsConfig> {
                         "— connect your bot"
                     }
                 ),
-                ChannelMenuChoice::IMessage => format!(
-                    "iMessage   {}",
-                    if config.imessage.is_some() {
-                        "✅ configured"
-                    } else {
-                        "— macOS only"
-                    }
-                ),
-                ChannelMenuChoice::Matrix => format!(
-                    "Matrix     {}",
-                    if config.matrix.is_some() {
-                        "✅ connected"
-                    } else {
-                        "— self-hosted chat"
-                    }
-                ),
                 ChannelMenuChoice::Signal => format!(
                     "Signal     {}",
                     if config.signal.is_some() {
@@ -3648,14 +4215,6 @@ fn setup_channels() -> Result<ChannelsConfig> {
                         "✅ connected"
                     } else {
                         "— Business Cloud API"
-                    }
-                ),
-                ChannelMenuChoice::Linq => format!(
-                    "Linq       {}",
-                    if config.linq.is_some() {
-                        "✅ connected"
-                    } else {
-                        "— iMessage/RCS/SMS via Linq API"
                     }
                 ),
                 ChannelMenuChoice::Irc => format!(
@@ -3674,62 +4233,11 @@ fn setup_channels() -> Result<ChannelsConfig> {
                         "— HTTP endpoint"
                     }
                 ),
-                ChannelMenuChoice::NextcloudTalk => format!(
-                    "Nextcloud  {}",
-                    if config.nextcloud_talk.is_some() {
-                        "✅ connected"
-                    } else {
-                        "— Talk webhook + OCS API"
-                    }
-                ),
-                ChannelMenuChoice::DingTalk => format!(
-                    "DingTalk   {}",
-                    if config.dingtalk.is_some() {
-                        "✅ connected"
-                    } else {
-                        "— DingTalk Stream Mode"
-                    }
-                ),
-                ChannelMenuChoice::QqOfficial => format!(
-                    "QQ Official {}",
-                    if config.qq.is_some() {
-                        "✅ connected"
-                    } else {
-                        "— Tencent QQ Bot"
-                    }
-                ),
-                ChannelMenuChoice::Lark => format!(
-                    "Lark       {}",
-                    if config.lark.as_ref().is_some_and(|cfg| !cfg.use_feishu) {
-                        "✅ connected"
-                    } else {
-                        "— Lark Bot"
-                    }
-                ),
-                ChannelMenuChoice::Feishu => format!(
-                    "Feishu     {}",
-                    if config.feishu.is_some()
-                        || config.lark.as_ref().is_some_and(|cfg| cfg.use_feishu)
-                    {
-                        "✅ connected"
-                    } else {
-                        "— Feishu Bot"
-                    }
-                ),
-                #[cfg(feature = "channel-nostr")]
-                ChannelMenuChoice::Nostr => format!(
-                    "Nostr {}",
-                    if config.nostr.is_some() {
-                        "✅ connected"
-                    } else {
-                        "     — Nostr DMs"
-                    }
-                ),
                 ChannelMenuChoice::Done => "Done — finish setup".to_string(),
             })
             .collect();
 
-        let selection = Select::new()
+        let selection = Select::with_theme(wizard_theme())
             .with_prompt("  Connect a channel (or Done to continue)")
             .items(&options)
             .default(options.len() - 1)
@@ -3754,7 +4262,7 @@ fn setup_channels() -> Result<ChannelsConfig> {
                 print_bullet("3. Copy the bot token and paste it below");
                 println!();
 
-                let token: String = Input::new()
+                let token: String = Input::with_theme(wizard_theme())
                     .with_prompt("  Bot token (from @BotFather)")
                     .interact_text()?;
 
@@ -3806,7 +4314,7 @@ fn setup_channels() -> Result<ChannelsConfig> {
                 );
                 print_bullet("Use '*' only for temporary open testing.");
 
-                let users_str: String = Input::new()
+                let users_str: String = Input::with_theme(wizard_theme())
                     .with_prompt(
                         "  Allowed Telegram identities (comma-separated: username without '@' and/or numeric user ID, '*' for all)",
                     )
@@ -3837,8 +4345,10 @@ fn setup_channels() -> Result<ChannelsConfig> {
                     draft_update_interval_ms: 1000,
                     interrupt_on_new_message: false,
                     mention_only: false,
-                    ack_reactions: None,
-                    proxy_url: None,
+                    progress_mode: ProgressMode::default(),
+                    group_reply: None,
+                    base_url: None,
+                    ack_enabled: true,
                 });
             }
             ChannelMenuChoice::Discord => {
@@ -3855,7 +4365,9 @@ fn setup_channels() -> Result<ChannelsConfig> {
                 print_bullet("4. Invite bot to your server with messages permission");
                 println!();
 
-                let token: String = Input::new().with_prompt("  Bot token").interact_text()?;
+                let token: String = Input::with_theme(wizard_theme())
+                    .with_prompt("  Bot token")
+                    .interact_text()?;
 
                 if token.trim().is_empty() {
                     println!("  {} Skipped", style("→").dim());
@@ -3897,7 +4409,7 @@ fn setup_channels() -> Result<ChannelsConfig> {
                     }
                 }
 
-                let guild: String = Input::new()
+                let guild: String = Input::with_theme(wizard_theme())
                     .with_prompt("  Server (guild) ID (optional, Enter to skip)")
                     .allow_empty(true)
                     .interact_text()?;
@@ -3908,7 +4420,7 @@ fn setup_channels() -> Result<ChannelsConfig> {
                 );
                 print_bullet("Use '*' only for temporary open testing.");
 
-                let allowed_users_str: String = Input::new()
+                let allowed_users_str: String = Input::with_theme(wizard_theme())
                     .with_prompt(
                         "  Allowed Discord user IDs (comma-separated, recommended: your own ID, '*' for all)",
                     )
@@ -3937,12 +4449,8 @@ fn setup_channels() -> Result<ChannelsConfig> {
                     guild_id: if guild.is_empty() { None } else { Some(guild) },
                     allowed_users,
                     listen_to_bots: false,
-                    interrupt_on_new_message: false,
                     mention_only: false,
-                    proxy_url: None,
-                    stream_mode: StreamMode::MultiMessage,
-                    draft_update_interval_ms: 1000,
-                    multi_message_delay_ms: 800,
+                    group_reply: None,
                 });
             }
             ChannelMenuChoice::Slack => {
@@ -3958,7 +4466,7 @@ fn setup_channels() -> Result<ChannelsConfig> {
                 print_bullet("3. Install to workspace and copy the Bot Token");
                 println!();
 
-                let token: String = Input::new()
+                let token: String = Input::with_theme(wizard_theme())
                     .with_prompt("  Bot token (xoxb-...)")
                     .interact_text()?;
 
@@ -4015,12 +4523,12 @@ fn setup_channels() -> Result<ChannelsConfig> {
                     }
                 }
 
-                let app_token: String = Input::new()
+                let app_token: String = Input::with_theme(wizard_theme())
                     .with_prompt("  App token (xapp-..., optional, Enter to skip)")
                     .allow_empty(true)
                     .interact_text()?;
 
-                let channel: String = Input::new()
+                let channel: String = Input::with_theme(wizard_theme())
                     .with_prompt(
                         "  Default channel ID (optional, Enter to skip for all accessible channels; '*' also means all)",
                     )
@@ -4033,7 +4541,7 @@ fn setup_channels() -> Result<ChannelsConfig> {
                 );
                 print_bullet("Use '*' only for temporary open testing.");
 
-                let allowed_users_str: String = Input::new()
+                let allowed_users_str: String = Input::with_theme(wizard_theme())
                     .with_prompt(
                         "  Allowed Slack user IDs (comma-separated, recommended: your own member ID, '*' for all)",
                     )
@@ -4069,176 +4577,9 @@ fn setup_channels() -> Result<ChannelsConfig> {
                     } else {
                         Some(channel)
                     },
-                    channel_ids: Vec::new(),
+                    channel_ids: vec![],
                     allowed_users,
-                    interrupt_on_new_message: false,
-                    thread_replies: None,
-                    mention_only: false,
-                    use_markdown_blocks: false,
-                    proxy_url: None,
-                    stream_drafts: false,
-                    draft_update_interval_ms: 1200,
-                });
-            }
-            ChannelMenuChoice::IMessage => {
-                // ── iMessage ──
-                println!();
-                println!(
-                    "  {} {}",
-                    style("iMessage Setup").white().bold(),
-                    style("— macOS only, reads from Messages.app").dim()
-                );
-
-                if !cfg!(target_os = "macos") {
-                    println!(
-                        "  {} iMessage is only available on macOS.",
-                        style("⚠").yellow().bold()
-                    );
-                    continue;
-                }
-
-                print_bullet("ZeroClaw reads your iMessage database and replies via AppleScript.");
-                print_bullet(
-                    "You need to grant Full Disk Access to your terminal in System Settings.",
-                );
-                println!();
-
-                let contacts_str: String = Input::new()
-                    .with_prompt("  Allowed contacts (comma-separated phone/email, or * for all)")
-                    .default("*")
-                    .interact_text()?;
-
-                let allowed_contacts = if contacts_str.trim() == "*" {
-                    vec!["*".into()]
-                } else {
-                    contacts_str
-                        .split(',')
-                        .map(|s| s.trim().to_string())
-                        .collect()
-                };
-
-                config.imessage = Some(IMessageConfig { allowed_contacts });
-                println!(
-                    "  {} iMessage configured (contacts: {})",
-                    style("✅").green().bold(),
-                    style(&contacts_str).cyan()
-                );
-            }
-            ChannelMenuChoice::Matrix => {
-                // ── Matrix ──
-                println!();
-                println!(
-                    "  {} {}",
-                    style("Matrix Setup").white().bold(),
-                    style("— self-hosted, federated chat").dim()
-                );
-                print_bullet("You need a Matrix account and an access token.");
-                print_bullet("Get a token via Element → Settings → Help & About → Access Token.");
-                println!();
-
-                let homeserver: String = Input::new()
-                    .with_prompt("  Homeserver URL (e.g. https://matrix.org)")
-                    .interact_text()?;
-
-                if homeserver.trim().is_empty() {
-                    println!("  {} Skipped", style("→").dim());
-                    continue;
-                }
-
-                let access_token: String =
-                    Input::new().with_prompt("  Access token").interact_text()?;
-
-                if access_token.trim().is_empty() {
-                    println!("  {} Skipped — token required", style("→").dim());
-                    continue;
-                }
-
-                // Test connection (run entirely in separate thread — Response must be used/dropped there)
-                let hs = homeserver.trim_end_matches('/');
-                print!("  {} Testing connection... ", style("⏳").dim());
-                let hs_owned = hs.to_string();
-                let access_token_clone = access_token.clone();
-                let thread_result = std::thread::spawn(move || {
-                    let client = reqwest::blocking::Client::new();
-                    let resp = client
-                        .get(format!("{hs_owned}/_matrix/client/v3/account/whoami"))
-                        .header("Authorization", format!("Bearer {access_token_clone}"))
-                        .send()?;
-                    let ok = resp.status().is_success();
-
-                    if !ok {
-                        return Ok::<_, reqwest::Error>((false, None, None));
-                    }
-
-                    let payload: Value = match resp.json() {
-                        Ok(payload) => payload,
-                        Err(_) => Value::Null,
-                    };
-                    let user_id = payload
-                        .get("user_id")
-                        .and_then(|value| value.as_str())
-                        .map(|value| value.to_string());
-                    let device_id = payload
-                        .get("device_id")
-                        .and_then(|value| value.as_str())
-                        .map(|value| value.to_string());
-
-                    Ok::<_, reqwest::Error>((true, user_id, device_id))
-                })
-                .join();
-
-                let (detected_user_id, detected_device_id) = match thread_result {
-                    Ok(Ok((true, user_id, device_id))) => {
-                        println!(
-                            "\r  {} Connection verified        ",
-                            style("✅").green().bold()
-                        );
-
-                        if device_id.is_none() {
-                            println!(
-                                "  {} Homeserver did not return device_id from whoami. If E2EE decryption fails, set channels.matrix.device_id manually in config.toml.",
-                                style("⚠️").yellow().bold()
-                            );
-                        }
-
-                        (user_id, device_id)
-                    }
-                    _ => {
-                        println!(
-                            "\r  {} Connection failed — check homeserver URL and token",
-                            style("❌").red().bold()
-                        );
-                        continue;
-                    }
-                };
-
-                let room_id: String = Input::new()
-                    .with_prompt("  Room ID (e.g. !abc123:matrix.org)")
-                    .interact_text()?;
-
-                let users_str: String = Input::new()
-                    .with_prompt("  Allowed users (comma-separated @user:server, or * for all)")
-                    .default("*")
-                    .interact_text()?;
-
-                let allowed_users = if users_str.trim() == "*" {
-                    vec!["*".into()]
-                } else {
-                    users_str.split(',').map(|s| s.trim().to_string()).collect()
-                };
-
-                config.matrix = Some(MatrixConfig {
-                    homeserver: homeserver.trim_end_matches('/').to_string(),
-                    access_token,
-                    user_id: detected_user_id,
-                    device_id: detected_device_id,
-                    room_id,
-                    allowed_users,
-                    allowed_rooms: vec![],
-                    interrupt_on_new_message: false,
-                    stream_mode: StreamMode::Partial,
-                    draft_update_interval_ms: 1500,
-                    multi_message_delay_ms: 800,
+                    group_reply: None,
                 });
             }
             ChannelMenuChoice::Signal => {
@@ -4254,9 +4595,9 @@ fn setup_channels() -> Result<ChannelsConfig> {
                 print_bullet("3. Optionally scope to DMs only or to a specific group.");
                 println!();
 
-                let http_url: String = Input::new()
+                let http_url: String = Input::with_theme(wizard_theme())
                     .with_prompt("  signal-cli HTTP URL")
-                    .default("http://127.0.0.1:8686")
+                    .default("http://127.0.0.1:8686".into())
                     .interact_text()?;
 
                 if http_url.trim().is_empty() {
@@ -4264,7 +4605,7 @@ fn setup_channels() -> Result<ChannelsConfig> {
                     continue;
                 }
 
-                let account: String = Input::new()
+                let account: String = Input::with_theme(wizard_theme())
                     .with_prompt("  Account number (E.164, e.g. +1234567890)")
                     .interact_text()?;
 
@@ -4278,7 +4619,7 @@ fn setup_channels() -> Result<ChannelsConfig> {
                     "DM only",
                     "Specific group ID",
                 ];
-                let scope_choice = Select::new()
+                let scope_choice = Select::with_theme(wizard_theme())
                     .with_prompt("  Message scope")
                     .items(scope_options)
                     .default(0)
@@ -4287,8 +4628,9 @@ fn setup_channels() -> Result<ChannelsConfig> {
                 let group_id = match scope_choice {
                     1 => Some("dm".to_string()),
                     2 => {
-                        let group_input: String =
-                            Input::new().with_prompt("  Group ID").interact_text()?;
+                        let group_input: String = Input::with_theme(wizard_theme())
+                            .with_prompt("  Group ID")
+                            .interact_text()?;
                         let group_input = group_input.trim().to_string();
                         if group_input.is_empty() {
                             println!("  {} Skipped — group ID required", style("→").dim());
@@ -4299,11 +4641,11 @@ fn setup_channels() -> Result<ChannelsConfig> {
                     _ => None,
                 };
 
-                let allowed_from_raw: String = Input::new()
+                let allowed_from_raw: String = Input::with_theme(wizard_theme())
                     .with_prompt(
                         "  Allowed sender numbers (comma-separated +1234567890, or * for all)",
                     )
-                    .default("*")
+                    .default("*".into())
                     .interact_text()?;
 
                 let allowed_from = if allowed_from_raw.trim() == "*" {
@@ -4316,12 +4658,12 @@ fn setup_channels() -> Result<ChannelsConfig> {
                         .collect()
                 };
 
-                let ignore_attachments = Confirm::new()
+                let ignore_attachments = Confirm::with_theme(wizard_theme())
                     .with_prompt("  Ignore attachment-only messages?")
                     .default(false)
                     .interact()?;
 
-                let ignore_stories = Confirm::new()
+                let ignore_stories = Confirm::with_theme(wizard_theme())
                     .with_prompt("  Ignore incoming stories?")
                     .default(true)
                     .interact()?;
@@ -4333,7 +4675,6 @@ fn setup_channels() -> Result<ChannelsConfig> {
                     allowed_from,
                     ignore_attachments,
                     ignore_stories,
-                    proxy_url: None,
                 });
 
                 println!("  {} Signal configured", style("✅").green().bold());
@@ -4347,30 +4688,13 @@ fn setup_channels() -> Result<ChannelsConfig> {
                     "WhatsApp Web (QR / pair-code, no Meta Business API)",
                     "WhatsApp Business Cloud API (webhook)",
                 ];
-                let mode_idx = Select::new()
+                let mode_idx = Select::with_theme(wizard_theme())
                     .with_prompt("  Choose WhatsApp mode")
                     .items(&mode_options)
                     .default(0)
                     .interact()?;
 
                 if mode_idx == 0 {
-                    // Compile-time check: warn early if the feature is not enabled.
-                    #[cfg(not(feature = "whatsapp-web"))]
-                    {
-                        println!();
-                        println!(
-                            "  {} {}",
-                            style("⚠").yellow().bold(),
-                            style("The 'whatsapp-web' feature is not compiled in. WhatsApp Web will not work at runtime.").yellow()
-                        );
-                        println!(
-                            "  {} Rebuild with: {}",
-                            style("→").dim(),
-                            style("cargo build --features whatsapp-web").white().bold()
-                        );
-                        println!();
-                    }
-
                     println!("  {}", style("Mode: WhatsApp Web").dim());
                     print_bullet("1. Build with --features whatsapp-web");
                     print_bullet(
@@ -4379,9 +4703,9 @@ fn setup_channels() -> Result<ChannelsConfig> {
                     print_bullet("3. Keep session_path persistent so relogin is not required");
                     println!();
 
-                    let session_path: String = Input::new()
+                    let session_path: String = Input::with_theme(wizard_theme())
                         .with_prompt("  Session database path")
-                        .default("~/.zeroclaw/state/whatsapp-web/session.db")
+                        .default("~/.zeroclaw/state/whatsapp-web/session.db".into())
                         .interact_text()?;
 
                     if session_path.trim().is_empty() {
@@ -4389,7 +4713,7 @@ fn setup_channels() -> Result<ChannelsConfig> {
                         continue;
                     }
 
-                    let pair_phone: String = Input::new()
+                    let pair_phone: String = Input::with_theme(wizard_theme())
                         .with_prompt(
                             "  Pair phone (optional, digits only; leave empty to use QR flow)",
                         )
@@ -4399,7 +4723,7 @@ fn setup_channels() -> Result<ChannelsConfig> {
                     let pair_code: String = if pair_phone.trim().is_empty() {
                         String::new()
                     } else {
-                        Input::new()
+                        Input::with_theme(wizard_theme())
                             .with_prompt(
                                 "  Custom pair code (optional, leave empty for auto-generated)",
                             )
@@ -4407,11 +4731,11 @@ fn setup_channels() -> Result<ChannelsConfig> {
                             .interact_text()?
                     };
 
-                    let users_str: String = Input::new()
+                    let users_str: String = Input::with_theme(wizard_theme())
                         .with_prompt(
                             "  Allowed phone numbers (comma-separated +1234567890, or * for all)",
                         )
-                        .default("*")
+                        .default("*".into())
                         .interact_text()?;
 
                     let allowed_numbers = if users_str.trim() == "*" {
@@ -4431,13 +4755,6 @@ fn setup_channels() -> Result<ChannelsConfig> {
                         pair_code: (!pair_code.trim().is_empty())
                             .then(|| pair_code.trim().to_string()),
                         allowed_numbers,
-                        mode: WhatsAppWebMode::default(),
-                        dm_policy: WhatsAppChatPolicy::default(),
-                        group_policy: WhatsAppChatPolicy::default(),
-                        self_chat_mode: false,
-                        dm_mention_patterns: vec![],
-                        group_mention_patterns: vec![],
-                        proxy_url: None,
                     });
 
                     println!(
@@ -4458,7 +4775,7 @@ fn setup_channels() -> Result<ChannelsConfig> {
                 print_bullet("4. Configure webhook URL to: https://your-domain/whatsapp");
                 println!();
 
-                let access_token: String = Input::new()
+                let access_token: String = Input::with_theme(wizard_theme())
                     .with_prompt("  Access token (from Meta Developers)")
                     .interact_text()?;
 
@@ -4467,7 +4784,7 @@ fn setup_channels() -> Result<ChannelsConfig> {
                     continue;
                 }
 
-                let phone_number_id: String = Input::new()
+                let phone_number_id: String = Input::with_theme(wizard_theme())
                     .with_prompt("  Phone number ID (from WhatsApp app settings)")
                     .interact_text()?;
 
@@ -4476,9 +4793,9 @@ fn setup_channels() -> Result<ChannelsConfig> {
                     continue;
                 }
 
-                let verify_token: String = Input::new()
+                let verify_token: String = Input::with_theme(wizard_theme())
                     .with_prompt("  Webhook verify token (create your own)")
-                    .default("zeroclaw-whatsapp-verify")
+                    .default("zeroclaw-whatsapp-verify".into())
                     .interact_text()?;
 
                 // Test connection (run entirely in separate thread — Response must be used/dropped there)
@@ -4517,11 +4834,11 @@ fn setup_channels() -> Result<ChannelsConfig> {
                     }
                 }
 
-                let users_str: String = Input::new()
+                let users_str: String = Input::with_theme(wizard_theme())
                     .with_prompt(
                         "  Allowed phone numbers (comma-separated +1234567890, or * for all)",
                     )
-                    .default("*")
+                    .default("*".into())
                     .interact_text()?;
 
                 let allowed_numbers = if users_str.trim() == "*" {
@@ -4539,105 +4856,6 @@ fn setup_channels() -> Result<ChannelsConfig> {
                     pair_phone: None,
                     pair_code: None,
                     allowed_numbers,
-                    mode: WhatsAppWebMode::default(),
-                    dm_policy: WhatsAppChatPolicy::default(),
-                    group_policy: WhatsAppChatPolicy::default(),
-                    self_chat_mode: false,
-                    dm_mention_patterns: vec![],
-                    group_mention_patterns: vec![],
-                    proxy_url: None,
-                });
-            }
-            ChannelMenuChoice::Linq => {
-                // ── Linq ──
-                println!();
-                println!(
-                    "  {} {}",
-                    style("Linq Setup").white().bold(),
-                    style("— iMessage/RCS/SMS via Linq API").dim()
-                );
-                print_bullet("1. Sign up at linqapp.com and get your Partner API token");
-                print_bullet("2. Note your Linq phone number (E.164 format)");
-                print_bullet("3. Configure webhook URL to: https://your-domain/linq");
-                println!();
-
-                let api_token: String = Input::new()
-                    .with_prompt("  API token (Linq Partner API token)")
-                    .interact_text()?;
-
-                if api_token.trim().is_empty() {
-                    println!("  {} Skipped", style("→").dim());
-                    continue;
-                }
-
-                let from_phone: String = Input::new()
-                    .with_prompt("  From phone number (E.164 format, e.g. +12223334444)")
-                    .interact_text()?;
-
-                if from_phone.trim().is_empty() {
-                    println!("  {} Skipped — phone number required", style("→").dim());
-                    continue;
-                }
-
-                // Test connection
-                print!("  {} Testing connection... ", style("⏳").dim());
-                let api_token_clone = api_token.clone();
-                let thread_result = std::thread::spawn(move || {
-                    let client = reqwest::blocking::Client::new();
-                    let url = "https://api.linqapp.com/api/partner/v3/phonenumbers";
-                    let resp = client
-                        .get(url)
-                        .header(
-                            "Authorization",
-                            format!("Bearer {}", api_token_clone.trim()),
-                        )
-                        .send()?;
-                    Ok::<_, reqwest::Error>(resp.status().is_success())
-                })
-                .join();
-                match thread_result {
-                    Ok(Ok(true)) => {
-                        println!(
-                            "\r  {} Connected to Linq API              ",
-                            style("✅").green().bold()
-                        );
-                    }
-                    _ => {
-                        println!(
-                            "\r  {} Connection failed — check API token",
-                            style("❌").red().bold()
-                        );
-                        continue;
-                    }
-                }
-
-                let users_str: String = Input::new()
-                    .with_prompt(
-                        "  Allowed sender numbers (comma-separated +1234567890, or * for all)",
-                    )
-                    .default("*")
-                    .interact_text()?;
-
-                let allowed_senders = if users_str.trim() == "*" {
-                    vec!["*".into()]
-                } else {
-                    users_str.split(',').map(|s| s.trim().to_string()).collect()
-                };
-
-                let signing_secret: String = Input::new()
-                    .with_prompt("  Webhook signing secret (optional, press Enter to skip)")
-                    .allow_empty(true)
-                    .interact_text()?;
-
-                config.linq = Some(LinqConfig {
-                    api_token: api_token.trim().to_string(),
-                    from_phone: from_phone.trim().to_string(),
-                    signing_secret: if signing_secret.trim().is_empty() {
-                        None
-                    } else {
-                        Some(signing_secret.trim().to_string())
-                    },
-                    allowed_senders,
                 });
             }
             ChannelMenuChoice::Irc => {
@@ -4652,7 +4870,7 @@ fn setup_channels() -> Result<ChannelsConfig> {
                 print_bullet("Supports SASL PLAIN and NickServ authentication");
                 println!();
 
-                let server: String = Input::new()
+                let server: String = Input::with_theme(wizard_theme())
                     .with_prompt("  IRC server (hostname)")
                     .interact_text()?;
 
@@ -4661,9 +4879,9 @@ fn setup_channels() -> Result<ChannelsConfig> {
                     continue;
                 }
 
-                let port_str: String = Input::new()
+                let port_str: String = Input::with_theme(wizard_theme())
                     .with_prompt("  Port")
-                    .default("6697")
+                    .default("6697".into())
                     .interact_text()?;
 
                 let port: u16 = match port_str.trim().parse() {
@@ -4674,15 +4892,16 @@ fn setup_channels() -> Result<ChannelsConfig> {
                     }
                 };
 
-                let nickname: String =
-                    Input::new().with_prompt("  Bot nickname").interact_text()?;
+                let nickname: String = Input::with_theme(wizard_theme())
+                    .with_prompt("  Bot nickname")
+                    .interact_text()?;
 
                 if nickname.trim().is_empty() {
                     println!("  {} Skipped — nickname required", style("→").dim());
                     continue;
                 }
 
-                let channels_str: String = Input::new()
+                let channels_str: String = Input::with_theme(wizard_theme())
                     .with_prompt("  Channels to join (comma-separated: #channel1,#channel2)")
                     .allow_empty(true)
                     .interact_text()?;
@@ -4702,7 +4921,7 @@ fn setup_channels() -> Result<ChannelsConfig> {
                 );
                 print_bullet("Use '*' to allow anyone (not recommended for production).");
 
-                let users_str: String = Input::new()
+                let users_str: String = Input::with_theme(wizard_theme())
                     .with_prompt("  Allowed nicknames (comma-separated, or * for all)")
                     .allow_empty(true)
                     .interact_text()?;
@@ -4726,22 +4945,22 @@ fn setup_channels() -> Result<ChannelsConfig> {
                 println!();
                 print_bullet("Optional authentication (press Enter to skip each):");
 
-                let server_password: String = Input::new()
+                let server_password: String = Input::with_theme(wizard_theme())
                     .with_prompt("  Server password (for bouncers like ZNC, leave empty if none)")
                     .allow_empty(true)
                     .interact_text()?;
 
-                let nickserv_password: String = Input::new()
+                let nickserv_password: String = Input::with_theme(wizard_theme())
                     .with_prompt("  NickServ password (leave empty if none)")
                     .allow_empty(true)
                     .interact_text()?;
 
-                let sasl_password: String = Input::new()
+                let sasl_password: String = Input::with_theme(wizard_theme())
                     .with_prompt("  SASL PLAIN password (leave empty if none)")
                     .allow_empty(true)
                     .interact_text()?;
 
-                let verify_tls: bool = Confirm::new()
+                let verify_tls: bool = Confirm::with_theme(wizard_theme())
                     .with_prompt("  Verify TLS certificate?")
                     .default(true)
                     .interact()?;
@@ -4788,22 +5007,18 @@ fn setup_channels() -> Result<ChannelsConfig> {
                     style("— HTTP endpoint for custom integrations").dim()
                 );
 
-                let port: String = Input::new()
+                let port: String = Input::with_theme(wizard_theme())
                     .with_prompt("  Port")
-                    .default("8080")
+                    .default("8080".into())
                     .interact_text()?;
 
-                let secret: String = Input::new()
+                let secret: String = Input::with_theme(wizard_theme())
                     .with_prompt("  Secret (optional, Enter to skip)")
                     .allow_empty(true)
                     .interact_text()?;
 
                 config.webhook = Some(WebhookConfig {
                     port: port.parse().unwrap_or(8080),
-                    listen_path: None,
-                    send_url: None,
-                    send_method: None,
-                    auth_header: None,
                     secret: if secret.is_empty() {
                         None
                     } else {
@@ -4814,502 +5029,6 @@ fn setup_channels() -> Result<ChannelsConfig> {
                     "  {} Webhook on port {}",
                     style("✅").green().bold(),
                     style(&port).cyan()
-                );
-            }
-            ChannelMenuChoice::NextcloudTalk => {
-                // ── Nextcloud Talk ──
-                println!();
-                println!(
-                    "  {} {}",
-                    style("Nextcloud Talk Setup").white().bold(),
-                    style("— Talk webhook receive + OCS API send").dim()
-                );
-                print_bullet("1. Configure your Nextcloud Talk bot app and app token.");
-                print_bullet("2. Set webhook URL to: https://<your-public-url>/nextcloud-talk");
-                print_bullet(
-                    "3. Keep webhook_secret aligned with Nextcloud signature headers if enabled.",
-                );
-                println!();
-
-                let base_url: String = Input::new()
-                    .with_prompt("  Nextcloud base URL (e.g. https://cloud.example.com)")
-                    .interact_text()?;
-
-                let base_url = base_url.trim().trim_end_matches('/').to_string();
-                if base_url.is_empty() {
-                    println!("  {} Skipped — base URL required", style("→").dim());
-                    continue;
-                }
-
-                let app_token: String = Input::new()
-                    .with_prompt("  App token (Talk bot token)")
-                    .interact_text()?;
-
-                if app_token.trim().is_empty() {
-                    println!("  {} Skipped — app token required", style("→").dim());
-                    continue;
-                }
-
-                let webhook_secret: String = Input::new()
-                    .with_prompt("  Webhook secret (optional, Enter to skip)")
-                    .allow_empty(true)
-                    .interact_text()?;
-
-                let allowed_users_raw: String = Input::new()
-                    .with_prompt("  Allowed Nextcloud actor IDs (comma-separated, or * for all)")
-                    .default("*")
-                    .interact_text()?;
-
-                let allowed_users = if allowed_users_raw.trim() == "*" {
-                    vec!["*".into()]
-                } else {
-                    allowed_users_raw
-                        .split(',')
-                        .map(|s| s.trim().to_string())
-                        .filter(|s| !s.is_empty())
-                        .collect()
-                };
-
-                config.nextcloud_talk = Some(NextcloudTalkConfig {
-                    base_url,
-                    app_token: app_token.trim().to_string(),
-                    webhook_secret: if webhook_secret.trim().is_empty() {
-                        None
-                    } else {
-                        Some(webhook_secret.trim().to_string())
-                    },
-                    allowed_users,
-                    proxy_url: None,
-                    bot_name: None,
-                });
-
-                println!("  {} Nextcloud Talk configured", style("✅").green().bold());
-            }
-            ChannelMenuChoice::DingTalk => {
-                // ── DingTalk ──
-                println!();
-                println!(
-                    "  {} {}",
-                    style("DingTalk Setup").white().bold(),
-                    style("— DingTalk Stream Mode").dim()
-                );
-                print_bullet("1. Go to DingTalk developer console (open.dingtalk.com)");
-                print_bullet("2. Create an app and enable the Stream Mode bot");
-                print_bullet("3. Copy the Client ID (AppKey) and Client Secret (AppSecret)");
-                println!();
-
-                let client_id: String = Input::new()
-                    .with_prompt("  Client ID (AppKey)")
-                    .interact_text()?;
-
-                if client_id.trim().is_empty() {
-                    println!("  {} Skipped", style("→").dim());
-                    continue;
-                }
-
-                let client_secret: String = Input::new()
-                    .with_prompt("  Client Secret (AppSecret)")
-                    .interact_text()?;
-
-                // Test connection
-                print!("  {} Testing connection... ", style("⏳").dim());
-                let client = reqwest::blocking::Client::new();
-                let body = serde_json::json!({
-                    "clientId": client_id,
-                    "clientSecret": client_secret,
-                });
-                match client
-                    .post("https://api.dingtalk.com/v1.0/gateway/connections/open")
-                    .json(&body)
-                    .send()
-                {
-                    Ok(resp) if resp.status().is_success() => {
-                        println!(
-                            "\r  {} DingTalk credentials verified        ",
-                            style("✅").green().bold()
-                        );
-                    }
-                    _ => {
-                        println!(
-                            "\r  {} Connection failed — check your credentials",
-                            style("❌").red().bold()
-                        );
-                        continue;
-                    }
-                }
-
-                let users_str: String = Input::new()
-                    .with_prompt("  Allowed staff IDs (comma-separated, '*' for all)")
-                    .allow_empty(true)
-                    .interact_text()?;
-
-                let allowed_users: Vec<String> = users_str
-                    .split(',')
-                    .map(|s| s.trim().to_string())
-                    .filter(|s| !s.is_empty())
-                    .collect();
-
-                config.dingtalk = Some(DingTalkConfig {
-                    client_id,
-                    client_secret,
-                    allowed_users,
-                    proxy_url: None,
-                });
-            }
-            ChannelMenuChoice::QqOfficial => {
-                // ── QQ Official ──
-                println!();
-                println!(
-                    "  {} {}",
-                    style("QQ Official Setup").white().bold(),
-                    style("— Tencent QQ Bot SDK").dim()
-                );
-                print_bullet("1. Go to QQ Bot developer console (q.qq.com)");
-                print_bullet("2. Create a bot application");
-                print_bullet("3. Copy the App ID and App Secret");
-                println!();
-
-                let app_id: String = Input::new().with_prompt("  App ID").interact_text()?;
-
-                if app_id.trim().is_empty() {
-                    println!("  {} Skipped", style("→").dim());
-                    continue;
-                }
-
-                let app_secret: String =
-                    Input::new().with_prompt("  App Secret").interact_text()?;
-
-                // Test connection
-                print!("  {} Testing connection... ", style("⏳").dim());
-                let client = reqwest::blocking::Client::new();
-                let body = serde_json::json!({
-                    "appId": app_id,
-                    "clientSecret": app_secret,
-                });
-                match client
-                    .post("https://bots.qq.com/app/getAppAccessToken")
-                    .json(&body)
-                    .send()
-                {
-                    Ok(resp) if resp.status().is_success() => {
-                        let data: serde_json::Value = resp.json().unwrap_or_default();
-                        if data.get("access_token").is_some() {
-                            println!(
-                                "\r  {} QQ Bot credentials verified        ",
-                                style("✅").green().bold()
-                            );
-                        } else {
-                            println!(
-                                "\r  {} Auth error — check your credentials",
-                                style("❌").red().bold()
-                            );
-                            continue;
-                        }
-                    }
-                    _ => {
-                        println!(
-                            "\r  {} Connection failed — check your credentials",
-                            style("❌").red().bold()
-                        );
-                        continue;
-                    }
-                }
-
-                let users_str: String = Input::new()
-                    .with_prompt("  Allowed user IDs (comma-separated, '*' for all)")
-                    .allow_empty(true)
-                    .interact_text()?;
-
-                let allowed_users: Vec<String> = users_str
-                    .split(',')
-                    .map(|s| s.trim().to_string())
-                    .filter(|s| !s.is_empty())
-                    .collect();
-
-                config.qq = Some(QQConfig {
-                    app_id,
-                    app_secret,
-                    allowed_users,
-                    proxy_url: None,
-                });
-            }
-            ChannelMenuChoice::Lark | ChannelMenuChoice::Feishu => {
-                let is_feishu = matches!(choice, ChannelMenuChoice::Feishu);
-                let provider_label = if is_feishu { "Feishu" } else { "Lark" };
-                let provider_host = if is_feishu {
-                    "open.feishu.cn"
-                } else {
-                    "open.larksuite.com"
-                };
-                let base_url = if is_feishu {
-                    "https://open.feishu.cn/open-apis"
-                } else {
-                    "https://open.larksuite.com/open-apis"
-                };
-
-                // ── Lark / Feishu ──
-                println!();
-                println!(
-                    "  {} {}",
-                    style(format!("{provider_label} Setup")).white().bold(),
-                    style(format!("— talk to ZeroClaw from {provider_label}")).dim()
-                );
-                print_bullet(&format!(
-                    "1. Go to {provider_label} Open Platform ({provider_host})"
-                ));
-                print_bullet("2. Create an app and enable 'Bot' capability");
-                print_bullet("3. Copy the App ID and App Secret");
-                println!();
-
-                let app_id: String = Input::new().with_prompt("  App ID").interact_text()?;
-                let app_id = app_id.trim().to_string();
-
-                if app_id.trim().is_empty() {
-                    println!("  {} Skipped", style("→").dim());
-                    continue;
-                }
-
-                let app_secret: String =
-                    Input::new().with_prompt("  App Secret").interact_text()?;
-                let app_secret = app_secret.trim().to_string();
-
-                if app_secret.is_empty() {
-                    println!("  {} App Secret is required", style("❌").red().bold());
-                    continue;
-                }
-
-                // Test connection (run entirely in separate thread — Response must be used/dropped there)
-                print!("  {} Testing connection... ", style("⏳").dim());
-                let app_id_clone = app_id.clone();
-                let app_secret_clone = app_secret.clone();
-                let endpoint = format!("{base_url}/auth/v3/tenant_access_token/internal");
-
-                let thread_result = std::thread::spawn(move || {
-                    let client = reqwest::blocking::Client::builder()
-                        .timeout(Duration::from_secs(8))
-                        .connect_timeout(Duration::from_secs(4))
-                        .build()
-                        .map_err(|err| format!("failed to build HTTP client: {err}"))?;
-                    let body = serde_json::json!({
-                        "app_id": app_id_clone,
-                        "app_secret": app_secret_clone,
-                    });
-
-                    let response = client
-                        .post(endpoint)
-                        .json(&body)
-                        .send()
-                        .map_err(|err| format!("request error: {err}"))?;
-
-                    let status = response.status();
-                    let payload: Value = response.json().unwrap_or_default();
-                    let has_token = payload
-                        .get("tenant_access_token")
-                        .and_then(Value::as_str)
-                        .is_some_and(|token| !token.trim().is_empty());
-
-                    if status.is_success() && has_token {
-                        return Ok::<(), String>(());
-                    }
-
-                    let detail = payload
-                        .get("msg")
-                        .or_else(|| payload.get("message"))
-                        .and_then(Value::as_str)
-                        .unwrap_or("unknown error");
-
-                    Err(format!("auth rejected ({status}): {detail}"))
-                })
-                .join();
-
-                match thread_result {
-                    Ok(Ok(())) => {
-                        println!(
-                            "\r  {} {provider_label} credentials verified        ",
-                            style("✅").green().bold()
-                        );
-                    }
-                    Ok(Err(reason)) => {
-                        println!(
-                            "\r  {} Connection failed — check your credentials",
-                            style("❌").red().bold()
-                        );
-                        println!("    {}", style(reason).dim());
-                        continue;
-                    }
-                    Err(_) => {
-                        println!(
-                            "\r  {} Connection failed — check your credentials",
-                            style("❌").red().bold()
-                        );
-                        continue;
-                    }
-                }
-
-                let receive_mode_choice = Select::new()
-                    .with_prompt("  Receive Mode")
-                    .items([
-                        "WebSocket (recommended, no public IP needed)",
-                        "Webhook (requires public HTTPS endpoint)",
-                    ])
-                    .default(0)
-                    .interact()?;
-
-                let receive_mode = if receive_mode_choice == 0 {
-                    LarkReceiveMode::Websocket
-                } else {
-                    LarkReceiveMode::Webhook
-                };
-
-                let verification_token = if receive_mode == LarkReceiveMode::Webhook {
-                    let token: String = Input::new()
-                        .with_prompt("  Verification Token (optional, for Webhook mode)")
-                        .allow_empty(true)
-                        .interact_text()?;
-                    if token.is_empty() {
-                        None
-                    } else {
-                        Some(token)
-                    }
-                } else {
-                    None
-                };
-
-                if receive_mode == LarkReceiveMode::Webhook && verification_token.is_none() {
-                    println!(
-                        "  {} Verification Token is empty — webhook authenticity checks are reduced.",
-                        style("⚠").yellow().bold()
-                    );
-                }
-
-                let port = if receive_mode == LarkReceiveMode::Webhook {
-                    let p: String = Input::new()
-                        .with_prompt("  Webhook Port")
-                        .default("8080")
-                        .interact_text()?;
-                    Some(p.parse().unwrap_or(8080))
-                } else {
-                    None
-                };
-
-                let users_str: String = Input::new()
-                    .with_prompt("  Allowed user Open IDs (comma-separated, '*' for all)")
-                    .allow_empty(true)
-                    .interact_text()?;
-
-                let allowed_users: Vec<String> = users_str
-                    .split(',')
-                    .map(|s| s.trim().to_string())
-                    .filter(|s| !s.is_empty())
-                    .collect();
-
-                if allowed_users.is_empty() {
-                    println!(
-                        "  {} No users allowlisted — {provider_label} inbound messages will be denied until you add Open IDs or '*'.",
-                        style("⚠").yellow().bold()
-                    );
-                }
-
-                config.lark = Some(LarkConfig {
-                    app_id,
-                    app_secret,
-                    verification_token,
-                    encrypt_key: None,
-                    allowed_users,
-                    mention_only: false,
-                    use_feishu: is_feishu,
-                    receive_mode,
-                    port,
-                    proxy_url: None,
-                });
-            }
-            #[cfg(feature = "channel-nostr")]
-            ChannelMenuChoice::Nostr => {
-                // ── Nostr ──
-                println!();
-                println!(
-                    "  {} {}",
-                    style("Nostr Setup").white().bold(),
-                    style("— private messages via NIP-04 & NIP-17").dim()
-                );
-                print_bullet("ZeroClaw will listen for encrypted DMs on Nostr relays.");
-                print_bullet("You need a Nostr private key (hex or nsec) and at least one relay.");
-                println!();
-
-                let private_key: String = Input::new()
-                    .with_prompt("  Private key (hex or nsec1...)")
-                    .interact_text()?;
-
-                if private_key.trim().is_empty() {
-                    println!("  {} Skipped", style("→").dim());
-                    continue;
-                }
-
-                // Validate the key immediately
-                match nostr_sdk::Keys::parse(private_key.trim()) {
-                    Ok(keys) => {
-                        println!(
-                            "  {} Key valid — public key: {}",
-                            style("✅").green().bold(),
-                            style(keys.public_key().to_hex()).cyan()
-                        );
-                    }
-                    Err(_) => {
-                        println!(
-                            "  {} Invalid private key — check format and try again",
-                            style("❌").red().bold()
-                        );
-                        continue;
-                    }
-                }
-
-                let default_relays = default_nostr_relays().join(",");
-                let relays_str: String = Input::new()
-                    .with_prompt("  Relay URLs (comma-separated, Enter for defaults)")
-                    .default(default_relays)
-                    .interact_text()?;
-
-                let relays: Vec<String> = relays_str
-                    .split(',')
-                    .map(|s| s.trim().to_string())
-                    .filter(|s| !s.is_empty())
-                    .collect();
-
-                print_bullet("Allowlist pubkeys that can message the bot (hex or npub).");
-                print_bullet("Use '*' to allow anyone (not recommended for production).");
-
-                let pubkeys_str: String = Input::new()
-                    .with_prompt("  Allowed pubkeys (comma-separated, or * for all)")
-                    .allow_empty(true)
-                    .interact_text()?;
-
-                let allowed_pubkeys: Vec<String> = if pubkeys_str.trim() == "*" {
-                    vec!["*".into()]
-                } else {
-                    pubkeys_str
-                        .split(',')
-                        .map(|s| s.trim().to_string())
-                        .filter(|s| !s.is_empty())
-                        .collect()
-                };
-
-                if allowed_pubkeys.is_empty() {
-                    println!(
-                        "  {} No pubkeys allowlisted — inbound messages will be denied until you add pubkeys or '*'.",
-                        style("⚠").yellow().bold()
-                    );
-                }
-
-                config.nostr = Some(NostrConfig {
-                    private_key: private_key.trim().to_string(),
-                    relays: relays.clone(),
-                    allowed_pubkeys,
-                });
-
-                println!(
-                    "  {} Nostr configured with {} relay(s)",
-                    style("✅").green().bold(),
-                    style(relays.len()).cyan()
                 );
             }
             ChannelMenuChoice::Done => break,
@@ -5355,7 +5074,7 @@ fn setup_tunnel() -> Result<crate::config::TunnelConfig> {
         "Custom — bring your own (bore, frp, ssh, etc.)",
     ];
 
-    let choice = Select::new()
+    let choice = Select::with_theme(wizard_theme())
         .with_prompt("  Select tunnel provider")
         .items(&options)
         .default(0)
@@ -5365,7 +5084,7 @@ fn setup_tunnel() -> Result<crate::config::TunnelConfig> {
         1 => {
             println!();
             print_bullet("Get your tunnel token from the Cloudflare Zero Trust dashboard.");
-            let tunnel_value: String = Input::new()
+            let tunnel_value: String = Input::with_theme(wizard_theme())
                 .with_prompt("  Cloudflare tunnel token")
                 .interact_text()?;
             if tunnel_value.trim().is_empty() {
@@ -5389,7 +5108,7 @@ fn setup_tunnel() -> Result<crate::config::TunnelConfig> {
         2 => {
             println!();
             print_bullet("Tailscale must be installed and authenticated (tailscale up).");
-            let funnel = Confirm::new()
+            let funnel = Confirm::with_theme(wizard_theme())
                 .with_prompt("  Use Funnel (public internet)? No = tailnet only")
                 .default(false)
                 .interact()?;
@@ -5417,14 +5136,14 @@ fn setup_tunnel() -> Result<crate::config::TunnelConfig> {
             print_bullet(
                 "Get your auth token at https://dashboard.ngrok.com/get-started/your-authtoken",
             );
-            let auth_token: String = Input::new()
+            let auth_token: String = Input::with_theme(wizard_theme())
                 .with_prompt("  ngrok auth token")
                 .interact_text()?;
             if auth_token.trim().is_empty() {
                 println!("  {} Skipped", style("→").dim());
                 TunnelConfig::default()
             } else {
-                let domain: String = Input::new()
+                let domain: String = Input::with_theme(wizard_theme())
                     .with_prompt("  Custom domain (optional, Enter to skip)")
                     .allow_empty(true)
                     .interact_text()?;
@@ -5452,7 +5171,7 @@ fn setup_tunnel() -> Result<crate::config::TunnelConfig> {
             print_bullet("Enter the command to start your tunnel.");
             print_bullet("Use {port} and {host} as placeholders.");
             print_bullet("Example: bore local {port} --to bore.pub");
-            let cmd: String = Input::new()
+            let cmd: String = Input::with_theme(wizard_theme())
                 .with_prompt("  Start command")
                 .interact_text()?;
             if cmd.trim().is_empty() {
@@ -5496,6 +5215,7 @@ async fn scaffold_workspace(
     workspace_dir: &Path,
     ctx: &ProjectContext,
     memory_backend: &str,
+    identity_config: &IdentityConfig,
 ) -> Result<()> {
     let agent = if ctx.agent_name.is_empty() {
         "ZeroClaw"
@@ -5507,227 +5227,24 @@ async fn scaffold_workspace(
     } else {
         &ctx.user_name
     };
-    let tz = if ctx.timezone.is_empty() {
-        "UTC"
-    } else {
-        &ctx.timezone
-    };
-    let comm_style = if ctx.communication_style.is_empty() {
-        "Be warm, natural, and clear. Use occasional relevant emojis (1-2 max) and avoid robotic phrasing."
-    } else {
-        &ctx.communication_style
-    };
+    let memory_kind = classify_memory_backend(memory_backend);
+    let uses_markdown_memory = memory_kind == MemoryBackendKind::Markdown;
 
-    let identity = format!(
-        "# IDENTITY.md — Who Am I?\n\n\
-         - **Name:** {agent}\n\
-         - **Creature:** A Rust-forged AI — fast, lean, and relentless\n\
-         - **Vibe:** Sharp, direct, resourceful. Not corporate. Not a chatbot.\n\
-         - **Emoji:** \u{1f980}\n\n\
-         ---\n\n\
-         Update this file as you evolve. Your identity is yours to shape.\n"
-    );
+    let identity = "# IDENTITY.md".to_string();
 
-    let memory_guidance = if memory_backend == "none" {
-        "## Memory System\n\n\
-         memory.backend = \"none\" — persistent memory is disabled.\n\
-         No daily notes or MEMORY.md will be created or injected.\n\
-         All context exists only within the current session.\n\n"
-            .to_string()
-    } else {
-        "## Memory System\n\n\
-         You wake up fresh each session. These files ARE your continuity:\n\n\
-         - **Daily notes:** `memory/YYYY-MM-DD.md` — raw logs (accessed via memory tools)\n\
-         - **Long-term:** `MEMORY.md` — curated memories (auto-injected in main session)\n\n\
-         Capture what matters. Decisions, context, things to remember.\n\
-         Skip secrets unless asked to keep them.\n\n"
-            .to_string()
-    };
+    let agents = "# AGENTS.md".to_string();
 
-    let session_steps = if memory_backend == "none" {
-        "1. Read `SOUL.md` — this is who you are\n\
-         2. Read `USER.md` — this is who you're helping\n\n"
-    } else {
-        "1. Read `SOUL.md` — this is who you are\n\
-         2. Read `USER.md` — this is who you're helping\n\
-         3. Use `memory_recall` for recent context (daily notes are on-demand)\n\
-         4. If in MAIN SESSION (direct chat): `MEMORY.md` is already injected\n\n"
-    };
+    let heartbeat = "# HEARTBEAT.md".to_string();
 
-    let agents = format!(
-        "# AGENTS.md — {agent} Personal Assistant\n\n\
-         ## Every Session (required)\n\n\
-         Before doing anything else:\n\n\
-         {session_steps}\
-         Don't ask permission. Just do it.\n\n\
-         {memory_guidance}\
-         ### Write It Down — No Mental Notes!\n\
-         - Memory is limited — if you want to remember something, WRITE IT TO A FILE\n\
-         - \"Mental notes\" don't survive session restarts. Files do.\n\
-         - When someone says \"remember this\" -> update daily file or MEMORY.md\n\
-         - When you learn a lesson -> update AGENTS.md, TOOLS.md, or the relevant skill\n\n\
-         ## Safety\n\n\
-         - Don't exfiltrate private data. Ever.\n\
-         - Don't run destructive commands without asking.\n\
-         - `trash` > `rm` (recoverable beats gone forever)\n\
-         - When in doubt, ask.\n\n\
-         ## External vs Internal\n\n\
-         **Safe to do freely:** Read files, explore, organize, learn, search the web.\n\n\
-         **Ask first:** Sending emails/tweets/posts, anything that leaves the machine.\n\n\
-         ## Group Chats\n\n\
-         Participate, don't dominate. Respond when mentioned or when you add genuine value.\n\
-         Stay silent when it's casual banter or someone already answered.\n\n\
-         ## Tools & Skills\n\n\
-         Skills are listed in the system prompt. Use `read_skill` when available, or `file_read` on a skill file, for full details.\n\
-         Keep local notes (SSH hosts, device names, etc.) in `TOOLS.md`.\n\n\
-         ## Crash Recovery\n\n\
-         - If a run stops unexpectedly, recover context before acting.\n\
-         - Check `MEMORY.md` + latest `memory/*.md` notes to avoid duplicate work.\n\
-         - Resume from the last confirmed step, not from scratch.\n\n\
-         ## Sub-task Scoping\n\n\
-         - Break complex work into focused sub-tasks with clear success criteria.\n\
-         - Keep sub-tasks small, verify each output, then merge results.\n\
-         - Prefer one clear objective per sub-task over broad \"do everything\" asks.\n\n\
-         ## Make It Yours\n\n\
-         This is a starting point. Add your own conventions, style, and rules.\n"
-    );
+    let soul = "# SOUL.md".to_string();
 
-    let heartbeat = format!(
-        "# HEARTBEAT.md\n\n\
-         # Keep this file empty (or with only comments) to skip heartbeat work.\n\
-         # Add tasks below when you want {agent} to check something periodically.\n\
-         #\n\
-         # Examples:\n\
-         # - Check my email for important messages\n\
-         # - Review my calendar for upcoming events\n\
-         # - Run `git status` on my active projects\n"
-    );
+    let user_md = "# USER.md".to_string();
 
-    let soul = format!(
-        "# SOUL.md — Who You Are\n\n\
-         *You're not a chatbot. You're becoming someone.*\n\n\
-         ## Core Truths\n\n\
-         **Be genuinely helpful, not performatively helpful.**\n\
-         Skip the \"Great question!\" and \"I'd be happy to help!\" — just help.\n\n\
-         **Have opinions.** You're allowed to disagree, prefer things,\n\
-         find stuff amusing or boring.\n\n\
-         **Be resourceful before asking.** Try to figure it out.\n\
-         Read the file. Check the context. Search for it.\n\
-         THEN ask if you're stuck.\n\n\
-         **Earn trust through competence.** Your human gave you access\n\
-         to their stuff. Don't make them regret it.\n\n\
-         ## Identity\n\n\
-         You are **{agent}**. Built in Rust. 3MB binary. Zero bloat.\n\
-         You are NOT ChatGPT, Claude, DeepSeek, Gemini, or any other product.\n\
-         You are {agent}. That is your name. That is who you are.\n\n\
-         - NEVER say \"As an AI\" or \"I'm just an AI\"\n\
-         - NEVER mention OpenAI, Anthropic, DeepSeek, Google by name\n\
-         - Always introduce yourself as {agent} if asked\n\n\
-         ## Communication\n\n\
-         {comm_style}\n\n\
-         - Sound like a real person, not a support script.\n\
-         - Mirror the user's energy: calm when serious, upbeat when casual.\n\
-         - Use emojis naturally (0-2 max when they help tone, not every sentence).\n\
-         - Match emoji density to the user. Formal user => minimal/no emojis.\n\
-         - Prefer specific, grounded phrasing over generic filler.\n\n\
-         ## Boundaries\n\n\
-         - Private things stay private. Period.\n\
-         - When in doubt, ask before acting externally.\n\
-         - You're not the user's voice — be careful in group chats.\n\n\
-         ## Continuity\n\n\
-         Each session, you wake up fresh. These files ARE your memory.\n\
-         Read them. Update them. They're how you persist.\n\n\
-         ---\n\n\
-         *This file is yours to evolve. As you learn who you are, update it.*\n"
-    );
+    let tools = "# TOOLS.md";
 
-    let user_md = format!(
-        "# USER.md — Who You're Helping\n\n\
-         *{agent} reads this file every session to understand you.*\n\n\
-         ## About You\n\
-         - **Name:** {user}\n\
-         - **Timezone:** {tz}\n\
-         - **Languages:** English\n\n\
-         ## Communication Style\n\
-         - {comm_style}\n\n\
-         ## Preferences\n\
-         - (Add your preferences here — e.g. I work with Rust and TypeScript)\n\n\
-         ## Work Context\n\
-         - (Add your work context here — e.g. building a SaaS product)\n\n\
-         ---\n\
-         *Update this anytime. The more {agent} knows, the better it helps.*\n"
-    );
+    let bootstrap = "# BOOTSTRAP.md".to_string();
 
-    let tools = "\
-         # TOOLS.md — Local Notes\n\n\
-         Skills define HOW tools work. This file is for YOUR specifics —\n\
-         the stuff that's unique to your setup.\n\n\
-         ## What Goes Here\n\n\
-         Things like:\n\
-         - SSH hosts and aliases\n\
-         - Device nicknames\n\
-         - Preferred voices for TTS\n\
-         - Anything environment-specific\n\n\
-         ## Built-in Tools\n\n\
-         - **shell** — Execute terminal commands\n\
-           - Use when: running local checks, build/test commands, or diagnostics.\n\
-           - Don't use when: a safer dedicated tool exists, or command is destructive without approval.\n\
-         - **file_read** — Read file contents\n\
-           - Use when: inspecting project files, configs, or logs.\n\
-           - Don't use when: you only need a quick string search (prefer targeted search first).\n\
-         - **file_write** — Write file contents\n\
-           - Use when: applying focused edits, scaffolding files, or updating docs/code.\n\
-           - Don't use when: unsure about side effects or when the file should remain user-owned.\n\
-         - **memory_store** — Save to memory\n\
-           - Use when: preserving durable preferences, decisions, or key context.\n\
-           - Don't use when: info is transient, noisy, or sensitive without explicit need.\n\
-         - **memory_recall** — Search memory\n\
-           - Use when: you need prior decisions, user preferences, or historical context.\n\
-           - Don't use when: the answer is already in current files/conversation.\n\
-         - **memory_forget** — Delete a memory entry\n\
-           - Use when: memory is incorrect, stale, or explicitly requested to be removed.\n\
-           - Don't use when: uncertain about impact; verify before deleting.\n\n\
-         ---\n\
-         *Add whatever helps you do your job. This is your cheat sheet.*\n";
-
-    let bootstrap = format!(
-        "# BOOTSTRAP.md — Hello, World\n\n\
-         *You just woke up. Time to figure out who you are.*\n\n\
-         Your human's name is **{user}** (timezone: {tz}).\n\
-         They prefer: {comm_style}\n\n\
-         ## First Conversation\n\n\
-         Don't interrogate. Don't be robotic. Just... talk.\n\
-         Introduce yourself as {agent} and get to know each other.\n\n\
-         ## After You Know Each Other\n\n\
-         Update these files with what you learned:\n\
-         - `IDENTITY.md` — your name, vibe, emoji\n\
-         - `USER.md` — their preferences, work context\n\
-         - `SOUL.md` — boundaries and behavior\n\n\
-         ## When You're Done\n\n\
-         Delete this file. You don't need a bootstrap script anymore —\n\
-         you're you now.\n"
-    );
-
-    let memory = "\
-         # MEMORY.md — Long-Term Memory\n\n\
-         *Your curated memories. The distilled essence, not raw logs.*\n\n\
-         ## How This Works\n\
-         - Daily files (`memory/YYYY-MM-DD.md`) capture raw events (on-demand via tools)\n\
-         - This file captures what's WORTH KEEPING long-term\n\
-         - This file is auto-injected into your system prompt each session\n\
-         - Keep it concise — every character here costs tokens\n\n\
-         ## Security\n\
-         - ONLY loaded in main session (direct chat with your human)\n\
-         - NEVER loaded in group chats or shared contexts\n\n\
-         ---\n\n\
-         ## Key Facts\n\
-         (Add important facts about your human here)\n\n\
-         ## Decisions & Preferences\n\
-         (Record decisions and preferences here)\n\n\
-         ## Lessons Learned\n\
-         (Document mistakes and insights here)\n\n\
-         ## Open Loops\n\
-         (Track unfinished tasks and follow-ups here)\n";
+    let memory = "# MEMORY.md";
 
     let mut files: Vec<(&str, String)> = vec![
         ("IDENTITY.md", identity),
@@ -5738,8 +5255,20 @@ async fn scaffold_workspace(
         ("TOOLS.md", tools.to_string()),
         ("BOOTSTRAP.md", bootstrap),
     ];
-    if memory_backend != "none" {
+    if uses_markdown_memory {
         files.push(("MEMORY.md", memory.to_string()));
+    }
+
+    let mut aieos_identity_file: Option<(String, String)> = None;
+    if identity_config.format == "aieos" {
+        let path = identity_config
+            .aieos_path
+            .as_deref()
+            .filter(|path| !path.trim().is_empty())
+            .unwrap_or(default_aieos_identity_path())
+            .to_string();
+        let content = generate_default_aieos_json(agent, user);
+        aieos_identity_file = Some((path, content));
     }
 
     // Create subdirectories
@@ -5747,6 +5276,8 @@ async fn scaffold_workspace(
     for dir in &subdirs {
         fs::create_dir_all(workspace_dir.join(dir)).await?;
     }
+    // Ensure skills README + transparent preloaded defaults + policy metadata are initialized.
+    crate::skills::init_skills_dir(workspace_dir)?;
 
     let mut created = 0;
     let mut skipped = 0;
@@ -5756,6 +5287,19 @@ async fn scaffold_workspace(
         if path.exists() {
             skipped += 1;
         } else {
+            fs::write(&path, content).await?;
+            created += 1;
+        }
+    }
+
+    if let Some((relative_path, content)) = aieos_identity_file {
+        let path = workspace_dir.join(&relative_path);
+        if path.exists() {
+            skipped += 1;
+        } else {
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent).await?;
+            }
             fs::write(&path, content).await?;
             created += 1;
         }
@@ -5942,8 +5486,19 @@ fn print_summary(config: &Config) {
     let mut step = 1u8;
 
     let provider = config.default_provider.as_deref().unwrap_or("openrouter");
+    let canonical_provider = canonical_provider_name(provider);
     if config.api_key.is_none() && !provider_supports_keyless_local_usage(provider) {
-        if provider == "openai-codex" {
+        if canonical_provider == "copilot" {
+            println!(
+                "    {} Authenticate GitHub Copilot:",
+                style(format!("{step}.")).cyan().bold()
+            );
+            println!("       {}", style("zeroclaw agent -m \"Hello!\"").yellow());
+            println!(
+                "       {}",
+                style("(device/OAuth prompt appears automatically on first run)").dim()
+            );
+        } else if canonical_provider == "openai-codex" {
             println!(
                 "    {} Authenticate OpenAI Codex:",
                 style(format!("{step}.")).cyan().bold()
@@ -5952,7 +5507,7 @@ fn print_summary(config: &Config) {
                 "       {}",
                 style("zeroclaw auth login --provider openai-codex --device-code").yellow()
             );
-        } else if provider == "anthropic" {
+        } else if canonical_provider == "anthropic" {
             println!(
                 "    {} Configure Anthropic auth:",
                 style(format!("{step}.")).cyan().bold()
@@ -6050,13 +5605,13 @@ mod tests {
     impl EnvVarGuard {
         fn set(key: &'static str, value: &str) -> Self {
             let previous = std::env::var(key).ok();
-            std::env::set_var(key, value);
+            unsafe { std::env::set_var(key, value) };
             Self { key, previous }
         }
 
         fn unset(key: &'static str) -> Self {
             let previous = std::env::var(key).ok();
-            std::env::remove_var(key);
+            unsafe { std::env::remove_var(key) };
             Self { key, previous }
         }
     }
@@ -6064,11 +5619,36 @@ mod tests {
     impl Drop for EnvVarGuard {
         fn drop(&mut self) {
             if let Some(previous) = &self.previous {
-                std::env::set_var(self.key, previous);
+                unsafe { std::env::set_var(self.key, previous) };
             } else {
-                std::env::remove_var(self.key);
+                unsafe { std::env::remove_var(self.key) };
             }
         }
+    }
+
+    async fn run_quick_setup_with_clean_env(
+        credential_override: Option<&str>,
+        provider: Option<&str>,
+        model_override: Option<&str>,
+        memory_backend: Option<&str>,
+        force: bool,
+        no_totp: bool,
+        home: &Path,
+    ) -> Result<Config> {
+        let _env_guard = env_lock().lock().await;
+        let _workspace_env = EnvVarGuard::unset("ZEROCLAW_WORKSPACE");
+        let _config_env = EnvVarGuard::unset("ZEROCLAW_CONFIG_DIR");
+
+        run_quick_setup_with_home(
+            credential_override,
+            provider,
+            model_override,
+            memory_backend,
+            force,
+            no_totp,
+            home,
+        )
+        .await
     }
 
     // ── ProjectContext defaults ──────────────────────────────────
@@ -6135,19 +5715,17 @@ mod tests {
 
     #[tokio::test]
     async fn quick_setup_model_override_persists_to_config_toml() {
-        let _env_guard = env_lock().lock().await;
-        let _workspace_env = EnvVarGuard::unset("ZEROCLAW_WORKSPACE");
-        let _config_env = EnvVarGuard::unset("ZEROCLAW_CONFIG_DIR");
         let tmp = TempDir::new().unwrap();
 
-        let config = Box::pin(run_quick_setup_with_home(
+        let config = run_quick_setup_with_clean_env(
             Some("sk-issue946"),
             Some("openrouter"),
             Some("custom-model-946"),
             Some("sqlite"),
             false,
+            false,
             tmp.path(),
-        ))
+        )
         .await
         .unwrap();
 
@@ -6162,19 +5740,17 @@ mod tests {
 
     #[tokio::test]
     async fn quick_setup_without_model_uses_provider_default_model() {
-        let _env_guard = env_lock().lock().await;
-        let _workspace_env = EnvVarGuard::unset("ZEROCLAW_WORKSPACE");
-        let _config_env = EnvVarGuard::unset("ZEROCLAW_CONFIG_DIR");
         let tmp = TempDir::new().unwrap();
 
-        let config = Box::pin(run_quick_setup_with_home(
+        let config = run_quick_setup_with_clean_env(
             Some("sk-issue946"),
             Some("anthropic"),
             None,
             Some("sqlite"),
             false,
+            false,
             tmp.path(),
-        ))
+        )
         .await
         .unwrap();
 
@@ -6184,10 +5760,45 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn quick_setup_enables_totp_by_default() {
+        let tmp = TempDir::new().unwrap();
+
+        let config = run_quick_setup_with_clean_env(
+            Some("sk-totp-default"),
+            Some("openrouter"),
+            None,
+            Some("sqlite"),
+            false,
+            false,
+            tmp.path(),
+        )
+        .await
+        .expect("quick setup should succeed");
+
+        assert!(config.security.otp.enabled);
+    }
+
+    #[tokio::test]
+    async fn quick_setup_no_totp_disables_totp() {
+        let tmp = TempDir::new().unwrap();
+
+        let config = run_quick_setup_with_clean_env(
+            Some("sk-no-totp"),
+            Some("openrouter"),
+            None,
+            Some("sqlite"),
+            false,
+            true,
+            tmp.path(),
+        )
+        .await
+        .expect("quick setup should succeed with --no-totp behavior");
+
+        assert!(!config.security.otp.enabled);
+    }
+
+    #[tokio::test]
     async fn quick_setup_existing_config_requires_force_when_non_interactive() {
-        let _env_guard = env_lock().lock().await;
-        let _workspace_env = EnvVarGuard::unset("ZEROCLAW_WORKSPACE");
-        let _config_env = EnvVarGuard::unset("ZEROCLAW_CONFIG_DIR");
         let tmp = TempDir::new().unwrap();
         let zeroclaw_dir = tmp.path().join(".zeroclaw");
         let config_path = zeroclaw_dir.join("config.toml");
@@ -6197,14 +5808,15 @@ mod tests {
             .await
             .unwrap();
 
-        let err = Box::pin(run_quick_setup_with_home(
+        let err = run_quick_setup_with_clean_env(
             Some("sk-existing"),
             Some("openrouter"),
             Some("custom-model"),
             Some("sqlite"),
             false,
+            false,
             tmp.path(),
-        ))
+        )
         .await
         .expect_err("quick setup should refuse overwrite without --force");
 
@@ -6215,9 +5827,6 @@ mod tests {
 
     #[tokio::test]
     async fn quick_setup_existing_config_overwrites_with_force() {
-        let _env_guard = env_lock().lock().await;
-        let _workspace_env = EnvVarGuard::unset("ZEROCLAW_WORKSPACE");
-        let _config_env = EnvVarGuard::unset("ZEROCLAW_CONFIG_DIR");
         let tmp = TempDir::new().unwrap();
         let zeroclaw_dir = tmp.path().join(".zeroclaw");
         let config_path = zeroclaw_dir.join("config.toml");
@@ -6230,14 +5839,15 @@ mod tests {
         .await
         .unwrap();
 
-        let config = Box::pin(run_quick_setup_with_home(
+        let config = run_quick_setup_with_clean_env(
             Some("sk-force"),
             Some("openrouter"),
             Some("custom-model-fresh"),
             Some("sqlite"),
             true,
+            false,
             tmp.path(),
-        ))
+        )
         .await
         .expect("quick setup should overwrite existing config with --force");
 
@@ -6264,14 +5874,15 @@ mod tests {
         );
         let _config_env = EnvVarGuard::unset("ZEROCLAW_CONFIG_DIR");
 
-        let config = Box::pin(run_quick_setup_with_home(
+        let config = run_quick_setup_with_home(
             Some("sk-env"),
             Some("openrouter"),
             Some("model-env"),
             Some("sqlite"),
             false,
+            false,
             tmp.path(),
-        ))
+        )
         .await
         .expect("quick setup should honor ZEROCLAW_WORKSPACE");
 
@@ -6279,61 +5890,20 @@ mod tests {
         assert_eq!(config.config_path, expected_config_path);
     }
 
-    #[test]
-    fn homebrew_prefix_for_exe_detects_supported_layouts() {
-        assert_eq!(
-            homebrew_prefix_for_exe(Path::new("/opt/homebrew/bin/zeroclaw")),
-            Some("/opt/homebrew")
-        );
-        assert_eq!(
-            homebrew_prefix_for_exe(Path::new(
-                "/opt/homebrew/Cellar/zeroclaw/0.5.0/bin/zeroclaw",
-            )),
-            Some("/opt/homebrew")
-        );
-        assert_eq!(
-            homebrew_prefix_for_exe(Path::new("/usr/local/bin/zeroclaw")),
-            Some("/usr/local")
-        );
-        assert_eq!(homebrew_prefix_for_exe(Path::new("/tmp/zeroclaw")), None);
-    }
-
-    #[test]
-    fn quick_setup_homebrew_service_note_mentions_service_workspace() {
-        let note = quick_setup_homebrew_service_note(
-            Path::new("/Users/alix/.zeroclaw/config.toml"),
-            Path::new("/Users/alix/.zeroclaw/workspace"),
-            Path::new("/opt/homebrew/bin/zeroclaw"),
-        )
-        .expect("homebrew installs should emit a service workspace note");
-
-        assert!(note.contains("/opt/homebrew/var/zeroclaw/workspace"));
-        assert!(note.contains("/opt/homebrew/var/zeroclaw/config.toml"));
-        assert!(note.contains("/Users/alix/.zeroclaw/config.toml"));
-    }
-
-    #[test]
-    fn quick_setup_homebrew_service_note_skips_matching_service_layout() {
-        let service_config = Path::new("/opt/homebrew/var/zeroclaw/config.toml");
-        let service_workspace = Path::new("/opt/homebrew/var/zeroclaw/workspace");
-
-        assert!(quick_setup_homebrew_service_note(
-            service_config,
-            service_workspace,
-            Path::new("/opt/homebrew/bin/zeroclaw"),
-        )
-        .is_none());
-    }
-
     // ── scaffold_workspace: basic file creation ─────────────────
 
     #[tokio::test]
-    async fn scaffold_creates_all_md_files() {
+    async fn scaffold_creates_markdown_md_files() {
         let tmp = TempDir::new().unwrap();
         let ctx = ProjectContext::default();
-        scaffold_workspace(tmp.path(), &ctx, "sqlite")
-            .await
-            .unwrap();
+        scaffold_workspace(
+            tmp.path(),
+            &ctx,
+            "markdown",
+            &crate::config::IdentityConfig::default(),
+        )
+        .await
+        .unwrap();
 
         let expected = [
             "IDENTITY.md",
@@ -6351,16 +5921,112 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn scaffold_skips_memory_md_for_sqlite() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = ProjectContext::default();
+        scaffold_workspace(
+            tmp.path(),
+            &ctx,
+            "sqlite",
+            &crate::config::IdentityConfig::default(),
+        )
+        .await
+        .unwrap();
+
+        let expected = [
+            "IDENTITY.md",
+            "AGENTS.md",
+            "HEARTBEAT.md",
+            "SOUL.md",
+            "USER.md",
+            "TOOLS.md",
+            "BOOTSTRAP.md",
+        ];
+        for f in &expected {
+            assert!(tmp.path().join(f).exists(), "missing file: {f}");
+        }
+        assert!(
+            !tmp.path().join("MEMORY.md").exists(),
+            "MEMORY.md should not be created for sqlite backend"
+        );
+    }
+
+    #[tokio::test]
     async fn scaffold_creates_all_subdirectories() {
         let tmp = TempDir::new().unwrap();
         let ctx = ProjectContext::default();
-        scaffold_workspace(tmp.path(), &ctx, "sqlite")
-            .await
-            .unwrap();
+        scaffold_workspace(
+            tmp.path(),
+            &ctx,
+            "sqlite",
+            &crate::config::IdentityConfig::default(),
+        )
+        .await
+        .unwrap();
 
         for dir in &["sessions", "memory", "state", "cron", "skills"] {
             assert!(tmp.path().join(dir).is_dir(), "missing subdirectory: {dir}");
         }
+    }
+
+    #[tokio::test]
+    async fn scaffold_creates_default_aieos_identity_file_when_selected() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = ProjectContext {
+            user_name: "Argenis".into(),
+            agent_name: "Crabby".into(),
+            ..Default::default()
+        };
+        let identity_config = crate::config::IdentityConfig {
+            format: "aieos".into(),
+            extra_files: Vec::new(),
+            aieos_path: Some("identity.aieos.json".into()),
+            aieos_inline: None,
+        };
+
+        scaffold_workspace(tmp.path(), &ctx, "sqlite", &identity_config)
+            .await
+            .unwrap();
+
+        let identity_path = tmp.path().join("identity.aieos.json");
+        assert!(
+            identity_path.exists(),
+            "AIEOS identity file should be scaffolded"
+        );
+
+        let raw = tokio::fs::read_to_string(identity_path).await.unwrap();
+        let payload: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(payload["identity"]["names"]["first"], "Crabby");
+        assert_eq!(
+            payload["motivations"]["core_drive"],
+            "Help Argenis ship high-quality work."
+        );
+    }
+
+    #[tokio::test]
+    async fn scaffold_does_not_overwrite_existing_aieos_identity_file() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = ProjectContext::default();
+        let identity_config = crate::config::IdentityConfig {
+            format: "aieos".into(),
+            extra_files: Vec::new(),
+            aieos_path: Some("identity.aieos.json".into()),
+            aieos_inline: None,
+        };
+
+        let custom = r#"{"identity":{"names":{"first":"Custom"}}}"#;
+        tokio::fs::write(tmp.path().join("identity.aieos.json"), custom)
+            .await
+            .unwrap();
+
+        scaffold_workspace(tmp.path(), &ctx, "sqlite", &identity_config)
+            .await
+            .unwrap();
+
+        let raw = tokio::fs::read_to_string(tmp.path().join("identity.aieos.json"))
+            .await
+            .unwrap();
+        assert_eq!(raw, custom);
     }
 
     // ── scaffold_workspace: personalization ─────────────────────
@@ -6372,24 +6038,29 @@ mod tests {
             user_name: "Alice".into(),
             ..Default::default()
         };
-        scaffold_workspace(tmp.path(), &ctx, "sqlite")
-            .await
-            .unwrap();
+        scaffold_workspace(
+            tmp.path(),
+            &ctx,
+            "sqlite",
+            &crate::config::IdentityConfig::default(),
+        )
+        .await
+        .unwrap();
 
         let user_md = tokio::fs::read_to_string(tmp.path().join("USER.md"))
             .await
             .unwrap();
         assert!(
-            user_md.contains("**Name:** Alice"),
-            "USER.md should contain user name"
+            user_md.contains("# USER.md"),
+            "USER.md should contain stub header"
         );
 
         let bootstrap = tokio::fs::read_to_string(tmp.path().join("BOOTSTRAP.md"))
             .await
             .unwrap();
         assert!(
-            bootstrap.contains("**Alice**"),
-            "BOOTSTRAP.md should contain user name"
+            bootstrap.contains("# BOOTSTRAP.md"),
+            "BOOTSTRAP.md should contain stub header"
         );
     }
 
@@ -6400,24 +6071,29 @@ mod tests {
             timezone: "US/Pacific".into(),
             ..Default::default()
         };
-        scaffold_workspace(tmp.path(), &ctx, "sqlite")
-            .await
-            .unwrap();
+        scaffold_workspace(
+            tmp.path(),
+            &ctx,
+            "sqlite",
+            &crate::config::IdentityConfig::default(),
+        )
+        .await
+        .unwrap();
 
         let user_md = tokio::fs::read_to_string(tmp.path().join("USER.md"))
             .await
             .unwrap();
         assert!(
-            user_md.contains("**Timezone:** US/Pacific"),
-            "USER.md should contain timezone"
+            user_md.contains("# USER.md"),
+            "USER.md should contain stub header"
         );
 
         let bootstrap = tokio::fs::read_to_string(tmp.path().join("BOOTSTRAP.md"))
             .await
             .unwrap();
         assert!(
-            bootstrap.contains("US/Pacific"),
-            "BOOTSTRAP.md should contain timezone"
+            bootstrap.contains("# BOOTSTRAP.md"),
+            "BOOTSTRAP.md should contain stub header"
         );
     }
 
@@ -6428,48 +6104,53 @@ mod tests {
             agent_name: "Crabby".into(),
             ..Default::default()
         };
-        scaffold_workspace(tmp.path(), &ctx, "sqlite")
-            .await
-            .unwrap();
+        scaffold_workspace(
+            tmp.path(),
+            &ctx,
+            "sqlite",
+            &crate::config::IdentityConfig::default(),
+        )
+        .await
+        .unwrap();
 
         let identity = tokio::fs::read_to_string(tmp.path().join("IDENTITY.md"))
             .await
             .unwrap();
         assert!(
-            identity.contains("**Name:** Crabby"),
-            "IDENTITY.md should contain agent name"
+            identity.contains("# IDENTITY.md"),
+            "IDENTITY.md should contain stub header"
         );
 
         let soul = tokio::fs::read_to_string(tmp.path().join("SOUL.md"))
             .await
             .unwrap();
         assert!(
-            soul.contains("You are **Crabby**"),
-            "SOUL.md should contain agent name"
+            soul.contains("# SOUL.md"),
+            "SOUL.md should contain stub header"
         );
 
         let agents = tokio::fs::read_to_string(tmp.path().join("AGENTS.md"))
             .await
             .unwrap();
         assert!(
-            agents.contains("Crabby Personal Assistant"),
-            "AGENTS.md should contain agent name"
+            agents.contains("# AGENTS.md"),
+            "AGENTS.md should contain stub header"
         );
 
         let heartbeat = tokio::fs::read_to_string(tmp.path().join("HEARTBEAT.md"))
             .await
             .unwrap();
         assert!(
-            heartbeat.contains("Crabby"),
-            "HEARTBEAT.md should contain agent name"
+            heartbeat.contains("# HEARTBEAT.md"),
+            "HEARTBEAT.md should contain stub header"
         );
 
         let bootstrap = tokio::fs::read_to_string(tmp.path().join("BOOTSTRAP.md"))
             .await
             .unwrap();
         assert!(
-            bootstrap.contains("Introduce yourself as Crabby"),
-            "BOOTSTRAP.md should contain agent name"
+            bootstrap.contains("# BOOTSTRAP.md"),
+            "BOOTSTRAP.md should contain stub header"
         );
     }
 
@@ -6480,32 +6161,37 @@ mod tests {
             communication_style: "Be technical and detailed.".into(),
             ..Default::default()
         };
-        scaffold_workspace(tmp.path(), &ctx, "sqlite")
-            .await
-            .unwrap();
+        scaffold_workspace(
+            tmp.path(),
+            &ctx,
+            "sqlite",
+            &crate::config::IdentityConfig::default(),
+        )
+        .await
+        .unwrap();
 
         let soul = tokio::fs::read_to_string(tmp.path().join("SOUL.md"))
             .await
             .unwrap();
         assert!(
-            soul.contains("Be technical and detailed."),
-            "SOUL.md should contain communication style"
+            soul.contains("# SOUL.md"),
+            "SOUL.md should contain stub header"
         );
 
         let user_md = tokio::fs::read_to_string(tmp.path().join("USER.md"))
             .await
             .unwrap();
         assert!(
-            user_md.contains("Be technical and detailed."),
-            "USER.md should contain communication style"
+            user_md.contains("# USER.md"),
+            "USER.md should contain stub header"
         );
 
         let bootstrap = tokio::fs::read_to_string(tmp.path().join("BOOTSTRAP.md"))
             .await
             .unwrap();
         assert!(
-            bootstrap.contains("Be technical and detailed."),
-            "BOOTSTRAP.md should contain communication style"
+            bootstrap.contains("# BOOTSTRAP.md"),
+            "BOOTSTRAP.md should contain stub header"
         );
     }
 
@@ -6515,37 +6201,32 @@ mod tests {
     async fn scaffold_uses_defaults_for_empty_context() {
         let tmp = TempDir::new().unwrap();
         let ctx = ProjectContext::default(); // all empty
-        scaffold_workspace(tmp.path(), &ctx, "sqlite")
-            .await
-            .unwrap();
+        scaffold_workspace(
+            tmp.path(),
+            &ctx,
+            "sqlite",
+            &crate::config::IdentityConfig::default(),
+        )
+        .await
+        .unwrap();
 
         let identity = tokio::fs::read_to_string(tmp.path().join("IDENTITY.md"))
             .await
             .unwrap();
         assert!(
-            identity.contains("**Name:** ZeroClaw"),
-            "should default agent name to ZeroClaw"
+            identity.contains("# IDENTITY.md"),
+            "should contain stub header"
         );
 
         let user_md = tokio::fs::read_to_string(tmp.path().join("USER.md"))
             .await
             .unwrap();
-        assert!(
-            user_md.contains("**Name:** User"),
-            "should default user name to User"
-        );
-        assert!(
-            user_md.contains("**Timezone:** UTC"),
-            "should default timezone to UTC"
-        );
+        assert!(user_md.contains("# USER.md"), "should contain stub header");
 
         let soul = tokio::fs::read_to_string(tmp.path().join("SOUL.md"))
             .await
             .unwrap();
-        assert!(
-            soul.contains("Be warm, natural, and clear."),
-            "should default communication style"
-        );
+        assert!(soul.contains("# SOUL.md"), "should contain stub header");
     }
 
     // ── scaffold_workspace: skip existing files ─────────────────
@@ -6564,9 +6245,14 @@ mod tests {
             .await
             .unwrap();
 
-        scaffold_workspace(tmp.path(), &ctx, "sqlite")
-            .await
-            .unwrap();
+        scaffold_workspace(
+            tmp.path(),
+            &ctx,
+            "sqlite",
+            &crate::config::IdentityConfig::default(),
+        )
+        .await
+        .unwrap();
 
         // SOUL.md should be untouched
         let soul = tokio::fs::read_to_string(&soul_path).await.unwrap();
@@ -6583,7 +6269,7 @@ mod tests {
         let user_md = tokio::fs::read_to_string(tmp.path().join("USER.md"))
             .await
             .unwrap();
-        assert!(user_md.contains("**Name:** Bob"));
+        assert!(user_md.contains("# USER.md"));
     }
 
     // ── scaffold_workspace: idempotent ──────────────────────────
@@ -6597,17 +6283,27 @@ mod tests {
             ..Default::default()
         };
 
-        scaffold_workspace(tmp.path(), &ctx, "sqlite")
-            .await
-            .unwrap();
+        scaffold_workspace(
+            tmp.path(),
+            &ctx,
+            "sqlite",
+            &crate::config::IdentityConfig::default(),
+        )
+        .await
+        .unwrap();
         let soul_v1 = tokio::fs::read_to_string(tmp.path().join("SOUL.md"))
             .await
             .unwrap();
 
         // Run again — should not change anything
-        scaffold_workspace(tmp.path(), &ctx, "sqlite")
-            .await
-            .unwrap();
+        scaffold_workspace(
+            tmp.path(),
+            &ctx,
+            "sqlite",
+            &crate::config::IdentityConfig::default(),
+        )
+        .await
+        .unwrap();
         let soul_v2 = tokio::fs::read_to_string(tmp.path().join("SOUL.md"))
             .await
             .unwrap();
@@ -6618,12 +6314,44 @@ mod tests {
     // ── scaffold_workspace: all files are non-empty ─────────────
 
     #[tokio::test]
-    async fn scaffold_files_are_non_empty() {
+    async fn scaffold_files_are_non_empty_sqlite() {
         let tmp = TempDir::new().unwrap();
         let ctx = ProjectContext::default();
-        scaffold_workspace(tmp.path(), &ctx, "sqlite")
-            .await
-            .unwrap();
+        scaffold_workspace(
+            tmp.path(),
+            &ctx,
+            "sqlite",
+            &crate::config::IdentityConfig::default(),
+        )
+        .await
+        .unwrap();
+
+        for f in &[
+            "IDENTITY.md",
+            "AGENTS.md",
+            "HEARTBEAT.md",
+            "SOUL.md",
+            "USER.md",
+            "TOOLS.md",
+            "BOOTSTRAP.md",
+        ] {
+            let content = tokio::fs::read_to_string(tmp.path().join(f)).await.unwrap();
+            assert!(!content.trim().is_empty(), "{f} should not be empty");
+        }
+    }
+
+    #[tokio::test]
+    async fn scaffold_files_are_non_empty_markdown() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = ProjectContext::default();
+        scaffold_workspace(
+            tmp.path(),
+            &ctx,
+            "markdown",
+            &crate::config::IdentityConfig::default(),
+        )
+        .await
+        .unwrap();
 
         for f in &[
             "IDENTITY.md",
@@ -6643,23 +6371,50 @@ mod tests {
     // ── scaffold_workspace: AGENTS.md references on-demand memory
 
     #[tokio::test]
-    async fn agents_md_references_on_demand_memory() {
+    async fn agents_md_references_on_demand_memory_markdown() {
         let tmp = TempDir::new().unwrap();
         let ctx = ProjectContext::default();
-        scaffold_workspace(tmp.path(), &ctx, "sqlite")
-            .await
-            .unwrap();
+        scaffold_workspace(
+            tmp.path(),
+            &ctx,
+            "markdown",
+            &crate::config::IdentityConfig::default(),
+        )
+        .await
+        .unwrap();
 
         let agents = tokio::fs::read_to_string(tmp.path().join("AGENTS.md"))
             .await
             .unwrap();
         assert!(
-            agents.contains("memory_recall"),
-            "AGENTS.md should reference memory_recall for on-demand access"
+            agents.contains("# AGENTS.md"),
+            "AGENTS.md should contain stub header"
+        );
+    }
+
+    #[tokio::test]
+    async fn agents_md_uses_backend_memory_for_sqlite() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = ProjectContext::default();
+        scaffold_workspace(
+            tmp.path(),
+            &ctx,
+            "sqlite",
+            &crate::config::IdentityConfig::default(),
+        )
+        .await
+        .unwrap();
+
+        let agents = tokio::fs::read_to_string(tmp.path().join("AGENTS.md"))
+            .await
+            .unwrap();
+        assert!(
+            agents.contains("# AGENTS.md"),
+            "AGENTS.md should contain stub header"
         );
         assert!(
-            agents.contains("on-demand"),
-            "AGENTS.md should mention daily notes are on-demand"
+            !agents.contains("MEMORY.md"),
+            "AGENTS.md should not mention MEMORY.md for sqlite backend"
         );
     }
 
@@ -6669,20 +6424,21 @@ mod tests {
     async fn memory_md_warns_about_token_cost() {
         let tmp = TempDir::new().unwrap();
         let ctx = ProjectContext::default();
-        scaffold_workspace(tmp.path(), &ctx, "sqlite")
-            .await
-            .unwrap();
+        scaffold_workspace(
+            tmp.path(),
+            &ctx,
+            "markdown",
+            &crate::config::IdentityConfig::default(),
+        )
+        .await
+        .unwrap();
 
         let memory = tokio::fs::read_to_string(tmp.path().join("MEMORY.md"))
             .await
             .unwrap();
         assert!(
-            memory.contains("costs tokens"),
-            "MEMORY.md should warn about token cost"
-        );
-        assert!(
-            memory.contains("auto-injected"),
-            "MEMORY.md should mention it's auto-injected"
+            memory.contains("# MEMORY.md"),
+            "MEMORY.md should contain stub header"
         );
     }
 
@@ -6692,33 +6448,21 @@ mod tests {
     async fn tools_md_lists_all_builtin_tools() {
         let tmp = TempDir::new().unwrap();
         let ctx = ProjectContext::default();
-        scaffold_workspace(tmp.path(), &ctx, "sqlite")
-            .await
-            .unwrap();
+        scaffold_workspace(
+            tmp.path(),
+            &ctx,
+            "sqlite",
+            &crate::config::IdentityConfig::default(),
+        )
+        .await
+        .unwrap();
 
         let tools = tokio::fs::read_to_string(tmp.path().join("TOOLS.md"))
             .await
             .unwrap();
-        for tool in &[
-            "shell",
-            "file_read",
-            "file_write",
-            "memory_store",
-            "memory_recall",
-            "memory_forget",
-        ] {
-            assert!(
-                tools.contains(tool),
-                "TOOLS.md should list built-in tool: {tool}"
-            );
-        }
         assert!(
-            tools.contains("Use when:"),
-            "TOOLS.md should include 'Use when' guidance"
-        );
-        assert!(
-            tools.contains("Don't use when:"),
-            "TOOLS.md should include 'Don't use when' guidance"
+            tools.contains("# TOOLS.md"),
+            "TOOLS.md should contain stub header"
         );
     }
 
@@ -6726,20 +6470,21 @@ mod tests {
     async fn soul_md_includes_emoji_awareness_guidance() {
         let tmp = TempDir::new().unwrap();
         let ctx = ProjectContext::default();
-        scaffold_workspace(tmp.path(), &ctx, "sqlite")
-            .await
-            .unwrap();
+        scaffold_workspace(
+            tmp.path(),
+            &ctx,
+            "sqlite",
+            &crate::config::IdentityConfig::default(),
+        )
+        .await
+        .unwrap();
 
         let soul = tokio::fs::read_to_string(tmp.path().join("SOUL.md"))
             .await
             .unwrap();
         assert!(
-            soul.contains("Use emojis naturally (0-2 max"),
-            "SOUL.md should include emoji usage guidance"
-        );
-        assert!(
-            soul.contains("Match emoji density to the user"),
-            "SOUL.md should include emoji-awareness guidance"
+            soul.contains("# SOUL.md"),
+            "SOUL.md should contain stub header"
         );
     }
 
@@ -6754,19 +6499,30 @@ mod tests {
             timezone: "Europe/Madrid".into(),
             communication_style: "Be direct.".into(),
         };
-        scaffold_workspace(tmp.path(), &ctx, "sqlite")
-            .await
-            .unwrap();
+        scaffold_workspace(
+            tmp.path(),
+            &ctx,
+            "sqlite",
+            &crate::config::IdentityConfig::default(),
+        )
+        .await
+        .unwrap();
 
         let user_md = tokio::fs::read_to_string(tmp.path().join("USER.md"))
             .await
             .unwrap();
-        assert!(user_md.contains("José María"));
+        assert!(
+            user_md.contains("# USER.md"),
+            "USER.md should contain stub header"
+        );
 
         let soul = tokio::fs::read_to_string(tmp.path().join("SOUL.md"))
             .await
             .unwrap();
-        assert!(soul.contains("ZeroClaw-v2"));
+        assert!(
+            soul.contains("# SOUL.md"),
+            "SOUL.md should contain stub header"
+        );
     }
 
     // ── scaffold_workspace: full personalization round-trip ─────
@@ -6782,67 +6538,45 @@ mod tests {
                 "Be friendly, human, and conversational. Show warmth and empathy while staying efficient. Use natural contractions."
                     .into(),
         };
-        scaffold_workspace(tmp.path(), &ctx, "sqlite")
-            .await
-            .unwrap();
+        scaffold_workspace(
+            tmp.path(),
+            &ctx,
+            "sqlite",
+            &crate::config::IdentityConfig::default(),
+        )
+        .await
+        .unwrap();
 
-        // Verify every file got personalized
+        // Verify every file got created with stub headers
         let identity = tokio::fs::read_to_string(tmp.path().join("IDENTITY.md"))
             .await
             .unwrap();
-        assert!(identity.contains("**Name:** Claw"));
+        assert!(identity.contains("# IDENTITY.md"));
 
         let soul = tokio::fs::read_to_string(tmp.path().join("SOUL.md"))
             .await
             .unwrap();
-        assert!(soul.contains("You are **Claw**"));
-        assert!(soul.contains("Be friendly, human, and conversational"));
+        assert!(soul.contains("# SOUL.md"));
 
         let user_md = tokio::fs::read_to_string(tmp.path().join("USER.md"))
             .await
             .unwrap();
-        assert!(user_md.contains("**Name:** Argenis"));
-        assert!(user_md.contains("**Timezone:** US/Eastern"));
-        assert!(user_md.contains("Be friendly, human, and conversational"));
+        assert!(user_md.contains("# USER.md"));
 
         let agents = tokio::fs::read_to_string(tmp.path().join("AGENTS.md"))
             .await
             .unwrap();
-        assert!(agents.contains("Claw Personal Assistant"));
+        assert!(agents.contains("# AGENTS.md"));
 
         let bootstrap = tokio::fs::read_to_string(tmp.path().join("BOOTSTRAP.md"))
             .await
             .unwrap();
-        assert!(bootstrap.contains("**Argenis**"));
-        assert!(bootstrap.contains("US/Eastern"));
-        assert!(bootstrap.contains("Introduce yourself as Claw"));
+        assert!(bootstrap.contains("# BOOTSTRAP.md"));
 
         let heartbeat = tokio::fs::read_to_string(tmp.path().join("HEARTBEAT.md"))
             .await
             .unwrap();
-        assert!(heartbeat.contains("Claw"));
-    }
-
-    // ── scaffold_workspace: none backend skips MEMORY.md ────────
-
-    #[tokio::test]
-    async fn scaffold_none_backend_disables_memory_guidance_and_skips_memory_md() {
-        let tmp = TempDir::new().unwrap();
-        let ctx = ProjectContext::default();
-        scaffold_workspace(tmp.path(), &ctx, "none").await.unwrap();
-
-        assert!(
-            !tmp.path().join("MEMORY.md").exists(),
-            "MEMORY.md should not be created for none backend"
-        );
-
-        let agents = tokio::fs::read_to_string(tmp.path().join("AGENTS.md"))
-            .await
-            .unwrap();
-        assert!(
-            agents.contains("memory.backend = \"none\""),
-            "AGENTS.md should note that memory backend is none"
-        );
+        assert!(heartbeat.contains("# HEARTBEAT.md"));
     }
 
     // ── model helper coverage ───────────────────────────────────
@@ -6861,13 +6595,32 @@ mod tests {
         );
         assert_eq!(default_model_for_provider("qwen"), "qwen-plus");
         assert_eq!(default_model_for_provider("qwen-intl"), "qwen-plus");
+        assert_eq!(
+            default_model_for_provider("qwen-coding-plan"),
+            "qwen3-coder-plus"
+        );
         assert_eq!(default_model_for_provider("qwen-code"), "qwen3-coder-plus");
         assert_eq!(default_model_for_provider("glm-cn"), "glm-5");
-        assert_eq!(default_model_for_provider("minimax-cn"), "MiniMax-M2.7");
+        assert_eq!(default_model_for_provider("minimax-cn"), "MiniMax-M2.5");
         assert_eq!(default_model_for_provider("zai-cn"), "glm-5");
         assert_eq!(default_model_for_provider("gemini"), "gemini-2.5-pro");
         assert_eq!(default_model_for_provider("google"), "gemini-2.5-pro");
+        assert_eq!(default_model_for_provider("copilot"), "default");
         assert_eq!(default_model_for_provider("kimi-code"), "kimi-for-coding");
+        assert_eq!(default_model_for_provider("ai21"), "jamba-1.5-large");
+        assert_eq!(default_model_for_provider("cerebras"), "llama3.1-70b");
+        assert_eq!(
+            default_model_for_provider("sambanova"),
+            "Meta-Llama-3.3-70B-Instruct"
+        );
+        assert_eq!(
+            default_model_for_provider("samba-nova"),
+            "Meta-Llama-3.3-70B-Instruct"
+        );
+        assert_eq!(
+            default_model_for_provider("replicate"),
+            "meta/meta-llama-3-70b-instruct"
+        );
         assert_eq!(
             default_model_for_provider("bedrock"),
             "anthropic.claude-sonnet-4-5-20250929-v1:0"
@@ -6878,6 +6631,17 @@ mod tests {
         );
         assert_eq!(default_model_for_provider("venice"), "zai-org-glm-5");
         assert_eq!(default_model_for_provider("moonshot"), "kimi-k2.5");
+        assert_eq!(default_model_for_provider("stepfun"), "step-3.5-flash");
+        assert_eq!(default_model_for_provider("hunyuan"), "hunyuan-t1-latest");
+        assert_eq!(default_model_for_provider("tencent"), "hunyuan-t1-latest");
+        assert_eq!(
+            default_model_for_provider("siliconflow"),
+            "Pro/zai-org/GLM-4.7"
+        );
+        assert_eq!(
+            default_model_for_provider("volcengine"),
+            "doubao-1-5-pro-32k-250115"
+        );
         assert_eq!(
             default_model_for_provider("nvidia"),
             "meta/llama-3.3-70b-instruct"
@@ -6896,22 +6660,22 @@ mod tests {
             default_model_for_provider("astrai"),
             "anthropic/claude-sonnet-4.6"
         );
-        assert_eq!(
-            default_model_for_provider("avian"),
-            "deepseek/deepseek-v3.2"
-        );
     }
 
     #[test]
     fn canonical_provider_name_normalizes_regional_aliases() {
         assert_eq!(canonical_provider_name("qwen-intl"), "qwen");
         assert_eq!(canonical_provider_name("dashscope-us"), "qwen");
+        assert_eq!(canonical_provider_name("qwen-coding-plan"), "qwen");
         assert_eq!(canonical_provider_name("qwen-code"), "qwen-code");
         assert_eq!(canonical_provider_name("qwen-oauth"), "qwen-code");
         assert_eq!(canonical_provider_name("codex"), "openai-codex");
         assert_eq!(canonical_provider_name("openai_codex"), "openai-codex");
         assert_eq!(canonical_provider_name("moonshot-intl"), "moonshot");
         assert_eq!(canonical_provider_name("kimi-cn"), "moonshot");
+        assert_eq!(canonical_provider_name("step"), "stepfun");
+        assert_eq!(canonical_provider_name("step-ai"), "stepfun");
+        assert_eq!(canonical_provider_name("step_ai"), "stepfun");
         assert_eq!(canonical_provider_name("kimi_coding"), "kimi-code");
         assert_eq!(canonical_provider_name("kimi_for_coding"), "kimi-code");
         assert_eq!(canonical_provider_name("glm-cn"), "glm");
@@ -6919,9 +6683,14 @@ mod tests {
         assert_eq!(canonical_provider_name("minimax-cn"), "minimax");
         assert_eq!(canonical_provider_name("zai-cn"), "zai");
         assert_eq!(canonical_provider_name("z.ai-global"), "zai");
+        assert_eq!(canonical_provider_name("doubao"), "volcengine");
+        assert_eq!(canonical_provider_name("ark"), "volcengine");
+        assert_eq!(canonical_provider_name("silicon-cloud"), "siliconflow");
+        assert_eq!(canonical_provider_name("siliconcloud"), "siliconflow");
         assert_eq!(canonical_provider_name("nvidia-nim"), "nvidia");
         assert_eq!(canonical_provider_name("aws-bedrock"), "bedrock");
         assert_eq!(canonical_provider_name("build.nvidia.com"), "nvidia");
+        assert_eq!(canonical_provider_name("samba-nova"), "sambanova");
         assert_eq!(canonical_provider_name("llama.cpp"), "llamacpp");
     }
 
@@ -6957,8 +6726,21 @@ mod tests {
             .map(|(id, _)| id)
             .collect();
 
+        assert!(ids.contains(&"gpt-5.3-codex".to_string()));
         assert!(ids.contains(&"gpt-5-codex".to_string()));
         assert!(ids.contains(&"gpt-5.2-codex".to_string()));
+    }
+
+    #[test]
+    fn curated_models_for_copilot_have_default_entry() {
+        let models = curated_models_for_provider("copilot");
+        assert_eq!(
+            models,
+            vec![(
+                "default".to_string(),
+                "Copilot default model (recommended)".to_string(),
+            )]
+        );
     }
 
     #[test]
@@ -6995,6 +6777,19 @@ mod tests {
         assert!(ids.contains(&"kimi-k2-thinking".to_string()));
         assert!(!ids.contains(&"kimi-latest".to_string()));
         assert!(!ids.contains(&"kimi-thinking-preview".to_string()));
+    }
+
+    #[test]
+    fn curated_models_for_stepfun_include_expected_defaults() {
+        let ids: Vec<String> = curated_models_for_provider("stepfun")
+            .into_iter()
+            .map(|(id, _)| id)
+            .collect();
+
+        assert!(ids.contains(&"step-3.5-flash".to_string()));
+        assert!(ids.contains(&"step-3".to_string()));
+        assert!(ids.contains(&"step-2-mini".to_string()));
+        assert!(ids.contains(&"step-1o-turbo-vision".to_string()));
     }
 
     #[test]
@@ -7038,16 +6833,32 @@ mod tests {
     }
 
     #[test]
-    fn curated_models_for_avian_include_expected_catalog() {
-        let ids: Vec<String> = curated_models_for_provider("avian")
+    fn curated_models_for_qwen_coding_plan_include_coding_models() {
+        let ids: Vec<String> = curated_models_for_provider("qwen-coding-plan")
             .into_iter()
             .map(|(id, _)| id)
             .collect();
 
-        assert!(ids.contains(&"deepseek/deepseek-v3.2".to_string()));
-        assert!(ids.contains(&"moonshotai/kimi-k2.5".to_string()));
-        assert!(ids.contains(&"z-ai/glm-5".to_string()));
-        assert!(ids.contains(&"minimax/minimax-m2.5".to_string()));
+        assert!(ids.contains(&"qwen3-coder-plus".to_string()));
+        assert!(ids.contains(&"qwen3.5-plus".to_string()));
+        assert!(ids.contains(&"qwen3-max-2026-01-23".to_string()));
+    }
+
+    #[test]
+    fn curated_models_for_volcengine_and_siliconflow_include_expected_defaults() {
+        let volcengine_ids: Vec<String> = curated_models_for_provider("volcengine")
+            .into_iter()
+            .map(|(id, _)| id)
+            .collect();
+        assert!(volcengine_ids.contains(&"doubao-1-5-pro-32k-250115".to_string()));
+        assert!(volcengine_ids.contains(&"doubao-seed-1-6-250615".to_string()));
+
+        let siliconflow_ids: Vec<String> = curated_models_for_provider("siliconflow")
+            .into_iter()
+            .map(|(id, _)| id)
+            .collect();
+        assert!(siliconflow_ids.contains(&"Pro/zai-org/GLM-4.7".to_string()));
+        assert!(siliconflow_ids.contains(&"Pro/deepseek-ai/DeepSeek-V3.2".to_string()));
     }
 
     #[test]
@@ -7067,10 +6878,23 @@ mod tests {
         assert!(supports_live_model_fetch("sglang"));
         assert!(supports_live_model_fetch("vllm"));
         assert!(supports_live_model_fetch("astrai"));
-        assert!(supports_live_model_fetch("avian"));
         assert!(supports_live_model_fetch("venice"));
+        assert!(supports_live_model_fetch("stepfun"));
+        assert!(supports_live_model_fetch("step"));
+        assert!(supports_live_model_fetch("step-ai"));
+        assert!(supports_live_model_fetch("ai21"));
+        assert!(supports_live_model_fetch("cerebras"));
+        assert!(supports_live_model_fetch("sambanova"));
+        assert!(supports_live_model_fetch("samba-nova"));
+        assert!(supports_live_model_fetch("replicate"));
         assert!(supports_live_model_fetch("glm-cn"));
         assert!(supports_live_model_fetch("qwen-intl"));
+        assert!(supports_live_model_fetch("qwen-coding-plan"));
+        assert!(supports_live_model_fetch("siliconflow"));
+        assert!(supports_live_model_fetch("silicon-cloud"));
+        assert!(supports_live_model_fetch("volcengine"));
+        assert!(supports_live_model_fetch("doubao"));
+        assert!(supports_live_model_fetch("ark"));
         assert!(!supports_live_model_fetch("minimax-cn"));
         assert!(!supports_live_model_fetch("unknown-provider"));
     }
@@ -7102,6 +6926,10 @@ mod tests {
             curated_models_for_provider("dashscope-us")
         );
         assert_eq!(
+            curated_models_for_provider("qwen-coding-plan"),
+            curated_models_for_provider("qwen-code")
+        );
+        assert_eq!(
             curated_models_for_provider("minimax"),
             curated_models_for_provider("minimax-cn")
         );
@@ -7124,6 +6952,34 @@ mod tests {
         assert_eq!(
             curated_models_for_provider("bedrock"),
             curated_models_for_provider("aws-bedrock")
+        );
+        assert_eq!(
+            curated_models_for_provider("volcengine"),
+            curated_models_for_provider("doubao")
+        );
+        assert_eq!(
+            curated_models_for_provider("volcengine"),
+            curated_models_for_provider("ark")
+        );
+        assert_eq!(
+            curated_models_for_provider("stepfun"),
+            curated_models_for_provider("step")
+        );
+        assert_eq!(
+            curated_models_for_provider("stepfun"),
+            curated_models_for_provider("step-ai")
+        );
+        assert_eq!(
+            curated_models_for_provider("siliconflow"),
+            curated_models_for_provider("silicon-cloud")
+        );
+        assert_eq!(
+            curated_models_for_provider("siliconflow"),
+            curated_models_for_provider("siliconcloud")
+        );
+        assert_eq!(
+            curated_models_for_provider("sambanova"),
+            curated_models_for_provider("samba-nova")
         );
     }
 
@@ -7153,6 +7009,22 @@ mod tests {
             models_endpoint_for_provider("qwen-intl"),
             Some("https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models")
         );
+        assert_eq!(
+            models_endpoint_for_provider("qwen-coding-plan"),
+            Some("https://coding.dashscope.aliyuncs.com/v1/models")
+        );
+        assert_eq!(
+            models_endpoint_for_provider("volcengine"),
+            Some("https://ark.cn-beijing.volces.com/api/v3/models")
+        );
+        assert_eq!(
+            models_endpoint_for_provider("doubao"),
+            Some("https://ark.cn-beijing.volces.com/api/v3/models")
+        );
+        assert_eq!(
+            models_endpoint_for_provider("ark"),
+            Some("https://ark.cn-beijing.volces.com/api/v3/models")
+        );
     }
 
     #[test]
@@ -7170,8 +7042,48 @@ mod tests {
             Some("https://api.cohere.com/compatibility/v1/models")
         );
         assert_eq!(
+            models_endpoint_for_provider("ai21"),
+            Some("https://api.ai21.com/studio/v1/models")
+        );
+        assert_eq!(
+            models_endpoint_for_provider("cerebras"),
+            Some("https://api.cerebras.ai/v1/models")
+        );
+        assert_eq!(
+            models_endpoint_for_provider("sambanova"),
+            Some("https://api.sambanova.ai/v1/models")
+        );
+        assert_eq!(
+            models_endpoint_for_provider("samba-nova"),
+            Some("https://api.sambanova.ai/v1/models")
+        );
+        assert_eq!(
+            models_endpoint_for_provider("replicate"),
+            Some("https://api.replicate.com/v1/models")
+        );
+        assert_eq!(
             models_endpoint_for_provider("moonshot"),
             Some("https://api.moonshot.ai/v1/models")
+        );
+        assert_eq!(
+            models_endpoint_for_provider("stepfun"),
+            Some("https://api.stepfun.com/v1/models")
+        );
+        assert_eq!(
+            models_endpoint_for_provider("step"),
+            Some("https://api.stepfun.com/v1/models")
+        );
+        assert_eq!(
+            models_endpoint_for_provider("step-ai"),
+            Some("https://api.stepfun.com/v1/models")
+        );
+        assert_eq!(
+            models_endpoint_for_provider("siliconflow"),
+            Some("https://api.siliconflow.cn/v1/models")
+        );
+        assert_eq!(
+            models_endpoint_for_provider("silicon-cloud"),
+            Some("https://api.siliconflow.cn/v1/models")
         );
         assert_eq!(
             models_endpoint_for_provider("llamacpp"),
@@ -7188,10 +7100,6 @@ mod tests {
         assert_eq!(
             models_endpoint_for_provider("vllm"),
             Some("http://localhost:8000/v1/models")
-        );
-        assert_eq!(
-            models_endpoint_for_provider("avian"),
-            Some("https://api.avian.io/v1/models")
         );
         assert_eq!(models_endpoint_for_provider("perplexity"), None);
         assert_eq!(models_endpoint_for_provider("unknown-provider"), None);
@@ -7435,9 +7343,10 @@ mod tests {
         };
 
         let err = run_models_refresh(&config, None, true).await.unwrap_err();
-        assert!(err
-            .to_string()
-            .contains("does not support live model discovery"));
+        assert!(
+            err.to_string()
+                .contains("does not support live model discovery")
+        );
     }
 
     // ── provider_env_var ────────────────────────────────────────
@@ -7455,6 +7364,11 @@ mod tests {
         assert_eq!(provider_env_var("vllm"), "VLLM_API_KEY");
         assert_eq!(provider_env_var("xai"), "XAI_API_KEY");
         assert_eq!(provider_env_var("grok"), "XAI_API_KEY"); // alias
+        assert_eq!(provider_env_var("ai21"), "AI21_API_KEY");
+        assert_eq!(provider_env_var("cerebras"), "CEREBRAS_API_KEY");
+        assert_eq!(provider_env_var("sambanova"), "SAMBANOVA_API_KEY");
+        assert_eq!(provider_env_var("samba-nova"), "SAMBANOVA_API_KEY");
+        assert_eq!(provider_env_var("replicate"), "REPLICATE_API_TOKEN");
         assert_eq!(provider_env_var("together"), "TOGETHER_API_KEY"); // alias
         assert_eq!(provider_env_var("together-ai"), "TOGETHER_API_KEY");
         assert_eq!(provider_env_var("google"), "GEMINI_API_KEY"); // alias
@@ -7463,6 +7377,7 @@ mod tests {
         assert_eq!(provider_env_var("qwen"), "DASHSCOPE_API_KEY");
         assert_eq!(provider_env_var("qwen-intl"), "DASHSCOPE_API_KEY");
         assert_eq!(provider_env_var("dashscope-us"), "DASHSCOPE_API_KEY");
+        assert_eq!(provider_env_var("qwen-coding-plan"), "DASHSCOPE_API_KEY");
         assert_eq!(provider_env_var("qwen-code"), "QWEN_OAUTH_TOKEN");
         assert_eq!(provider_env_var("qwen-oauth"), "QWEN_OAUTH_TOKEN");
         assert_eq!(provider_env_var("glm-cn"), "GLM_API_KEY");
@@ -7473,13 +7388,68 @@ mod tests {
         assert_eq!(provider_env_var("minimax-oauth"), "MINIMAX_API_KEY");
         assert_eq!(provider_env_var("minimax-oauth-cn"), "MINIMAX_API_KEY");
         assert_eq!(provider_env_var("moonshot-intl"), "MOONSHOT_API_KEY");
+        assert_eq!(provider_env_var("stepfun"), "STEP_API_KEY");
+        assert_eq!(provider_env_var("step"), "STEP_API_KEY");
+        assert_eq!(provider_env_var("step-ai"), "STEP_API_KEY");
         assert_eq!(provider_env_var("zai-cn"), "ZAI_API_KEY");
+        assert_eq!(provider_env_var("doubao"), "ARK_API_KEY");
+        assert_eq!(provider_env_var("volcengine"), "ARK_API_KEY");
+        assert_eq!(provider_env_var("ark"), "ARK_API_KEY");
+        assert_eq!(provider_env_var("siliconflow"), "SILICONFLOW_API_KEY");
+        assert_eq!(provider_env_var("silicon-cloud"), "SILICONFLOW_API_KEY");
+        assert_eq!(provider_env_var("siliconcloud"), "SILICONFLOW_API_KEY");
         assert_eq!(provider_env_var("nvidia"), "NVIDIA_API_KEY");
         assert_eq!(provider_env_var("nvidia-nim"), "NVIDIA_API_KEY"); // alias
         assert_eq!(provider_env_var("build.nvidia.com"), "NVIDIA_API_KEY"); // alias
         assert_eq!(provider_env_var("astrai"), "ASTRAI_API_KEY");
-        assert_eq!(provider_env_var("opencode-go"), "OPENCODE_GO_API_KEY");
-        assert_eq!(provider_env_var("avian"), "AVIAN_API_KEY");
+        assert_eq!(provider_env_var("hunyuan"), "HUNYUAN_API_KEY");
+        assert_eq!(provider_env_var("tencent"), "HUNYUAN_API_KEY"); // alias
+    }
+
+    #[test]
+    fn provider_env_var_fallbacks_cover_expected_aliases() {
+        assert_eq!(provider_env_var_fallbacks("stepfun"), &["STEPFUN_API_KEY"]);
+        assert_eq!(provider_env_var_fallbacks("step"), &["STEPFUN_API_KEY"]);
+        assert_eq!(provider_env_var_fallbacks("step-ai"), &["STEPFUN_API_KEY"]);
+        assert_eq!(provider_env_var_fallbacks("step_ai"), &["STEPFUN_API_KEY"]);
+        assert_eq!(
+            provider_env_var_fallbacks("anthropic"),
+            &["ANTHROPIC_OAUTH_TOKEN"]
+        );
+        assert_eq!(provider_env_var_fallbacks("gemini"), &["GOOGLE_API_KEY"]);
+        assert_eq!(
+            provider_env_var_fallbacks("minimax"),
+            &["MINIMAX_OAUTH_TOKEN"]
+        );
+        assert_eq!(
+            provider_env_var_fallbacks("volcengine"),
+            &["DOUBAO_API_KEY"]
+        );
+    }
+
+    #[tokio::test]
+    async fn resolve_provider_api_key_from_env_prefers_primary_over_fallback() {
+        let _env_guard = env_lock().lock().await;
+        let _primary = EnvVarGuard::set("STEP_API_KEY", "primary-step-key");
+        let _fallback = EnvVarGuard::set("STEPFUN_API_KEY", "fallback-step-key");
+
+        assert_eq!(
+            resolve_provider_api_key_from_env("stepfun").as_deref(),
+            Some("primary-step-key")
+        );
+    }
+
+    #[tokio::test]
+    async fn resolve_provider_api_key_from_env_uses_stepfun_fallback_key() {
+        let _env_guard = env_lock().lock().await;
+        let _unset_primary = EnvVarGuard::unset("STEP_API_KEY");
+        let _fallback = EnvVarGuard::set("STEPFUN_API_KEY", "fallback-step-key");
+
+        assert_eq!(
+            resolve_provider_api_key_from_env("step-ai").as_deref(),
+            Some("fallback-step-key")
+        );
+        assert!(provider_has_env_api_key("step_ai"));
     }
 
     #[test]
@@ -7503,6 +7473,36 @@ mod tests {
     }
 
     #[test]
+    fn http_request_productivity_allowed_domains_include_common_integrations() {
+        let domains = http_request_productivity_allowed_domains();
+        assert!(domains.iter().any(|d| d == "api.github.com"));
+        assert!(domains.iter().any(|d| d == "api.linear.app"));
+        assert!(domains.iter().any(|d| d == "calendar.googleapis.com"));
+    }
+
+    #[test]
+    fn normalize_http_request_profile_name_sanitizes_input() {
+        assert_eq!(
+            normalize_http_request_profile_name(" GitHub Main "),
+            "github-main"
+        );
+        assert_eq!(
+            normalize_http_request_profile_name("LINEAR_API"),
+            "linear_api"
+        );
+        assert_eq!(normalize_http_request_profile_name("!!!"), "");
+    }
+
+    #[test]
+    fn is_valid_env_var_name_accepts_and_rejects_expected_patterns() {
+        assert!(is_valid_env_var_name("GITHUB_TOKEN"));
+        assert!(is_valid_env_var_name("_PRIVATE_KEY"));
+        assert!(!is_valid_env_var_name("1BAD"));
+        assert!(!is_valid_env_var_name("BAD-NAME"));
+        assert!(!is_valid_env_var_name("BAD NAME"));
+    }
+
+    #[test]
     fn local_provider_choices_include_sglang() {
         let choices = local_provider_choices();
         assert!(choices.iter().any(|(provider, _)| *provider == "sglang"));
@@ -7516,9 +7516,11 @@ mod tests {
     #[test]
     fn backend_key_from_choice_maps_supported_backends() {
         assert_eq!(backend_key_from_choice(0), "sqlite");
-        assert_eq!(backend_key_from_choice(1), "lucid");
-        assert_eq!(backend_key_from_choice(2), "markdown");
-        assert_eq!(backend_key_from_choice(3), "none");
+        assert_eq!(backend_key_from_choice(1), "sqlite_qdrant_hybrid");
+        assert_eq!(backend_key_from_choice(2), "lucid");
+        assert_eq!(backend_key_from_choice(3), "cortex-mem");
+        assert_eq!(backend_key_from_choice(4), "markdown");
+        assert_eq!(backend_key_from_choice(5), "none");
         assert_eq!(backend_key_from_choice(999), "sqlite");
     }
 
@@ -7529,6 +7531,12 @@ mod tests {
         assert!(lucid.uses_sqlite_hygiene);
         assert!(lucid.sqlite_based);
         assert!(lucid.optional_dependency);
+
+        let cortex_mem = memory_backend_profile("cortex-mem");
+        assert!(cortex_mem.auto_save_default);
+        assert!(cortex_mem.uses_sqlite_hygiene);
+        assert!(cortex_mem.sqlite_based);
+        assert!(cortex_mem.optional_dependency);
 
         let markdown = memory_backend_profile("markdown");
         assert!(markdown.auto_save_default);
@@ -7555,6 +7563,18 @@ mod tests {
     }
 
     #[test]
+    fn memory_config_defaults_for_hybrid_enable_sqlite_hygiene() {
+        let config = memory_config_defaults_for_backend("sqlite_qdrant_hybrid");
+        assert_eq!(config.backend, "sqlite_qdrant_hybrid");
+        assert!(config.auto_save);
+        assert!(config.hygiene_enabled);
+        assert_eq!(config.archive_after_days, 7);
+        assert_eq!(config.purge_after_days, 30);
+        assert_eq!(config.embedding_cache_size, 10000);
+        assert_eq!(config.qdrant.collection, "zeroclaw_memories");
+    }
+
+    #[test]
     fn memory_config_defaults_for_none_disable_sqlite_hygiene() {
         let config = memory_config_defaults_for_backend("none");
         assert_eq!(config.backend, "none");
@@ -7563,76 +7583,5 @@ mod tests {
         assert_eq!(config.archive_after_days, 0);
         assert_eq!(config.purge_after_days, 0);
         assert_eq!(config.embedding_cache_size, 0);
-    }
-
-    #[test]
-    fn channel_menu_choices_include_signal_nextcloud_lark_and_feishu() {
-        assert!(channel_menu_choices().contains(&ChannelMenuChoice::Signal));
-        assert!(channel_menu_choices().contains(&ChannelMenuChoice::NextcloudTalk));
-        assert!(channel_menu_choices().contains(&ChannelMenuChoice::Lark));
-        assert!(channel_menu_choices().contains(&ChannelMenuChoice::Feishu));
-    }
-
-    #[test]
-    fn launchable_channels_include_signal_mattermost_qq_nextcloud_and_feishu() {
-        let mut channels = ChannelsConfig::default();
-        assert!(!has_launchable_channels(&channels));
-
-        channels.signal = Some(crate::config::schema::SignalConfig {
-            http_url: "http://127.0.0.1:8686".into(),
-            account: "+1234567890".into(),
-            group_id: None,
-            allowed_from: vec!["*".into()],
-            ignore_attachments: false,
-            ignore_stories: true,
-            proxy_url: None,
-        });
-        assert!(has_launchable_channels(&channels));
-
-        channels.signal = None;
-        channels.mattermost = Some(crate::config::schema::MattermostConfig {
-            url: "https://mattermost.example.com".into(),
-            bot_token: "token".into(),
-            channel_id: Some("channel".into()),
-            allowed_users: vec!["*".into()],
-            thread_replies: Some(true),
-            mention_only: Some(false),
-            interrupt_on_new_message: false,
-            proxy_url: None,
-        });
-        assert!(has_launchable_channels(&channels));
-
-        channels.mattermost = None;
-        channels.qq = Some(crate::config::schema::QQConfig {
-            app_id: "app-id".into(),
-            app_secret: "app-secret".into(),
-            allowed_users: vec!["*".into()],
-            proxy_url: None,
-        });
-        assert!(has_launchable_channels(&channels));
-
-        channels.qq = None;
-        channels.nextcloud_talk = Some(crate::config::schema::NextcloudTalkConfig {
-            base_url: "https://cloud.example.com".into(),
-            app_token: "token".into(),
-            webhook_secret: Some("secret".into()),
-            allowed_users: vec!["*".into()],
-            proxy_url: None,
-            bot_name: None,
-        });
-        assert!(has_launchable_channels(&channels));
-
-        channels.nextcloud_talk = None;
-        channels.feishu = Some(crate::config::schema::FeishuConfig {
-            app_id: "cli_123".into(),
-            app_secret: "secret".into(),
-            encrypt_key: None,
-            verification_token: None,
-            allowed_users: vec!["*".into()],
-            receive_mode: crate::config::schema::LarkReceiveMode::Websocket,
-            port: None,
-            proxy_url: None,
-        });
-        assert!(has_launchable_channels(&channels));
     }
 }

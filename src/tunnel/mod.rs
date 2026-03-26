@@ -2,8 +2,6 @@ mod cloudflare;
 mod custom;
 mod ngrok;
 mod none;
-mod openvpn;
-mod pinggy;
 mod tailscale;
 
 pub use cloudflare::CloudflareTunnel;
@@ -11,12 +9,10 @@ pub use custom::CustomTunnel;
 pub use ngrok::NgrokTunnel;
 #[allow(unused_imports)]
 pub use none::NoneTunnel;
-pub use openvpn::OpenVpnTunnel;
-pub use pinggy::PinggyTunnel;
 pub use tailscale::TailscaleTunnel;
 
 use crate::config::schema::{TailscaleTunnelConfig, TunnelConfig};
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -79,10 +75,11 @@ pub fn create_tunnel(config: &TunnelConfig) -> Result<Option<Box<dyn Tunnel>>> {
         "none" | "" => Ok(None),
 
         "cloudflare" => {
-            let cf = config
-                .cloudflare
-                .as_ref()
-                .ok_or_else(|| anyhow::anyhow!("tunnel.provider = \"cloudflare\" but [tunnel.cloudflare] section is missing"))?;
+            let cf = config.cloudflare.as_ref().ok_or_else(|| {
+                anyhow::anyhow!(
+                    "tunnel.provider = \"cloudflare\" but [tunnel.cloudflare] section is missing"
+                )
+            })?;
             Ok(Some(Box::new(CloudflareTunnel::new(cf.token.clone()))))
         }
 
@@ -98,35 +95,21 @@ pub fn create_tunnel(config: &TunnelConfig) -> Result<Option<Box<dyn Tunnel>>> {
         }
 
         "ngrok" => {
-            let ng = config
-                .ngrok
-                .as_ref()
-                .ok_or_else(|| anyhow::anyhow!("tunnel.provider = \"ngrok\" but [tunnel.ngrok] section is missing"))?;
+            let ng = config.ngrok.as_ref().ok_or_else(|| {
+                anyhow::anyhow!("tunnel.provider = \"ngrok\" but [tunnel.ngrok] section is missing")
+            })?;
             Ok(Some(Box::new(NgrokTunnel::new(
                 ng.auth_token.clone(),
                 ng.domain.clone(),
             ))))
         }
 
-        "openvpn" => {
-            let ov = config
-                .openvpn
-                .as_ref()
-                .ok_or_else(|| anyhow::anyhow!("tunnel.provider = \"openvpn\" but [tunnel.openvpn] section is missing"))?;
-            Ok(Some(Box::new(OpenVpnTunnel::new(
-                ov.config_file.clone(),
-                ov.auth_file.clone(),
-                ov.advertise_address.clone(),
-                ov.connect_timeout_secs,
-                ov.extra_args.clone(),
-            ))))
-        }
-
         "custom" => {
-            let cu = config
-                .custom
-                .as_ref()
-                .ok_or_else(|| anyhow::anyhow!("tunnel.provider = \"custom\" but [tunnel.custom] section is missing"))?;
+            let cu = config.custom.as_ref().ok_or_else(|| {
+                anyhow::anyhow!(
+                    "tunnel.provider = \"custom\" but [tunnel.custom] section is missing"
+                )
+            })?;
             Ok(Some(Box::new(CustomTunnel::new(
                 cu.start_command.clone(),
                 cu.health_url.clone(),
@@ -134,18 +117,9 @@ pub fn create_tunnel(config: &TunnelConfig) -> Result<Option<Box<dyn Tunnel>>> {
             ))))
         }
 
-        "pinggy" => {
-            let pg = config
-                .pinggy
-                .as_ref()
-                .ok_or_else(|| anyhow::anyhow!("tunnel.provider = \"pinggy\" but [tunnel.pinggy] section is missing"))?;
-            Ok(Some(Box::new(PinggyTunnel::new(
-                pg.token.clone(),
-                pg.region.clone(),
-            ))))
-        }
-
-        other => bail!("Unknown tunnel provider: \"{other}\". Valid: none, cloudflare, tailscale, ngrok, openvpn, pinggy, custom"),
+        other => bail!(
+            "Unknown tunnel provider: \"{other}\". Valid: none, cloudflare, tailscale, ngrok, custom"
+        ),
     }
 }
 
@@ -155,8 +129,7 @@ pub fn create_tunnel(config: &TunnelConfig) -> Result<Option<Box<dyn Tunnel>>> {
 mod tests {
     use super::*;
     use crate::config::schema::{
-        CloudflareTunnelConfig, CustomTunnelConfig, NgrokTunnelConfig, OpenVpnTunnelConfig,
-        PinggyTunnelConfig, TunnelConfig,
+        CloudflareTunnelConfig, CustomTunnelConfig, NgrokTunnelConfig, TunnelConfig,
     };
     use tokio::process::Command;
 
@@ -281,30 +254,6 @@ mod tests {
     }
 
     #[test]
-    fn factory_pinggy_missing_config_errors() {
-        let cfg = TunnelConfig {
-            provider: "pinggy".into(),
-            ..TunnelConfig::default()
-        };
-        assert_tunnel_err(&cfg, "[tunnel.pinggy]");
-    }
-
-    #[test]
-    fn factory_pinggy_with_config_ok() {
-        let cfg = TunnelConfig {
-            provider: "pinggy".into(),
-            pinggy: Some(PinggyTunnelConfig {
-                token: Some("tok".into()),
-                region: None,
-            }),
-            ..TunnelConfig::default()
-        };
-        let t = create_tunnel(&cfg).unwrap();
-        assert!(t.is_some());
-        assert_eq!(t.unwrap().name(), "pinggy");
-    }
-
-    #[test]
     fn none_tunnel_name() {
         let t = NoneTunnel;
         assert_eq!(t.name(), "none");
@@ -369,46 +318,6 @@ mod tests {
         assert!(t.public_url().is_none());
     }
 
-    #[test]
-    fn factory_openvpn_missing_config_errors() {
-        let cfg = TunnelConfig {
-            provider: "openvpn".into(),
-            ..TunnelConfig::default()
-        };
-        assert_tunnel_err(&cfg, "[tunnel.openvpn]");
-    }
-
-    #[test]
-    fn factory_openvpn_with_config_ok() {
-        let cfg = TunnelConfig {
-            provider: "openvpn".into(),
-            openvpn: Some(OpenVpnTunnelConfig {
-                config_file: "client.ovpn".into(),
-                auth_file: None,
-                advertise_address: None,
-                connect_timeout_secs: 30,
-                extra_args: vec![],
-            }),
-            ..TunnelConfig::default()
-        };
-        let t = create_tunnel(&cfg).unwrap();
-        assert!(t.is_some());
-        assert_eq!(t.unwrap().name(), "openvpn");
-    }
-
-    #[test]
-    fn openvpn_tunnel_name() {
-        let t = OpenVpnTunnel::new("client.ovpn".into(), None, None, 30, vec![]);
-        assert_eq!(t.name(), "openvpn");
-        assert!(t.public_url().is_none());
-    }
-
-    #[tokio::test]
-    async fn openvpn_health_false_before_start() {
-        let tunnel = OpenVpnTunnel::new("client.ovpn".into(), None, None, 30, vec![]);
-        assert!(!tunnel.health_check().await);
-    }
-
     #[tokio::test]
     async fn kill_shared_no_process_is_ok() {
         let proc = new_shared_process();
@@ -464,25 +373,6 @@ mod tests {
     #[tokio::test]
     async fn custom_health_false_before_start_without_health_url() {
         let tunnel = CustomTunnel::new("echo hi".into(), None, Some("https://".into()));
-        assert!(!tunnel.health_check().await);
-    }
-
-    #[test]
-    fn pinggy_tunnel_name() {
-        let t = PinggyTunnel::new(Some("tok".into()), None);
-        assert_eq!(t.name(), "pinggy");
-        assert!(t.public_url().is_none());
-    }
-
-    #[test]
-    fn pinggy_without_token() {
-        let t = PinggyTunnel::new(None, None);
-        assert_eq!(t.name(), "pinggy");
-    }
-
-    #[tokio::test]
-    async fn pinggy_health_false_before_start() {
-        let tunnel = PinggyTunnel::new(None, None);
         assert!(!tunnel.health_check().await);
     }
 }

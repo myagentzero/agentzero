@@ -117,7 +117,7 @@ impl Tool for CronRunTool {
 
         let started_at = Utc::now();
         let (success, output) =
-            Box::pin(cron::scheduler::execute_job_now(&self.config, &job)).await;
+            cron::scheduler::execute_job_now_with_approval(&self.config, &job, approved).await;
         let finished_at = Utc::now();
         let duration_ms = (finished_at - started_at).num_milliseconds();
         let status = if success { "ok" } else { "error" };
@@ -234,29 +234,34 @@ mod tests {
         config.autonomy.level = AutonomyLevel::Supervised;
         config.autonomy.allowed_commands = vec!["touch".into()];
         std::fs::create_dir_all(&config.workspace_dir).unwrap();
-        let cfg = Arc::new(config);
-        // Create with explicit approval so the job persists for the run test.
         let job = cron::add_shell_job_with_approval(
-            &cfg,
+            &config,
             None,
-            cron::Schedule::Cron {
+            crate::cron::Schedule::Cron {
                 expr: "*/5 * * * *".into(),
                 tz: None,
             },
             "touch cron-run-approval",
-            None,
             true,
         )
         .unwrap();
+        let cfg = Arc::new(config);
         let tool = CronRunTool::new(cfg.clone(), test_security(&cfg));
 
-        // Without approval, the tool-level policy check blocks medium-risk commands.
         let denied = tool.execute(json!({ "job_id": job.id })).await.unwrap();
         assert!(!denied.success);
-        assert!(denied
-            .error
-            .unwrap_or_default()
-            .contains("explicit approval"));
+        assert!(
+            denied
+                .error
+                .unwrap_or_default()
+                .contains("explicit approval")
+        );
+
+        let approved = tool
+            .execute(json!({ "job_id": job.id, "approved": true }))
+            .await
+            .unwrap();
+        assert!(approved.success, "{:?}", approved.error);
     }
 
     #[tokio::test]
@@ -276,10 +281,12 @@ mod tests {
 
         let result = tool.execute(json!({ "job_id": job.id })).await.unwrap();
         assert!(!result.success);
-        assert!(result
-            .error
-            .unwrap_or_default()
-            .contains("Rate limit exceeded"));
+        assert!(
+            result
+                .error
+                .unwrap_or_default()
+                .contains("Rate limit exceeded")
+        );
         assert!(cron::list_runs(&cfg, &job.id, 10).unwrap().is_empty());
     }
 }

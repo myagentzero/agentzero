@@ -83,12 +83,10 @@ always_ask = []
 allowed_roots = []
 non_cli_excluded_tools = [
     "shell",
-    "process",
     "file_write",
     "file_edit",
     "git_operations",
     "browser",
-    "browser_open",
     "http_request",
     "schedule",
     "cron_add",
@@ -140,7 +138,6 @@ cache_valid_secs = 300
 gated_actions = [
     "shell",
     "file_write",
-    "browser_open",
     "browser",
     "memory_forget",
 ]
@@ -453,7 +450,6 @@ encrypt = true
 [browser]
 enabled = false
 allowed_domains = []
-browser_open = "default"
 backend = "agent_browser"
 auto_backend_priority = []
 agent_browser_command = "agent-browser"

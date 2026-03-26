@@ -42,7 +42,7 @@ fi
 
 TAG="v${VERSION}"
 ASSET_NAME="zeroclaw-${TARGET}.tar.gz"
-ASSET_URL="https://github.com/zeroclaw-labs/zeroclaw/releases/download/${TAG}/${ASSET_NAME}"
+ASSET_URL="https://github.com/myagentzero/zeroclaw/releases/download/${TAG}/${ASSET_NAME}"
 TEMP_DIR="$(mktemp -d -t zeroclaw-termux-test-XXXXXX)"
 
 cleanup() { rm -rf "$TEMP_DIR"; }
@@ -179,7 +179,7 @@ fi
 
 # --- Test 10: SHA256 checksum verification ---
 info "Verifying SHA256 checksum"
-CHECKSUMS_URL="https://github.com/zeroclaw-labs/zeroclaw/releases/download/${TAG}/SHA256SUMS"
+CHECKSUMS_URL="https://github.com/myagentzero/zeroclaw/releases/download/${TAG}/SHA256SUMS"
 if curl -fsSL "$CHECKSUMS_URL" -o "$TEMP_DIR/SHA256SUMS" 2>/dev/null; then
   EXPECTED=$(grep "$ASSET_NAME" "$TEMP_DIR/SHA256SUMS" | awk '{print $1}')
   if [[ -n "$EXPECTED" ]]; then

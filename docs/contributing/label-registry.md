@@ -108,7 +108,7 @@ Tools are grouped by logical function rather than one label per file.
 
 | Label | Matches |
 |---|---|
-| `tool:browser` | `browser.rs`, `browser_delegate.rs`, `browser_open.rs`, `text_browser.rs`, `screenshot.rs` |
+| `tool:browser` | `browser.rs`, `browser_delegate.rs`, `text_browser.rs`, `screenshot.rs` |
 | `tool:cloud` | `cloud_ops.rs`, `cloud_patterns.rs` |
 | `tool:composio` | `composio.rs` |
 | `tool:cron` | `cron_add.rs`, `cron_list.rs`, `cron_remove.rs`, `cron_run.rs`, `cron_runs.rs`, `cron_update.rs` |

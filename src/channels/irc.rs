@@ -1,9 +1,9 @@
 use crate::channels::traits::{Channel, ChannelMessage, SendMessage};
 use async_trait::async_trait;
-use portable_atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{Mutex, mpsc};
 
 // Use tokio_rustls's re-export of rustls types
 use tokio_rustls::rustls;
@@ -104,11 +104,7 @@ impl IrcMessage {
         self.prefix.as_ref().and_then(|p| {
             let end = p.find('!').unwrap_or(p.len());
             let nick = &p[..end];
-            if nick.is_empty() {
-                None
-            } else {
-                Some(nick)
-            }
+            if nick.is_empty() { None } else { Some(nick) }
         })
     }
 }
@@ -287,7 +283,7 @@ impl IrcChannel {
         };
 
         let connector = tokio_rustls::TlsConnector::from(Arc::new(tls_config));
-        let domain = rustls::pki_types::ServerName::try_from(self.server.clone())?;
+        let domain = rustls::pki_types::ServerName::try_from(self.server.as_str())?.to_owned();
         let tls = connector.connect(domain, tcp).await?;
 
         Ok(tls)
@@ -580,8 +576,6 @@ impl Channel for IrcChannel {
                             .unwrap_or_default()
                             .as_secs(),
                         thread_ts: None,
-                        interruption_scope_id: None,
-                        attachments: vec![],
                     };
 
                     if tx.send(channel_msg).await.is_err() {

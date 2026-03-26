@@ -95,7 +95,7 @@ struct ApiChatRequest<'a> {
 struct ApiMessage {
     role: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    content: Option<ApiContent>,
+    content: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tool_call_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -129,28 +129,6 @@ struct NativeToolCall {
 struct NativeFunctionCall {
     name: String,
     arguments: String,
-}
-
-/// Multi-part content for vision messages (OpenAI format).
-#[derive(Debug, Clone, Serialize)]
-#[serde(untagged)]
-enum ApiContent {
-    Text(String),
-    Parts(Vec<ContentPart>),
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(tag = "type")]
-enum ContentPart {
-    #[serde(rename = "text")]
-    Text { text: String },
-    #[serde(rename = "image_url")]
-    ImageUrl { image_url: ImageUrlDetail },
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct ImageUrlDetail {
-    url: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -267,34 +245,6 @@ impl CopilotProvider {
         })
     }
 
-    /// Convert message content to API format, with multi-part support for
-    /// user messages containing `[IMAGE:...]` markers.
-    fn to_api_content(role: &str, content: &str) -> Option<ApiContent> {
-        if role != "user" {
-            return Some(ApiContent::Text(content.to_string()));
-        }
-
-        let (cleaned_text, image_refs) = crate::multimodal::parse_image_markers(content);
-        if image_refs.is_empty() {
-            return Some(ApiContent::Text(content.to_string()));
-        }
-
-        let mut parts = Vec::with_capacity(image_refs.len() + 1);
-        let trimmed = cleaned_text.trim();
-        if !trimmed.is_empty() {
-            parts.push(ContentPart::Text {
-                text: trimmed.to_string(),
-            });
-        }
-        for image_ref in image_refs {
-            parts.push(ContentPart::ImageUrl {
-                image_url: ImageUrlDetail { url: image_ref },
-            });
-        }
-
-        Some(ApiContent::Parts(parts))
-    }
-
     fn convert_messages(messages: &[ChatMessage]) -> Vec<ApiMessage> {
         messages
             .iter()
@@ -320,7 +270,7 @@ impl CopilotProvider {
                                 let content = value
                                     .get("content")
                                     .and_then(serde_json::Value::as_str)
-                                    .map(|s| ApiContent::Text(s.to_string()));
+                                    .map(ToString::to_string);
 
                                 return ApiMessage {
                                     role: "assistant".to_string(),
@@ -342,7 +292,7 @@ impl CopilotProvider {
                         let content = value
                             .get("content")
                             .and_then(serde_json::Value::as_str)
-                            .map(|s| ApiContent::Text(s.to_string()));
+                            .map(ToString::to_string);
 
                         return ApiMessage {
                             role: "tool".to_string(),
@@ -355,12 +305,49 @@ impl CopilotProvider {
 
                 ApiMessage {
                     role: message.role.clone(),
-                    content: Self::to_api_content(&message.role, &message.content),
+                    content: Some(message.content.clone()),
                     tool_call_id: None,
                     tool_calls: None,
                 }
             })
             .collect()
+    }
+
+    fn merge_response_choices(
+        choices: Vec<Choice>,
+    ) -> anyhow::Result<(Option<String>, Vec<ProviderToolCall>)> {
+        if choices.is_empty() {
+            return Err(anyhow::anyhow!("No response from GitHub Copilot"));
+        }
+
+        // Keep the first non-empty text response and aggregate tool calls from every choice.
+        let mut text = None;
+        let mut tool_calls = Vec::new();
+
+        for choice in choices {
+            let ResponseMessage {
+                content,
+                tool_calls: choice_tool_calls,
+            } = choice.message;
+
+            if text.is_none() {
+                if let Some(content) = content.filter(|value| !value.is_empty()) {
+                    text = Some(content);
+                }
+            }
+
+            for tool_call in choice_tool_calls.unwrap_or_default() {
+                tool_calls.push(ProviderToolCall {
+                    id: tool_call
+                        .id
+                        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+                    name: tool_call.function.name,
+                    arguments: tool_call.function.arguments,
+                });
+            }
+        }
+
+        Ok((text, tool_calls))
     }
 
     /// Send a chat completions request with required Copilot headers.
@@ -405,31 +392,17 @@ impl CopilotProvider {
             output_tokens: u.completion_tokens,
             cached_input_tokens: None,
         });
-        let choice = api_response
-            .choices
-            .into_iter()
-            .next()
-            .ok_or_else(|| anyhow::anyhow!("No response from GitHub Copilot"))?;
-
-        let tool_calls = choice
-            .message
-            .tool_calls
-            .unwrap_or_default()
-            .into_iter()
-            .map(|tool_call| ProviderToolCall {
-                id: tool_call
-                    .id
-                    .unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
-                name: tool_call.function.name,
-                arguments: tool_call.function.arguments,
-            })
-            .collect();
+        // Copilot may split text and tool calls across multiple choices.
+        let (text, tool_calls) = Self::merge_response_choices(api_response.choices)?;
 
         Ok(ProviderChatResponse {
-            text: choice.message.content,
+            text,
             tool_calls,
             usage,
             reasoning_content: None,
+            quota_metadata: None,
+            stop_reason: None,
+            raw_stop_reason: None,
         })
     }
 
@@ -660,14 +633,14 @@ impl Provider for CopilotProvider {
         if let Some(system) = system_prompt {
             messages.push(ApiMessage {
                 role: "system".to_string(),
-                content: Some(ApiContent::Text(system.to_string())),
+                content: Some(system.to_string()),
                 tool_call_id: None,
                 tool_calls: None,
             });
         }
         messages.push(ApiMessage {
             role: "user".to_string(),
-            content: Self::to_api_content("user", message),
+            content: Some(message.to_string()),
             tool_call_id: None,
             tool_calls: None,
         });
@@ -747,12 +720,16 @@ mod tests {
     #[test]
     fn copilot_headers_include_required_fields() {
         let headers = CopilotProvider::COPILOT_HEADERS;
-        assert!(headers
-            .iter()
-            .any(|(header, _)| *header == "Editor-Version"));
-        assert!(headers
-            .iter()
-            .any(|(header, _)| *header == "Editor-Plugin-Version"));
+        assert!(
+            headers
+                .iter()
+                .any(|(header, _)| *header == "Editor-Version")
+        );
+        assert!(
+            headers
+                .iter()
+                .any(|(header, _)| *header == "Editor-Plugin-Version")
+        );
         assert!(headers.iter().any(|(header, _)| *header == "User-Agent"));
     }
 
@@ -788,35 +765,77 @@ mod tests {
     }
 
     #[test]
-    fn to_api_content_user_with_image_returns_parts() {
-        let content = "describe this [IMAGE:data:image/png;base64,abc123]";
-        let result = CopilotProvider::to_api_content("user", content).unwrap();
-        match result {
-            ApiContent::Parts(parts) => {
-                assert_eq!(parts.len(), 2);
-                assert!(matches!(&parts[0], ContentPart::Text { text } if text == "describe this"));
-                assert!(
-                    matches!(&parts[1], ContentPart::ImageUrl { image_url } if image_url.url == "data:image/png;base64,abc123")
-                );
-            }
-            ApiContent::Text(_) => {
-                panic!("expected ApiContent::Parts for user message with image marker")
-            }
-        }
+    fn merge_response_choices_merges_tool_calls_across_choices() {
+        let choices = vec![
+            Choice {
+                message: ResponseMessage {
+                    content: Some("Let me check".to_string()),
+                    tool_calls: None,
+                },
+            },
+            Choice {
+                message: ResponseMessage {
+                    content: None,
+                    tool_calls: Some(vec![
+                        NativeToolCall {
+                            id: Some("tool-1".to_string()),
+                            kind: Some("function".to_string()),
+                            function: NativeFunctionCall {
+                                name: "get_time".to_string(),
+                                arguments: "{}".to_string(),
+                            },
+                        },
+                        NativeToolCall {
+                            id: Some("tool-2".to_string()),
+                            kind: Some("function".to_string()),
+                            function: NativeFunctionCall {
+                                name: "read_file".to_string(),
+                                arguments: r#"{"path":"notes.txt"}"#.to_string(),
+                            },
+                        },
+                    ]),
+                },
+            },
+        ];
+
+        let (text, tool_calls) = CopilotProvider::merge_response_choices(choices).unwrap();
+        assert_eq!(text.as_deref(), Some("Let me check"));
+        assert_eq!(tool_calls.len(), 2);
+        assert_eq!(tool_calls[0].id, "tool-1");
+        assert_eq!(tool_calls[1].id, "tool-2");
     }
 
     #[test]
-    fn to_api_content_user_plain_returns_text() {
-        let result = CopilotProvider::to_api_content("user", "hello world").unwrap();
-        assert!(matches!(result, ApiContent::Text(ref s) if s == "hello world"));
+    fn merge_response_choices_prefers_first_non_empty_text() {
+        let choices = vec![
+            Choice {
+                message: ResponseMessage {
+                    content: Some(String::new()),
+                    tool_calls: None,
+                },
+            },
+            Choice {
+                message: ResponseMessage {
+                    content: Some("First".to_string()),
+                    tool_calls: None,
+                },
+            },
+            Choice {
+                message: ResponseMessage {
+                    content: Some("Second".to_string()),
+                    tool_calls: None,
+                },
+            },
+        ];
+
+        let (text, tool_calls) = CopilotProvider::merge_response_choices(choices).unwrap();
+        assert_eq!(text.as_deref(), Some("First"));
+        assert!(tool_calls.is_empty());
     }
 
     #[test]
-    fn to_api_content_non_user_returns_text() {
-        let result = CopilotProvider::to_api_content("system", "you are helpful").unwrap();
-        assert!(matches!(result, ApiContent::Text(ref s) if s == "you are helpful"));
-
-        let result = CopilotProvider::to_api_content("assistant", "sure").unwrap();
-        assert!(matches!(result, ApiContent::Text(ref s) if s == "sure"));
+    fn merge_response_choices_rejects_empty_choice_list() {
+        let error = CopilotProvider::merge_response_choices(Vec::new()).unwrap_err();
+        assert!(error.to_string().contains("No response"));
     }
 }

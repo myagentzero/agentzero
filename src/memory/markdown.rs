@@ -91,9 +91,6 @@ impl MarkdownMemory {
                     timestamp: filename.to_string(),
                     session_id: None,
                     score: None,
-                    namespace: "default".into(),
-                    importance: None,
-                    superseded_by: None,
                 }
             })
             .collect()
@@ -161,23 +158,7 @@ impl Memory for MarkdownMemory {
         query: &str,
         limit: usize,
         _session_id: Option<&str>,
-        since: Option<&str>,
-        until: Option<&str>,
     ) -> anyhow::Result<Vec<MemoryEntry>> {
-        let since_dt = since
-            .map(chrono::DateTime::parse_from_rfc3339)
-            .transpose()
-            .map_err(|e| anyhow::anyhow!("invalid 'since' date (expected RFC 3339): {e}"))?;
-        let until_dt = until
-            .map(chrono::DateTime::parse_from_rfc3339)
-            .transpose()
-            .map_err(|e| anyhow::anyhow!("invalid 'until' date (expected RFC 3339): {e}"))?;
-        if let (Some(s), Some(u)) = (&since_dt, &until_dt) {
-            if s >= u {
-                anyhow::bail!("'since' must be before 'until'");
-            }
-        }
-
         let all = self.read_all_entries().await?;
         let query_lower = query.to_lowercase();
         let keywords: Vec<&str> = query_lower.split_whitespace().collect();
@@ -185,24 +166,6 @@ impl Memory for MarkdownMemory {
         let mut scored: Vec<MemoryEntry> = all
             .into_iter()
             .filter_map(|mut entry| {
-                if let Some(ref s) = since_dt {
-                    if let Ok(ts) = chrono::DateTime::parse_from_rfc3339(&entry.timestamp) {
-                        if ts < *s {
-                            return None;
-                        }
-                    }
-                }
-                if let Some(ref u) = until_dt {
-                    if let Ok(ts) = chrono::DateTime::parse_from_rfc3339(&entry.timestamp) {
-                        if ts > *u {
-                            return None;
-                        }
-                    }
-                }
-                if keywords.is_empty() {
-                    entry.score = Some(1.0);
-                    return Some(entry);
-                }
                 let content_lower = entry.content.to_lowercase();
                 let matched = keywords
                     .iter()
@@ -220,13 +183,9 @@ impl Memory for MarkdownMemory {
             .collect();
 
         scored.sort_by(|a, b| {
-            if keywords.is_empty() {
-                b.timestamp.as_str().cmp(a.timestamp.as_str())
-            } else {
-                b.score
-                    .partial_cmp(&a.score)
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            }
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
         });
         scored.truncate(limit);
         Ok(scored)
@@ -324,11 +283,13 @@ mod tests {
             .await
             .unwrap();
 
-        let results = mem.recall("Rust", 10, None, None, None).await.unwrap();
+        let results = mem.recall("Rust", 10, None).await.unwrap();
         assert!(results.len() >= 2);
-        assert!(results
-            .iter()
-            .all(|r| r.content.to_lowercase().contains("rust")));
+        assert!(
+            results
+                .iter()
+                .all(|r| r.content.to_lowercase().contains("rust"))
+        );
     }
 
     #[tokio::test]
@@ -337,10 +298,7 @@ mod tests {
         mem.store("a", "Rust is great", MemoryCategory::Core, None)
             .await
             .unwrap();
-        let results = mem
-            .recall("javascript", 10, None, None, None)
-            .await
-            .unwrap();
+        let results = mem.recall("javascript", 10, None).await.unwrap();
         assert!(results.is_empty());
     }
 
@@ -387,7 +345,7 @@ mod tests {
     #[tokio::test]
     async fn markdown_empty_recall() {
         let (_tmp, mem) = temp_workspace();
-        let results = mem.recall("anything", 10, None, None, None).await.unwrap();
+        let results = mem.recall("anything", 10, None).await.unwrap();
         assert!(results.is_empty());
     }
 

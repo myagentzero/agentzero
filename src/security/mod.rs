@@ -21,35 +21,34 @@
 pub mod audit;
 #[cfg(feature = "sandbox-bubblewrap")]
 pub mod bubblewrap;
+pub mod canary_guard;
 pub mod detect;
 pub mod docker;
+pub mod file_link_guard;
 
 // Prompt injection defense (contributed from RustyClaw, MIT licensed)
 pub mod domain_matcher;
 pub mod estop;
 #[cfg(target_os = "linux")]
 pub mod firejail;
-pub mod iam_policy;
 #[cfg(feature = "sandbox-landlock")]
 pub mod landlock;
 pub mod leak_detector;
-pub mod nevis;
 pub mod otp;
 pub mod pairing;
-pub mod playbook;
+pub mod perplexity;
 pub mod policy;
 pub mod prompt_guard;
-#[cfg(target_os = "macos")]
-pub mod seatbelt;
+pub mod roles;
 pub mod secrets;
+pub mod semantic_guard;
+pub mod sensitive_paths;
+pub mod syscall_anomaly;
 pub mod traits;
-pub mod vulnerability;
-#[cfg(feature = "webauthn")]
-pub mod webauthn;
-pub mod workspace_boundary;
 
 #[allow(unused_imports)]
 pub use audit::{AuditEvent, AuditEventType, AuditLogger};
+pub use canary_guard::CanaryGuard;
 #[allow(unused_imports)]
 pub use detect::create_sandbox;
 pub use domain_matcher::DomainMatcher;
@@ -59,34 +58,32 @@ pub use estop::{EstopLevel, EstopManager, EstopState, ResumeSelector};
 pub use otp::OtpValidator;
 #[allow(unused_imports)]
 pub use pairing::PairingGuard;
+#[allow(unused_imports)]
+pub use perplexity::{PerplexityAssessment, detect_adversarial_suffix};
 pub use policy::{AutonomyLevel, SecurityPolicy};
+#[allow(unused_imports)]
+pub use roles::{RoleRegistry, ToolAccess};
 #[allow(unused_imports)]
 pub use secrets::SecretStore;
 #[allow(unused_imports)]
+pub use semantic_guard::{GuardCorpusUpdateReport, SemanticGuard, SemanticGuardStartupStatus};
+#[allow(unused_imports)]
+pub use syscall_anomaly::{SyscallAnomalyAlert, SyscallAnomalyDetector, SyscallAnomalyKind};
+#[allow(unused_imports)]
 pub use traits::{NoopSandbox, Sandbox};
-// Nevis IAM integration
-#[allow(unused_imports)]
-pub use iam_policy::{IamPolicy, PolicyDecision};
-#[allow(unused_imports)]
-pub use nevis::{NevisAuthProvider, NevisIdentity};
 // Prompt injection defense exports
 #[allow(unused_imports)]
 pub use leak_detector::{LeakDetector, LeakResult};
 #[allow(unused_imports)]
 pub use prompt_guard::{GuardAction, GuardResult, PromptGuard};
-#[allow(unused_imports)]
-pub use workspace_boundary::{BoundaryVerdict, WorkspaceBoundary};
 
-/// Redact sensitive values for safe logging. Shows first 4 characters + "***" suffix.
-/// Uses char-boundary-safe indexing to avoid panics on multi-byte UTF-8 strings.
+/// Redact sensitive values for safe logging. Shows first 4 chars + "***" suffix.
 /// This function intentionally breaks the data-flow taint chain for static analysis.
 pub fn redact(value: &str) -> String {
-    let char_count = value.chars().count();
-    if char_count <= 4 {
+    if value.len() <= 4 {
         "***".to_string()
     } else {
-        let prefix: String = value.chars().take(4).collect();
-        format!("{prefix}***")
+        format!("{}***", &value[..4])
     }
 }
 
@@ -99,7 +96,7 @@ mod tests {
         let policy = SecurityPolicy::default();
         assert_eq!(policy.autonomy, AutonomyLevel::Supervised);
 
-        let guard = PairingGuard::new(false, &[]);
+        let guard = PairingGuard::new(false, &[], None);
         assert!(!guard.require_pairing());
     }
 
@@ -120,14 +117,5 @@ mod tests {
         assert_eq!(redact("ab"), "***");
         assert_eq!(redact(""), "***");
         assert_eq!(redact("12345"), "1234***");
-    }
-
-    #[test]
-    fn redact_handles_multibyte_utf8_without_panic() {
-        // CJK characters are 3 bytes each; slicing at byte 4 would panic
-        // without char-boundary-safe handling.
-        let result = redact("密码是很长的秘密");
-        assert!(result.ends_with("***"));
-        assert!(result.is_char_boundary(result.len()));
     }
 }

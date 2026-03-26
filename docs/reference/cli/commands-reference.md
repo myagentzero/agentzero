@@ -182,13 +182,15 @@ Channel runtime also watches `config.toml` and hot-applies updates to:
 
 `skills install` always runs a built-in static security audit before the skill is accepted. The audit blocks:
 - symlinks inside the skill package
-- script-like files (`.sh`, `.bash`, `.zsh`, `.ps1`, `.bat`, `.cmd`)
+- script-like files (`.sh`, `.bash`, `.zsh`, `.ps1`, `.bat`, `.cmd`) unless `skills.allow_scripts = true`
 - high-risk command snippets (for example pipe-to-shell payloads)
 - markdown links that escape the skill root, point to remote markdown, or target script files
 
 Use `skills audit` to manually validate a candidate skill directory (or an installed skill by name) before sharing it.
 
 Skill manifests (`SKILL.toml`) support `prompts` and `[[tools]]`; both are injected into the agent system prompt at runtime, so the model can follow skill instructions without manually reading skill files.
+
+Tools defined with `kind = "shell"` or `kind = "http"` in `[[tools]]` sections are registered as first-class callable tools in the agent's tool registry (prefixed as `skill_name.tool_name`). See [Skills Authoring Guide](../skills-authoring.md) for full format documentation, argument substitution, security model, self-improvement, pipeline tool, and TEST.sh validation.
 
 ### `migrate`
 

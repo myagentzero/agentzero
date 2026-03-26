@@ -291,19 +291,9 @@ impl Memory for QdrantMemory {
         query: &str,
         limit: usize,
         session_id: Option<&str>,
-        since: Option<&str>,
-        until: Option<&str>,
     ) -> Result<Vec<MemoryEntry>> {
         if query.trim().is_empty() {
-            let mut entries = self.list(None, session_id).await?;
-            if let Some(s) = since {
-                entries.retain(|e| e.timestamp.as_str() >= s);
-            }
-            if let Some(u) = until {
-                entries.retain(|e| e.timestamp.as_str() <= u);
-            }
-            entries.truncate(limit);
-            return Ok(entries);
+            return self.list(None, session_id).await;
         }
 
         self.ensure_initialized().await?;
@@ -354,7 +344,7 @@ impl Memory for QdrantMemory {
 
         let result: QdrantSearchResult = resp.json().await?;
 
-        let mut entries: Vec<MemoryEntry> = result
+        let entries = result
             .result
             .into_iter()
             .filter_map(|point| {
@@ -373,20 +363,9 @@ impl Memory for QdrantMemory {
                     timestamp: payload.timestamp,
                     session_id: payload.session_id,
                     score: Some(point.score),
-                    namespace: "default".into(),
-                    importance: None,
-                    superseded_by: None,
                 })
             })
             .collect();
-
-        // Filter by time range if specified
-        if let Some(s) = since {
-            entries.retain(|e| e.timestamp.as_str() >= s);
-        }
-        if let Some(u) = until {
-            entries.retain(|e| e.timestamp.as_str() <= u);
-        }
 
         Ok(entries)
     }
@@ -440,9 +419,6 @@ impl Memory for QdrantMemory {
                 timestamp: payload.timestamp,
                 session_id: payload.session_id,
                 score: None,
-                namespace: "default".into(),
-                importance: None,
-                superseded_by: None,
             })
         });
 
@@ -520,9 +496,6 @@ impl Memory for QdrantMemory {
                     timestamp: payload.timestamp,
                     session_id: payload.session_id,
                     score: None,
-                    namespace: "default".into(),
-                    importance: None,
-                    superseded_by: None,
                 })
             })
             .collect();

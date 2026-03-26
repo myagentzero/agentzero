@@ -148,8 +148,8 @@ async fn agent_respects_max_tool_iterations() {
 
     let invocations = *count.lock().unwrap();
     assert!(
-        invocations <= 10,
-        "tool invocations ({invocations}) should not exceed default max_tool_iterations (10)"
+        invocations <= 20,
+        "tool invocations ({invocations}) should not exceed default max_tool_iterations (20)"
     );
 }
 
@@ -165,6 +165,9 @@ async fn agent_handles_empty_provider_response() {
         tool_calls: vec![],
         usage: None,
         reasoning_content: None,
+        quota_metadata: None,
+        stop_reason: None,
+        raw_stop_reason: None,
     }]));
 
     let mut agent = build_agent(provider, vec![Box::new(EchoTool)]);
@@ -180,6 +183,9 @@ async fn agent_handles_none_text_response() {
         tool_calls: vec![],
         usage: None,
         reasoning_content: None,
+        quota_metadata: None,
+        stop_reason: None,
+        raw_stop_reason: None,
     }]));
 
     let mut agent = build_agent(provider, vec![Box::new(EchoTool)]);

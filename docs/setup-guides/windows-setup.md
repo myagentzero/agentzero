@@ -25,7 +25,7 @@ You can also pass flags to skip the interactive menu:
 ### Option B: Scoop (package manager)
 
 ```powershell
-scoop bucket add zeroclaw https://github.com/zeroclaw-labs/scoop-zeroclaw
+scoop bucket add zeroclaw https://github.com/myagentzero/scoop-zeroclaw
 scoop install zeroclaw
 ```
 

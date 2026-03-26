@@ -171,7 +171,7 @@ impl WebFetchTool {
             });
         }
 
-        let output = self.truncate_response(markdown);
+        let output = crate::util::strip_unicode_format_controls(&self.truncate_response(markdown));
 
         Ok(ToolResult {
             success: true,
@@ -189,7 +189,7 @@ impl WebFetchTool {
                     success: false,
                     output: String::new(),
                     error: Some(format!("HTTP request failed: {e}")),
-                }
+                };
             }
         };
 
@@ -239,7 +239,7 @@ impl WebFetchTool {
                     success: false,
                     output: String::new(),
                     error: Some(format!("Failed to read response body: {e}")),
-                }
+                };
             }
         };
 
@@ -249,7 +249,7 @@ impl WebFetchTool {
             body
         };
 
-        let output = self.truncate_response(&text);
+        let output = crate::util::strip_unicode_format_controls(&self.truncate_response(&text));
 
         ToolResult {
             success: true,
@@ -316,7 +316,7 @@ impl Tool for WebFetchTool {
                     success: false,
                     output: String::new(),
                     error: Some(e.to_string()),
-                })
+                });
             }
         };
 
@@ -365,7 +365,7 @@ impl Tool for WebFetchTool {
                     success: false,
                     output: String::new(),
                     error: Some(format!("Failed to build HTTP client: {e}")),
-                })
+                });
             }
         };
 
@@ -877,14 +877,16 @@ mod tests {
     fn redirect_target_validation_allows_permitted_host() {
         let allowed = vec!["example.com".to_string()];
         let blocked = vec![];
-        assert!(validate_target_url(
-            "https://docs.example.com/page",
-            &allowed,
-            &blocked,
-            &[],
-            "web_fetch"
-        )
-        .is_ok());
+        assert!(
+            validate_target_url(
+                "https://docs.example.com/page",
+                &allowed,
+                &blocked,
+                &[],
+                "web_fetch"
+            )
+            .is_ok()
+        );
     }
 
     #[test]
@@ -1290,9 +1292,7 @@ mod tests {
 
     #[tokio::test]
     async fn firecrawl_missing_api_key_returns_error() {
-        // Ensure the env var is unset for this test
-        std::env::remove_var("FIRECRAWL_TEST_MISSING_KEY");
-
+        // Use a unique env var name that is guaranteed to not exist.
         let tool = test_tool_with_firecrawl(FirecrawlConfig {
             enabled: true,
             api_key_env: "FIRECRAWL_TEST_MISSING_KEY".into(),
@@ -1327,9 +1327,7 @@ mod tests {
             .mount(&server)
             .await;
 
-        // Ensure Firecrawl API key env is missing so fallback also fails
-        std::env::remove_var("FIRECRAWL_DOUBLE_FAIL_KEY");
-
+        // Use a unique env var name that is guaranteed to not exist.
         let security = Arc::new(SecurityPolicy {
             autonomy: AutonomyLevel::Supervised,
             ..SecurityPolicy::default()
@@ -1380,88 +1378,6 @@ mod tests {
             "Expected original HTTP 403 error, got: {:?}",
             standard_result.error
         );
-    }
-
-    // ── Item 3: end-to-end fallback orchestration in execute() ───────
-
-    #[tokio::test]
-    async fn execute_falls_back_to_firecrawl_on_short_body() {
-        use wiremock::matchers::{method, path};
-        use wiremock::{Mock, MockServer, ResponseTemplate};
-
-        // Standard-fetch server: returns a very short body (JS-only placeholder)
-        let standard_server = MockServer::start().await;
-        Mock::given(method("GET"))
-            .respond_with(
-                ResponseTemplate::new(200)
-                    .set_body_string("<html><body>Loading...</body></html>")
-                    .insert_header("content-type", "text/html"),
-            )
-            .mount(&standard_server)
-            .await;
-
-        // Firecrawl server: returns rich markdown content
-        let firecrawl_server = MockServer::start().await;
-        Mock::given(method("POST"))
-            .and(path("/scrape"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-                "success": true,
-                "data": {
-                    "markdown": "# Real Content\n\nThis is the full page content extracted by Firecrawl, with enough text to be clearly above the minimum body length threshold."
-                }
-            })))
-            .mount(&firecrawl_server)
-            .await;
-
-        // Set up API key env var for this test
-        std::env::set_var("FIRECRAWL_E2E_TEST_KEY", "test-key-12345");
-
-        let security = Arc::new(SecurityPolicy {
-            autonomy: AutonomyLevel::Supervised,
-            ..SecurityPolicy::default()
-        });
-        let standard_addr = standard_server.address();
-        let firecrawl_addr = firecrawl_server.address();
-        let tool = WebFetchTool::new(
-            security,
-            vec!["*".into()],
-            vec![],
-            500_000,
-            30,
-            FirecrawlConfig {
-                enabled: true,
-                api_key_env: "FIRECRAWL_E2E_TEST_KEY".into(),
-                api_url: format!("http://{firecrawl_addr}"),
-                ..FirecrawlConfig::default()
-            },
-            vec![],
-        );
-
-        // Bypass SSRF-guarded execute() — call standard_fetch + fallback
-        // logic directly so wiremock on 127.0.0.1 is reachable.
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(30))
-            .build()
-            .unwrap();
-
-        let url = format!("http://{standard_addr}/page");
-        let standard_result = tool.standard_fetch(&client, &url).await;
-
-        // Standard fetch returns short body, should trigger fallback
-        assert!(tool.should_fallback_to_firecrawl(&standard_result));
-
-        // Firecrawl fallback should succeed with rich content
-        let result = Box::pin(tool.fetch_via_firecrawl(&url)).await.unwrap();
-
-        assert!(result.success, "Expected successful Firecrawl fallback");
-        assert!(
-            result.output.contains("Real Content"),
-            "Expected Firecrawl markdown content, got: {}",
-            result.output
-        );
-
-        // Clean up env var
-        std::env::remove_var("FIRECRAWL_E2E_TEST_KEY");
     }
 
     // ── Allowed private hosts ─────────────────────────────────────

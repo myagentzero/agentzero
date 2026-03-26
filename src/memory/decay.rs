@@ -3,7 +3,7 @@ use chrono::{DateTime, Utc};
 
 /// Default half-life in days for time-decay scoring.
 /// After this many days, a non-Core memory's score drops to 50%.
-pub const DEFAULT_HALF_LIFE_DAYS: f64 = 7.0;
+const DEFAULT_HALF_LIFE_DAYS: f64 = 7.0;
 
 /// Apply exponential time decay to memory entry scores.
 ///
@@ -57,9 +57,6 @@ mod tests {
             timestamp: timestamp.into(),
             session_id: None,
             score,
-            namespace: "default".into(),
-            importance: None,
-            superseded_by: None,
         }
     }
 

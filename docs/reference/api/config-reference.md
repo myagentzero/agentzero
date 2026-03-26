@@ -158,7 +158,7 @@ message_timeout_scale_max = 8
 | `method` | `totp` | OTP method (`totp`, `pairing`, `cli-prompt`) |
 | `token_ttl_secs` | `30` | TOTP time-step window in seconds |
 | `cache_valid_secs` | `300` | Cache window for recently validated OTP codes |
-| `gated_actions` | `["shell","file_write","browser_open","browser","memory_forget"]` | Tool actions protected by OTP |
+| `gated_actions` | `["shell","file_write","browser","memory_forget"]` | Tool actions protected by OTP |
 | `gated_domains` | `[]` | Explicit domain patterns requiring OTP (`*.example.com`, `login.example.com`) |
 | `gated_domain_categories` | `[]` | Domain preset categories (`banking`, `medical`, `government`, `identity_providers`) |
 
@@ -177,7 +177,7 @@ enabled = true
 method = "totp"
 token_ttl_secs = 30
 cache_valid_secs = 300
-gated_actions = ["shell", "browser_open"]
+gated_actions = ["shell", "browser"]
 gated_domains = ["*.chase.com", "accounts.google.com"]
 gated_domain_categories = ["banking"]
 ```
@@ -347,8 +347,8 @@ Notes:
 
 | Key | Default | Purpose |
 |---|---|---|
-| `enabled` | `false` | Enable `browser_open` tool (opens URLs in the system browser without scraping) |
-| `allowed_domains` | `[]` | Allowed domains for `browser_open` (exact/subdomain match, or `"*"` for all public domains) |
+| `enabled` | `false` | Enable browser automation tools |
+| `allowed_domains` | `[]` | Allowed domains for browser tools (exact/subdomain match, or `"*"` for all public domains) |
 | `session_name` | unset | Browser session name (for agent-browser automation) |
 | `backend` | `agent_browser` | Browser automation backend: `"agent_browser"`, `"rust_native"`, `"computer_use"`, or `"auto"` |
 | `native_headless` | `true` | Headless mode for rust-native backend |

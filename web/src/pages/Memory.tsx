@@ -9,7 +9,6 @@ import {
 } from 'lucide-react';
 import type { MemoryEntry } from '@/types/api';
 import { getMemory, storeMemory, deleteMemory } from '@/lib/api';
-import { t } from '@/lib/i18n';
 
 function truncate(text: string, max: number): string {
   if (text.length <= max) return text;
@@ -40,9 +39,9 @@ export default function Memory() {
   const fetchEntries = (q?: string, cat?: string) => {
     setLoading(true);
     getMemory(q || undefined, cat || undefined)
-    .then(setEntries)
-    .catch((err) => setError(err.message))
-    .finally(() => setLoading(false));
+      .then(setEntries)
+      .catch((err) => setError(err.message))
+      .finally(() => setLoading(false));
   };
 
   useEffect(() => {
@@ -56,10 +55,14 @@ export default function Memory() {
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter') handleSearch();
   };
+
   const categories = Array.from(new Set(entries.map((e) => e.category))).sort();
 
   const handleAdd = async () => {
-    if (!formKey.trim() || !formContent.trim()) { setFormError(t('memory.validation_error')); return; }
+    if (!formKey.trim() || !formContent.trim()) {
+      setFormError('Key and content are required.');
+      return;
+    }
     setSubmitting(true);
     setFormError(null);
     try {
@@ -70,10 +73,14 @@ export default function Memory() {
       );
       fetchEntries(search, categoryFilter);
       setShowForm(false);
-      setFormKey(''); setFormContent(''); setFormCategory('');
+      setFormKey('');
+      setFormContent('');
+      setFormCategory('');
     } catch (err: unknown) {
-      setFormError(err instanceof Error ? err.message : t('memory.store_error'));
-    } finally { setSubmitting(false); }
+      setFormError(err instanceof Error ? err.message : 'Failed to store memory');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const handleDelete = async (key: string) => {
@@ -81,7 +88,7 @@ export default function Memory() {
       await deleteMemory(key);
       setEntries((prev) => prev.filter((e) => e.key !== key));
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : t('memory.delete_error'));
+      setError(err instanceof Error ? err.message : 'Failed to delete memory');
     } finally {
       setConfirmDelete(null);
     }
@@ -89,39 +96,54 @@ export default function Memory() {
 
   if (error && entries.length === 0) {
     return (
-      <div className="p-6 animate-fade-in">
-        <div className="rounded-2xl border p-4" style={{ background: 'rgba(239, 68, 68, 0.08)', borderColor: 'rgba(239, 68, 68, 0.2)', color: '#f87171' }}>
-          {t('memory.load_error')}: {error}
+      <div className="p-6">
+        <div className="rounded-lg bg-red-900/30 border border-red-700 p-4 text-red-300">
+          Failed to load memory: {error}
         </div>
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col h-full p-6 gap-6 animate-fade-in overflow-hidden">
+    <div className="p-6 space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <Brain className="h-5 w-5" style={{ color: 'var(--pc-accent)' }} />
-          <h2 className="text-sm font-semibold uppercase tracking-wider" style={{ color: 'var(--pc-text-primary)' }}>
-            {t('memory.memory_title')} ({entries.length})
+          <Brain className="h-5 w-5 text-blue-400" />
+          <h2 className="text-base font-semibold text-white">
+            Memory ({entries.length})
           </h2>
         </div>
-        <button onClick={() => setShowForm(true)} className="btn-electric flex items-center gap-2 text-sm px-4 py-2">
-          <Plus className="h-4 w-4" />{t('memory.add_memory')}
+        <button
+          onClick={() => setShowForm(true)}
+          className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+        >
+          <Plus className="h-4 w-4" />
+          Add Memory
         </button>
       </div>
 
       {/* Search and Filter */}
       <div className="flex flex-col sm:flex-row gap-3">
         <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4" style={{ color: 'var(--pc-text-faint)' }} />
-          <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} onKeyDown={handleKeyDown} placeholder={t('memory.search_placeholder')} className="input-electric w-full pl-10 pr-4 py-2.5 text-sm" />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="Search memory entries..."
+            className="w-full bg-gray-900 border border-gray-700 rounded-lg pl-10 pr-4 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
         </div>
         <div className="relative">
-          <Filter className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4" style={{ color: 'var(--pc-text-faint)' }} />
-          <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} className="input-electric pl-10 pr-8 py-2.5 text-sm appearance-none cursor-pointer">
-            <option value="">{t('memory.all_categories')}</option>
+          <Filter className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
+          <select
+            value={categoryFilter}
+            onChange={(e) => setCategoryFilter(e.target.value)}
+            className="bg-gray-900 border border-gray-700 rounded-lg pl-10 pr-8 py-2.5 text-sm text-white appearance-none focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
+          >
+            <option value="">All Categories</option>
             {categories.map((cat) => (
               <option key={cat} value={cat}>
                 {cat}
@@ -129,68 +151,100 @@ export default function Memory() {
             ))}
           </select>
         </div>
-        <button onClick={handleSearch} className="btn-electric px-4 py-2.5 text-sm">{t('memory.search_button')}</button>
+        <button
+          onClick={handleSearch}
+          className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors"
+        >
+          Search
+        </button>
       </div>
 
       {/* Error banner (non-fatal) */}
       {error && (
-        <div className="rounded-xl border p-3 text-sm animate-fade-in" style={{ background: 'rgba(239, 68, 68, 0.08)', borderColor: 'rgba(239, 68, 68, 0.2)', color: '#f87171' }}>
+        <div className="rounded-lg bg-red-900/30 border border-red-700 p-3 text-sm text-red-300">
           {error}
         </div>
       )}
 
       {/* Add Memory Form Modal */}
       {showForm && (
-        <div className="fixed inset-0 modal-backdrop flex items-center justify-center z-50">
-          <div className="surface-panel p-6 w-full max-w-md mx-4 animate-fade-in-scale">
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+          <div className="bg-gray-900 border border-gray-700 rounded-xl p-6 w-full max-w-md mx-4">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold" style={{ color: 'var(--pc-text-primary)' }}>{t('memory.add_modal_title')}</h3>
+              <h3 className="text-lg font-semibold text-white">Add Memory</h3>
               <button
                 onClick={() => {
                   setShowForm(false);
                   setFormError(null);
                 }}
-                className="btn-icon">
+                className="text-gray-400 hover:text-white transition-colors"
+              >
                 <X className="h-5 w-5" />
               </button>
             </div>
+
             {formError && (
-              <div className="mb-4 rounded-xl border p-3 text-sm animate-fade-in" style={{ background: 'rgba(239, 68, 68, 0.08)', borderColor: 'rgba(239, 68, 68, 0.2)', color: '#f87171' }}>
+              <div className="mb-4 rounded-lg bg-red-900/30 border border-red-700 p-3 text-sm text-red-300">
                 {formError}
               </div>
             )}
+
             <div className="space-y-4">
               <div>
-                <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wider" style={{ color: 'var(--pc-text-secondary)' }}>
-                  {t('memory.key_required')} <span style={{ color: 'var(--color-status-error)' }}>*</span>
+                <label className="block text-sm font-medium text-gray-300 mb-1">
+                  Key <span className="text-red-400">*</span>
                 </label>
-                <input type="text" value={formKey} onChange={(e) => setFormKey(e.target.value)} placeholder="e.g. user_preferences" className="input-electric w-full px-3 py-2.5 text-sm" />
+                <input
+                  type="text"
+                  value={formKey}
+                  onChange={(e) => setFormKey(e.target.value)}
+                  placeholder="e.g. user_preferences"
+                  className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
               </div>
               <div>
-                <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wider" style={{ color: 'var(--pc-text-secondary)' }}>
-                  {t('memory.content_required')} <span style={{ color: 'var(--color-status-error)' }}>*</span>
+                <label className="block text-sm font-medium text-gray-300 mb-1">
+                  Content <span className="text-red-400">*</span>
                 </label>
-                <textarea value={formContent} onChange={(e) => setFormContent(e.target.value)} placeholder="Memory content..." rows={4} className="input-electric w-full px-3 py-2.5 text-sm resize-none" />
+                <textarea
+                  value={formContent}
+                  onChange={(e) => setFormContent(e.target.value)}
+                  placeholder="Memory content..."
+                  rows={4}
+                  className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+                />
               </div>
               <div>
-                <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wider" style={{ color: 'var(--pc-text-secondary)' }}>
-                  {t('memory.category_optional')}
+                <label className="block text-sm font-medium text-gray-300 mb-1">
+                  Category (optional)
                 </label>
-                <input type="text" value={formCategory} onChange={(e) => setFormCategory(e.target.value)} placeholder="e.g. preferences, context, facts" className="input-electric w-full px-3 py-2.5 text-sm" />
+                <input
+                  type="text"
+                  value={formCategory}
+                  onChange={(e) => setFormCategory(e.target.value)}
+                  placeholder="e.g. preferences, context, facts"
+                  className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
               </div>
             </div>
+
             <div className="flex justify-end gap-3 mt-6">
               <button
                 onClick={() => {
                   setShowForm(false);
                   setFormError(null);
                 }}
-                className="btn-secondary px-4 py-2 text-sm font-medium"
+                className="px-4 py-2 text-sm font-medium text-gray-300 hover:text-white border border-gray-700 rounded-lg hover:bg-gray-800 transition-colors"
               >
-                {t('memory.cancel')}
+                Cancel
               </button>
               <button
-                onClick={handleAdd} disabled={submitting} className="btn-electric px-4 py-2 text-sm font-medium">{submitting ? t('memory.saving') : t('common.save')}</button>
+                onClick={handleAdd}
+                disabled={submitting}
+                className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:opacity-50"
+              >
+                {submitting ? 'Saving...' : 'Save'}
+              </button>
             </div>
           </div>
         </div>
@@ -199,66 +253,78 @@ export default function Memory() {
       {/* Memory Table */}
       {loading ? (
         <div className="flex items-center justify-center h-32">
-          <div className="h-8 w-8 border-2 rounded-full animate-spin" style={{ borderColor: 'var(--pc-border)', borderTopColor: 'var(--pc-accent)' }} />
+          <div className="animate-spin rounded-full h-8 w-8 border-2 border-blue-500 border-t-transparent" />
         </div>
       ) : entries.length === 0 ? (
-        <div className="card p-8 text-center">
-          <Brain className="h-10 w-10 mx-auto mb-3" style={{ color: 'var(--pc-text-faint)' }} />
-          <p style={{ color: 'var(--pc-text-muted)' }}>{t('memory.empty')}</p>
+        <div className="bg-gray-900 rounded-xl border border-gray-800 p-8 text-center">
+          <Brain className="h-10 w-10 text-gray-600 mx-auto mb-3" />
+          <p className="text-gray-400">No memory entries found.</p>
         </div>
       ) : (
-        <div className="card overflow-x-auto rounded-2xl">
-          <table className="table-electric">
+        <div className="bg-gray-900 rounded-xl border border-gray-800 overflow-x-auto">
+          <table className="w-full text-sm">
             <thead>
-              <tr>
-                <th>{t('memory.key')}</th>
-                <th>{t('memory.content')}</th>
-                <th>{t('memory.category')}</th>
-                <th>{t('memory.timestamp')}</th>
-                <th className="text-right">{t('common.actions')}</th>
+              <tr className="border-b border-gray-800">
+                <th className="text-left px-4 py-3 text-gray-400 font-medium">
+                  Key
+                </th>
+                <th className="text-left px-4 py-3 text-gray-400 font-medium">
+                  Content
+                </th>
+                <th className="text-left px-4 py-3 text-gray-400 font-medium">
+                  Category
+                </th>
+                <th className="text-left px-4 py-3 text-gray-400 font-medium">
+                  Timestamp
+                </th>
+                <th className="text-right px-4 py-3 text-gray-400 font-medium">
+                  Actions
+                </th>
               </tr>
             </thead>
             <tbody>
               {entries.map((entry) => (
-                <tr key={entry.id}>
-                  <td className="font-mono text-xs" style={{ color: 'var(--pc-text-primary)' }}>
+                <tr
+                  key={entry.id}
+                  className="border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors"
+                >
+                  <td className="px-4 py-3 text-white font-medium font-mono text-xs">
                     {entry.key}
                   </td>
-                  <td className="max-w-[300px] text-sm" style={{ color: 'var(--pc-text-secondary)' }}>
+                  <td className="px-4 py-3 text-gray-300 max-w-[300px]">
                     <span title={entry.content}>
                       {truncate(entry.content, 80)}
                     </span>
                   </td>
-                  <td>
-                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-semibold capitalize border" style={{ borderColor: 'var(--pc-border)', color: 'var(--pc-text-secondary)', background: 'var(--pc-accent-glow)' }}>
+                  <td className="px-4 py-3">
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-800 text-gray-300 capitalize">
                       {entry.category}
                     </span>
                   </td>
-                  <td className="text-xs whitespace-nowrap" style={{ color: 'var(--pc-text-muted)' }}>
+                  <td className="px-4 py-3 text-gray-400 text-xs whitespace-nowrap">
                     {formatDate(entry.timestamp)}
                   </td>
-                  <td className="text-right">
+                  <td className="px-4 py-3 text-right">
                     {confirmDelete === entry.key ? (
-                      <div className="flex items-center justify-end gap-2 animate-fade-in">
-                        <span className="text-xs" style={{ color: 'var(--color-status-error)' }}>
-                          {t('memory.delete_confirm')}
-                        </span>
+                      <div className="flex items-center justify-end gap-2">
+                        <span className="text-xs text-red-400">Delete?</span>
                         <button
                           onClick={() => handleDelete(entry.key)}
-                          className="text-xs font-medium" style={{ color: 'var(--color-status-error)' }}
+                          className="text-red-400 hover:text-red-300 text-xs font-medium"
                         >
-                          {t('memory.yes')}
+                          Yes
                         </button>
                         <button
                           onClick={() => setConfirmDelete(null)}
-                          className="text-xs font-medium" style={{ color: 'var(--pc-text-muted)' }}>
-                          {t('memory.no')}
+                          className="text-gray-400 hover:text-white text-xs font-medium"
+                        >
+                          No
                         </button>
                       </div>
                     ) : (
                       <button
                         onClick={() => setConfirmDelete(entry.key)}
-                        className="btn-icon"
+                        className="text-gray-400 hover:text-red-400 transition-colors"
                       >
                         <Trash2 className="h-4 w-4" />
                       </button>

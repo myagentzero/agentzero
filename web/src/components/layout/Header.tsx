@@ -1,10 +1,8 @@
-import { useState } from 'react';
 import { useLocation } from 'react-router-dom';
-import { LogOut, Menu, Settings } from 'lucide-react';
-import { t } from '@/lib/i18n';
+import { LogOut, Menu, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
+import { t, LANGUAGE_BUTTON_LABELS, LANGUAGE_SWITCH_ORDER } from '@/lib/i18n';
 import { useLocaleContext } from '@/App';
 import { useAuth } from '@/hooks/useAuth';
-import { SettingsModal } from '@/components/SettingsModal';
 
 const routeTitles: Record<string, string> = {
   '/': 'nav.dashboard',
@@ -13,112 +11,93 @@ const routeTitles: Record<string, string> = {
   '/cron': 'nav.cron',
   '/integrations': 'nav.integrations',
   '/memory': 'nav.memory',
+  '/devices': 'nav.devices',
   '/config': 'nav.config',
   '/cost': 'nav.cost',
   '/logs': 'nav.logs',
   '/doctor': 'nav.doctor',
 };
 
+const languageSummary = 'English · 简体中文 · 日本語 · Русский · Français · Tiếng Việt · Ελληνικά';
+
 interface HeaderProps {
-  onMenuToggle: () => void;
+  isSidebarCollapsed: boolean;
+  onToggleSidebar: () => void;
+  onToggleSidebarCollapse: () => void;
 }
 
-export default function Header({ onMenuToggle }: HeaderProps) {
+export default function Header({
+  isSidebarCollapsed,
+  onToggleSidebar,
+  onToggleSidebarCollapse,
+}: HeaderProps) {
   const location = useLocation();
   const { logout } = useAuth();
   const { locale, setAppLocale } = useLocaleContext();
-  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const titleKey = routeTitles[location.pathname] ?? 'nav.dashboard';
   const pageTitle = t(titleKey);
 
   const toggleLanguage = () => {
-    // Cycle through: en -> zh -> tr -> en
-    const nextLocale = locale === 'en' ? 'zh' : locale === 'zh' ? 'tr' : 'en';
+    const currentIndex = LANGUAGE_SWITCH_ORDER.indexOf(locale);
+    const nextLocale =
+      LANGUAGE_SWITCH_ORDER[(currentIndex + 1) % LANGUAGE_SWITCH_ORDER.length] ?? 'en';
     setAppLocale(nextLocale);
   };
 
   return (
-    <>
-      <header className="h-14 flex items-center justify-between px-6 border-b animate-fade-in" style={{ background: 'var(--pc-bg-surface)', borderColor: 'var(--pc-border)', backdropFilter: 'blur(12px)', }}>
-        <div className="flex items-center gap-3">
-          {/* Hamburger — visible only on mobile */}
-          <button
-            type="button"
-            onClick={onMenuToggle}
-            className="md:hidden p-1.5 -ml-1.5 rounded-lg transition-colors duration-200"
-            style={{ color: 'var(--pc-text-muted)' }}
-            onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--pc-text-primary)'; e.currentTarget.style.background = 'var(--pc-hover)'; }}
-            onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--pc-text-muted)'; e.currentTarget.style.background = 'transparent'; }}
-            aria-label="Open menu"
-          >
-            <Menu className="h-5 w-5" />
-          </button>
+    <header className="glass-header relative flex min-h-[4.5rem] flex-wrap items-center justify-between gap-2 rounded-2xl border border-[#1a3670] px-4 py-3 sm:px-5 sm:py-3.5 md:flex-nowrap md:px-8 md:py-4">
+      <div className="absolute inset-0 pointer-events-none opacity-70 bg-[radial-gradient(circle_at_15%_30%,rgba(41,148,255,0.22),transparent_45%),radial-gradient(circle_at_85%_75%,rgba(0,209,255,0.14),transparent_40%)]" />
 
-          {/* Page title */}
-          <h1 className="h-9 leading-9 text-lg font-semibold tracking-tight" style={{ color: 'var(--pc-text-primary)' }}>{pageTitle}</h1>
+      <div className="relative flex min-w-0 items-center gap-2.5 sm:gap-3">
+        <button
+          type="button"
+          onClick={onToggleSidebar}
+          aria-label="Open navigation"
+          className="rounded-lg border border-[#294a8f] bg-[#081637]/70 p-1.5 text-[#9ec2ff] transition hover:border-[#4f83ff] hover:text-white md:hidden"
+        >
+          <Menu className="h-5 w-5" />
+        </button>
+
+        <div className="min-w-0">
+          <h1 className="truncate text-base font-semibold tracking-wide text-white sm:text-lg">
+            {pageTitle}
+          </h1>
+          <p className="hidden text-[10px] uppercase tracking-[0.16em] text-[#7ea5eb] sm:block">
+            Electric dashboard
+          </p>
         </div>
+      </div>
 
-        {/* Right-side controls */}
-        <div className="flex items-center gap-2 h-9">
-          {/* Settings */}
-          <button
-            type="button"
-            onClick={() => setSettingsOpen(true)}
-            className="h-9 w-9 flex items-center justify-center rounded-xl text-xs transition-all"
-            style={{ color: 'var(--pc-text-muted)', background: 'transparent', border: 'none', cursor: 'pointer' }}
-            onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--pc-text-primary)'; e.currentTarget.style.background = 'var(--pc-hover)'; }}
-            onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--pc-text-muted)'; e.currentTarget.style.background = 'transparent'; }}
-            aria-label={t('settings.title')}
-          >
-            <Settings className="h-3.5 w-3.5" />
-          </button>
+      <div className="relative flex w-full items-center justify-end gap-1.5 sm:gap-2 md:w-auto md:gap-3">
+        <button
+          type="button"
+          onClick={onToggleSidebarCollapse}
+          className="hidden items-center gap-1 rounded-lg border border-[#2b4f97] bg-[#091937]/75 px-2.5 py-1.5 text-xs text-[#c4d8ff] transition hover:border-[#4f83ff] hover:text-white md:flex md:text-sm"
+          title={isSidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+        >
+          {isSidebarCollapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
+          <span>{isSidebarCollapsed ? 'Expand' : 'Collapse'}</span>
+        </button>
 
-          {/* Language switcher */}
-          <button
-            type="button"
-            onClick={toggleLanguage}
-            className="h-9 px-3 rounded-xl text-xs font-semibold border transition-all flex items-center"
-            style={{
-              borderColor: 'var(--pc-border)',
-              color: 'var(--pc-text-secondary)',
-              background: 'var(--pc-bg-elevated)',
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.borderColor = 'var(--pc-accent-dim)';
-              e.currentTarget.style.color = 'var(--pc-text-primary)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.borderColor = 'var(--pc-border)';
-              e.currentTarget.style.color = 'var(--pc-text-secondary)';
-            }}
-          >
-            {locale === 'en' ? 'EN' : locale === 'zh' ? 'ZH' : 'TR'}
-          </button>
+        <button
+          type="button"
+          onClick={toggleLanguage}
+          title={`🌐 Languages: ${languageSummary}`}
+          className="rounded-lg border border-[#2b4f97] bg-[#091937]/75 px-2.5 py-1 text-xs font-medium text-[#c4d8ff] transition hover:border-[#4f83ff] hover:text-white sm:px-3 sm:text-sm"
+        >
+          {LANGUAGE_BUTTON_LABELS[locale] ?? 'EN'}
+        </button>
 
-          {/* Logout */}
-          <button
-            type="button"
-            onClick={logout}
-            className="h-9 px-3 rounded-xl text-xs transition-all flex items-center gap-1.5"
-            style={{ color: 'var(--pc-text-muted)', background: 'transparent', border: 'none', cursor: 'pointer' }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.color = '#f87171';
-              e.currentTarget.style.background = 'rgba(239, 68, 68, 0.08)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.color = 'var(--pc-text-muted)';
-              e.currentTarget.style.background = 'transparent';
-            }}
-          >
-            <LogOut className="h-3.5 w-3.5" />
-            <span className="hidden sm:inline">{t('auth.logout')}</span>
-          </button>
-        </div>
-      </header>
-
-      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
-    </>
-
+        <button
+          type="button"
+          onClick={logout}
+          className="flex items-center gap-1 rounded-lg border border-[#2b4f97] bg-[#091937]/75 px-2.5 py-1.5 text-xs text-[#c4d8ff] transition hover:border-[#4f83ff] hover:text-white sm:gap-1.5 sm:px-3 sm:text-sm"
+        >
+          <LogOut className="h-4 w-4" />
+          <span className="hidden sm:inline">{t('auth.logout')}</span>
+        </button>
+      </div>
+    </header>
   );
 }

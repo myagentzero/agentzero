@@ -1,22 +1,17 @@
 use crate::multimodal;
 use crate::providers::traits::{
     ChatMessage, ChatRequest as ProviderChatRequest, ChatResponse as ProviderChatResponse,
-    Provider, ProviderCapabilities, TokenUsage, ToolCall as ProviderToolCall,
+    NormalizedStopReason, Provider, ProviderCapabilities, TokenUsage, ToolCall as ProviderToolCall,
 };
 use crate::tools::ToolSpec;
 use async_trait::async_trait;
 use reqwest::Client;
-use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 pub struct OpenRouterProvider {
     credential: Option<String>,
-    timeout_secs: u64,
-    max_tokens: Option<u32>,
+    max_tokens_override: Option<u32>,
 }
-
-const DEFAULT_OPENROUTER_TIMEOUT_SECS: u64 = 120;
-const OPENROUTER_CONNECT_TIMEOUT_SECS: u64 = 10;
 
 #[derive(Debug, Serialize)]
 struct ChatRequest {
@@ -60,6 +55,8 @@ struct ApiChatResponse {
 #[derive(Debug, Deserialize)]
 struct Choice {
     message: ResponseMessage,
+    #[serde(default)]
+    finish_reason: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -73,11 +70,11 @@ struct NativeChatRequest {
     messages: Vec<NativeMessage>,
     temperature: f64,
     #[serde(skip_serializing_if = "Option::is_none")]
+    max_tokens: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     tools: Option<Vec<NativeToolSpec>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tool_choice: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    max_tokens: Option<u32>,
 }
 
 #[derive(Debug, Serialize)]
@@ -142,6 +139,8 @@ struct UsageInfo {
 #[derive(Debug, Deserialize)]
 struct NativeChoice {
     message: NativeResponseMessage,
+    #[serde(default)]
+    finish_reason: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -156,26 +155,15 @@ struct NativeResponseMessage {
 }
 
 impl OpenRouterProvider {
-    pub fn new(credential: Option<&str>, timeout_secs: Option<u64>) -> Self {
+    pub fn new(credential: Option<&str>) -> Self {
+        Self::new_with_max_tokens(credential, None)
+    }
+
+    pub fn new_with_max_tokens(credential: Option<&str>, max_tokens_override: Option<u32>) -> Self {
         Self {
             credential: credential.map(ToString::to_string),
-            timeout_secs: timeout_secs
-                .filter(|secs| *secs > 0)
-                .unwrap_or(DEFAULT_OPENROUTER_TIMEOUT_SECS),
-            max_tokens: None,
+            max_tokens_override: max_tokens_override.filter(|value| *value > 0),
         }
-    }
-
-    /// Override the HTTP request timeout for LLM API calls.
-    pub fn with_timeout_secs(mut self, secs: u64) -> Self {
-        self.timeout_secs = secs;
-        self
-    }
-
-    /// Set the maximum output tokens for API requests.
-    pub fn with_max_tokens(mut self, max_tokens: Option<u32>) -> Self {
-        self.max_tokens = max_tokens;
-        self
     }
 
     fn convert_tools(tools: Option<&[ToolSpec]>) -> Option<Vec<NativeToolSpec>> {
@@ -183,23 +171,19 @@ impl OpenRouterProvider {
         if items.is_empty() {
             return None;
         }
-        let valid: Vec<NativeToolSpec> = items
-            .iter()
-            .filter(|tool| is_valid_openai_tool_name(&tool.name))
-            .map(|tool| NativeToolSpec {
-                kind: "function".to_string(),
-                function: NativeToolFunctionSpec {
-                    name: tool.name.clone(),
-                    description: tool.description.clone(),
-                    parameters: tool.parameters.clone(),
-                },
-            })
-            .collect();
-        if valid.is_empty() {
-            None
-        } else {
-            Some(valid)
-        }
+        Some(
+            items
+                .iter()
+                .map(|tool| NativeToolSpec {
+                    kind: "function".to_string(),
+                    function: NativeToolFunctionSpec {
+                        name: tool.name.clone(),
+                        description: tool.description.clone(),
+                        parameters: tool.parameters.clone(),
+                    },
+                })
+                .collect(),
+        )
     }
 
     fn convert_messages(messages: &[ChatMessage]) -> Vec<NativeMessage> {
@@ -304,7 +288,12 @@ impl OpenRouterProvider {
         MessageContent::Parts(parts)
     }
 
-    fn parse_native_response(message: NativeResponseMessage) -> ProviderChatResponse {
+    fn parse_native_response(choice: NativeChoice) -> ProviderChatResponse {
+        let raw_stop_reason = choice.finish_reason;
+        let stop_reason = raw_stop_reason
+            .as_deref()
+            .map(NormalizedStopReason::from_openai_finish_reason);
+        let message = choice.message;
         let reasoning_content = message.reasoning_content.clone();
         let tool_calls = message
             .tool_calls
@@ -322,47 +311,14 @@ impl OpenRouterProvider {
             tool_calls,
             usage: None,
             reasoning_content,
+            quota_metadata: None,
+            stop_reason,
+            raw_stop_reason,
         }
     }
 
-    fn compact_sanitized_body_snippet(body: &str) -> String {
-        super::sanitize_api_error(body)
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ")
-    }
-
-    async fn read_response_body(
-        provider_name: &str,
-        response: reqwest::Response,
-    ) -> anyhow::Result<String> {
-        response.text().await.map_err(|error| {
-            let sanitized = super::sanitize_api_error(&error.to_string());
-            anyhow::anyhow!(
-                "{provider_name} transport error while reading response body: {sanitized}"
-            )
-        })
-    }
-
-    fn parse_response_body<T: DeserializeOwned>(
-        provider_name: &str,
-        body: &str,
-        kind: &str,
-    ) -> anyhow::Result<T> {
-        serde_json::from_str::<T>(body).map_err(|error| {
-            let snippet = Self::compact_sanitized_body_snippet(body);
-            anyhow::anyhow!(
-                "{provider_name} API returned an unexpected {kind} payload: {error}; body={snippet}"
-            )
-        })
-    }
-
     fn http_client(&self) -> Client {
-        crate::config::build_runtime_proxy_client_with_timeouts(
-            "provider.openrouter",
-            self.timeout_secs,
-            OPENROUTER_CONNECT_TIMEOUT_SECS,
-        )
+        crate::config::build_runtime_proxy_client_with_timeouts("provider.openrouter", 120, 10)
     }
 }
 
@@ -372,7 +328,6 @@ impl Provider for OpenRouterProvider {
         ProviderCapabilities {
             native_tool_calling: true,
             vision: true,
-            prompt_caching: false,
         }
     }
 
@@ -418,14 +373,14 @@ impl Provider for OpenRouterProvider {
             model: model.to_string(),
             messages,
             temperature,
-            max_tokens: self.max_tokens,
+            max_tokens: self.max_tokens_override,
         };
 
         let response = self
             .http_client()
             .post("https://openrouter.ai/api/v1/chat/completions")
             .header("Authorization", format!("Bearer {credential}"))
-            .header("HTTP-Referer", "https://github.com/zeroclaw-labs/zeroclaw")
+            .header("HTTP-Referer", "https://github.com/myagentzero/zeroclaw")
             .header("X-Title", "ZeroClaw")
             .json(&request)
             .send()
@@ -435,9 +390,7 @@ impl Provider for OpenRouterProvider {
             return Err(super::api_error("OpenRouter", response).await);
         }
 
-        let body = Self::read_response_body("OpenRouter", response).await?;
-        let chat_response =
-            Self::parse_response_body::<ApiChatResponse>("OpenRouter", &body, "chat-completions")?;
+        let chat_response: ApiChatResponse = response.json().await?;
 
         chat_response
             .choices
@@ -468,14 +421,14 @@ impl Provider for OpenRouterProvider {
             model: model.to_string(),
             messages: api_messages,
             temperature,
-            max_tokens: self.max_tokens,
+            max_tokens: self.max_tokens_override,
         };
 
         let response = self
             .http_client()
             .post("https://openrouter.ai/api/v1/chat/completions")
             .header("Authorization", format!("Bearer {credential}"))
-            .header("HTTP-Referer", "https://github.com/zeroclaw-labs/zeroclaw")
+            .header("HTTP-Referer", "https://github.com/myagentzero/zeroclaw")
             .header("X-Title", "ZeroClaw")
             .json(&request)
             .send()
@@ -485,9 +438,7 @@ impl Provider for OpenRouterProvider {
             return Err(super::api_error("OpenRouter", response).await);
         }
 
-        let body = Self::read_response_body("OpenRouter", response).await?;
-        let chat_response =
-            Self::parse_response_body::<ApiChatResponse>("OpenRouter", &body, "chat-completions")?;
+        let chat_response: ApiChatResponse = response.json().await?;
 
         chat_response
             .choices
@@ -514,16 +465,16 @@ impl Provider for OpenRouterProvider {
             model: model.to_string(),
             messages: Self::convert_messages(request.messages),
             temperature,
+            max_tokens: self.max_tokens_override,
             tool_choice: tools.as_ref().map(|_| "auto".to_string()),
             tools,
-            max_tokens: self.max_tokens,
         };
 
         let response = self
             .http_client()
             .post("https://openrouter.ai/api/v1/chat/completions")
             .header("Authorization", format!("Bearer {credential}"))
-            .header("HTTP-Referer", "https://github.com/zeroclaw-labs/zeroclaw")
+            .header("HTTP-Referer", "https://github.com/myagentzero/zeroclaw")
             .header("X-Title", "ZeroClaw")
             .json(&native_request)
             .send()
@@ -533,21 +484,18 @@ impl Provider for OpenRouterProvider {
             return Err(super::api_error("OpenRouter", response).await);
         }
 
-        let body = Self::read_response_body("OpenRouter", response).await?;
-        let native_response =
-            Self::parse_response_body::<NativeChatResponse>("OpenRouter", &body, "native chat")?;
+        let native_response: NativeChatResponse = response.json().await?;
         let usage = native_response.usage.map(|u| TokenUsage {
             input_tokens: u.prompt_tokens,
             output_tokens: u.completion_tokens,
             cached_input_tokens: None,
         });
-        let message = native_response
+        let choice = native_response
             .choices
             .into_iter()
             .next()
-            .map(|c| c.message)
             .ok_or_else(|| anyhow::anyhow!("No response from OpenRouter"))?;
-        let mut result = Self::parse_native_response(message);
+        let mut result = Self::parse_native_response(choice);
         result.usage = usage;
         Ok(result)
     }
@@ -594,11 +542,7 @@ impl Provider for OpenRouterProvider {
                     })
                 })
                 .collect();
-            if specs.is_empty() {
-                None
-            } else {
-                Some(specs)
-            }
+            if specs.is_empty() { None } else { Some(specs) }
         };
 
         // Convert ChatMessage to NativeMessage, preserving structured assistant/tool entries
@@ -609,16 +553,16 @@ impl Provider for OpenRouterProvider {
             model: model.to_string(),
             messages: native_messages,
             temperature,
+            max_tokens: self.max_tokens_override,
             tool_choice: native_tools.as_ref().map(|_| "auto".to_string()),
             tools: native_tools,
-            max_tokens: self.max_tokens,
         };
 
         let response = self
             .http_client()
             .post("https://openrouter.ai/api/v1/chat/completions")
             .header("Authorization", format!("Bearer {credential}"))
-            .header("HTTP-Referer", "https://github.com/zeroclaw-labs/zeroclaw")
+            .header("HTTP-Referer", "https://github.com/myagentzero/zeroclaw")
             .header("X-Title", "ZeroClaw")
             .json(&native_request)
             .send()
@@ -628,34 +572,21 @@ impl Provider for OpenRouterProvider {
             return Err(super::api_error("OpenRouter", response).await);
         }
 
-        let body = Self::read_response_body("OpenRouter", response).await?;
-        let native_response =
-            Self::parse_response_body::<NativeChatResponse>("OpenRouter", &body, "native chat")?;
+        let native_response: NativeChatResponse = response.json().await?;
         let usage = native_response.usage.map(|u| TokenUsage {
             input_tokens: u.prompt_tokens,
             output_tokens: u.completion_tokens,
             cached_input_tokens: None,
         });
-        let message = native_response
+        let choice = native_response
             .choices
             .into_iter()
             .next()
-            .map(|c| c.message)
             .ok_or_else(|| anyhow::anyhow!("No response from OpenRouter"))?;
-        let mut result = Self::parse_native_response(message);
+        let mut result = Self::parse_native_response(choice);
         result.usage = usage;
         Ok(result)
     }
-}
-
-/// Check if a tool name is valid for OpenAI-compatible APIs.
-/// Must match `^[a-zA-Z0-9_-]{1,64}$`.
-fn is_valid_openai_tool_name(name: &str) -> bool {
-    !name.is_empty()
-        && name.len() <= 64
-        && name
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
 }
 
 #[cfg(test)]
@@ -665,7 +596,7 @@ mod tests {
 
     #[test]
     fn capabilities_report_vision_support() {
-        let provider = OpenRouterProvider::new(Some("openrouter-test-credential"), None);
+        let provider = OpenRouterProvider::new(Some("openrouter-test-credential"));
         let caps = <OpenRouterProvider as Provider>::capabilities(&provider);
         assert!(caps.native_tool_calling);
         assert!(caps.vision);
@@ -673,7 +604,7 @@ mod tests {
 
     #[test]
     fn creates_with_key() {
-        let provider = OpenRouterProvider::new(Some("openrouter-test-credential"), None);
+        let provider = OpenRouterProvider::new(Some("openrouter-test-credential"));
         assert_eq!(
             provider.credential.as_deref(),
             Some("openrouter-test-credential")
@@ -682,32 +613,20 @@ mod tests {
 
     #[test]
     fn creates_without_key() {
-        let provider = OpenRouterProvider::new(None, None);
+        let provider = OpenRouterProvider::new(None);
         assert!(provider.credential.is_none());
-    }
-
-    #[test]
-    fn uses_configured_timeout_when_provided() {
-        let provider = OpenRouterProvider::new(Some("openrouter-test-credential"), Some(1200));
-        assert_eq!(provider.timeout_secs, 1200);
-    }
-
-    #[test]
-    fn falls_back_to_default_timeout_for_zero() {
-        let provider = OpenRouterProvider::new(Some("openrouter-test-credential"), Some(0));
-        assert_eq!(provider.timeout_secs, DEFAULT_OPENROUTER_TIMEOUT_SECS);
     }
 
     #[tokio::test]
     async fn warmup_without_key_is_noop() {
-        let provider = OpenRouterProvider::new(None, None);
+        let provider = OpenRouterProvider::new(None);
         let result = provider.warmup().await;
         assert!(result.is_ok());
     }
 
     #[tokio::test]
     async fn chat_with_system_fails_without_key() {
-        let provider = OpenRouterProvider::new(None, None);
+        let provider = OpenRouterProvider::new(None);
         let result = provider
             .chat_with_system(Some("system"), "hello", "openai/gpt-4o", 0.2)
             .await;
@@ -718,7 +637,7 @@ mod tests {
 
     #[tokio::test]
     async fn chat_with_history_fails_without_key() {
-        let provider = OpenRouterProvider::new(None, None);
+        let provider = OpenRouterProvider::new(None);
         let messages = vec![
             ChatMessage {
                 role: "system".into(),
@@ -797,6 +716,21 @@ mod tests {
     }
 
     #[test]
+    fn chat_request_serializes_max_tokens_when_present() {
+        let request = ChatRequest {
+            model: "openai/gpt-4o".into(),
+            messages: vec![Message {
+                role: "user".into(),
+                content: MessageContent::Text("hello".into()),
+            }],
+            temperature: 0.2,
+            max_tokens: Some(2048),
+        };
+        let json = serde_json::to_string(&request).unwrap();
+        assert!(json.contains("\"max_tokens\":2048"));
+    }
+
+    #[test]
     fn response_deserializes_single_choice() {
         let json = r#"{"choices":[{"message":{"content":"Hi from OpenRouter"}}]}"#;
 
@@ -815,43 +749,9 @@ mod tests {
         assert!(response.choices.is_empty());
     }
 
-    #[test]
-    fn parse_chat_response_body_reports_sanitized_snippet() {
-        let body = r#"{"choices":"invalid","api_key":"sk-test-secret-value"}"#;
-        let err = OpenRouterProvider::parse_response_body::<ApiChatResponse>(
-            "OpenRouter",
-            body,
-            "chat-completions",
-        )
-        .expect_err("payload should fail");
-        let msg = err.to_string();
-
-        assert!(msg.contains("OpenRouter API returned an unexpected chat-completions payload"));
-        assert!(msg.contains("body="));
-        assert!(msg.contains("[REDACTED]"));
-        assert!(!msg.contains("sk-test-secret-value"));
-    }
-
-    #[test]
-    fn parse_native_response_body_reports_sanitized_snippet() {
-        let body = r#"{"choices":123,"api_key":"sk-another-secret"}"#;
-        let err = OpenRouterProvider::parse_response_body::<NativeChatResponse>(
-            "OpenRouter",
-            body,
-            "native chat",
-        )
-        .expect_err("payload should fail");
-        let msg = err.to_string();
-
-        assert!(msg.contains("OpenRouter API returned an unexpected native chat payload"));
-        assert!(msg.contains("body="));
-        assert!(msg.contains("[REDACTED]"));
-        assert!(!msg.contains("sk-another-secret"));
-    }
-
     #[tokio::test]
     async fn chat_with_tools_fails_without_key() {
-        let provider = OpenRouterProvider::new(None, None);
+        let provider = OpenRouterProvider::new(None);
         let messages = vec![ChatMessage {
             role: "user".into(),
             content: "What is the date?".into(),
@@ -923,25 +823,30 @@ mod tests {
 
     #[test]
     fn parse_native_response_converts_to_chat_response() {
-        let message = NativeResponseMessage {
-            content: Some("Here you go.".into()),
-            reasoning_content: None,
-            tool_calls: Some(vec![NativeToolCall {
-                id: Some("call_789".into()),
-                kind: Some("function".into()),
-                function: NativeFunctionCall {
-                    name: "file_read".into(),
-                    arguments: r#"{"path":"test.txt"}"#.into(),
-                },
-            }]),
+        let choice = NativeChoice {
+            message: NativeResponseMessage {
+                content: Some("Here you go.".into()),
+                reasoning_content: None,
+                tool_calls: Some(vec![NativeToolCall {
+                    id: Some("call_789".into()),
+                    kind: Some("function".into()),
+                    function: NativeFunctionCall {
+                        name: "file_read".into(),
+                        arguments: r#"{"path":"test.txt"}"#.into(),
+                    },
+                }]),
+            },
+            finish_reason: Some("stop".into()),
         };
 
-        let response = OpenRouterProvider::parse_native_response(message);
+        let response = OpenRouterProvider::parse_native_response(choice);
 
         assert_eq!(response.text.as_deref(), Some("Here you go."));
         assert_eq!(response.tool_calls.len(), 1);
         assert_eq!(response.tool_calls[0].id, "call_789");
         assert_eq!(response.tool_calls[0].name, "file_read");
+        assert_eq!(response.stop_reason, Some(NormalizedStopReason::EndTurn));
+        assert_eq!(response.raw_stop_reason.as_deref(), Some("stop"));
     }
 
     #[test]
@@ -1037,32 +942,42 @@ mod tests {
 
     #[test]
     fn parse_native_response_captures_reasoning_content() {
-        let message = NativeResponseMessage {
-            content: Some("answer".into()),
-            reasoning_content: Some("thinking step".into()),
-            tool_calls: Some(vec![NativeToolCall {
-                id: Some("call_1".into()),
-                kind: Some("function".into()),
-                function: NativeFunctionCall {
-                    name: "shell".into(),
-                    arguments: "{}".into(),
-                },
-            }]),
+        let choice = NativeChoice {
+            message: NativeResponseMessage {
+                content: Some("answer".into()),
+                reasoning_content: Some("thinking step".into()),
+                tool_calls: Some(vec![NativeToolCall {
+                    id: Some("call_1".into()),
+                    kind: Some("function".into()),
+                    function: NativeFunctionCall {
+                        name: "shell".into(),
+                        arguments: "{}".into(),
+                    },
+                }]),
+            },
+            finish_reason: Some("length".into()),
         };
-        let parsed = OpenRouterProvider::parse_native_response(message);
+        let parsed = OpenRouterProvider::parse_native_response(choice);
         assert_eq!(parsed.reasoning_content.as_deref(), Some("thinking step"));
         assert_eq!(parsed.tool_calls.len(), 1);
+        assert_eq!(parsed.stop_reason, Some(NormalizedStopReason::MaxTokens));
+        assert_eq!(parsed.raw_stop_reason.as_deref(), Some("length"));
     }
 
     #[test]
     fn parse_native_response_none_reasoning_content_for_normal_model() {
-        let message = NativeResponseMessage {
-            content: Some("hello".into()),
-            reasoning_content: None,
-            tool_calls: None,
+        let choice = NativeChoice {
+            message: NativeResponseMessage {
+                content: Some("hello".into()),
+                reasoning_content: None,
+                tool_calls: None,
+            },
+            finish_reason: Some("stop".into()),
         };
-        let parsed = OpenRouterProvider::parse_native_response(message);
+        let parsed = OpenRouterProvider::parse_native_response(choice);
         assert!(parsed.reasoning_content.is_none());
+        assert_eq!(parsed.stop_reason, Some(NormalizedStopReason::EndTurn));
+        assert_eq!(parsed.raw_stop_reason.as_deref(), Some("stop"));
     }
 
     #[test]
@@ -1152,86 +1067,5 @@ mod tests {
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains("reasoning_content"));
         assert!(json.contains("thinking..."));
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════
-    // timeout_secs configuration tests
-    // ═══════════════════════════════════════════════════════════════════════
-
-    #[test]
-    fn default_timeout_is_120() {
-        let provider = OpenRouterProvider::new(Some("key"), None);
-        assert_eq!(provider.timeout_secs, 120);
-    }
-
-    #[test]
-    fn with_timeout_secs_overrides_default() {
-        let provider = OpenRouterProvider::new(Some("key"), None).with_timeout_secs(300);
-        assert_eq!(provider.timeout_secs, 300);
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════
-    // tool name validation tests
-    // ═══════════════════════════════════════════════════════════════════════
-
-    #[test]
-    fn valid_openai_tool_names() {
-        assert!(is_valid_openai_tool_name("shell"));
-        assert!(is_valid_openai_tool_name("file_read"));
-        assert!(is_valid_openai_tool_name("web-search"));
-        assert!(is_valid_openai_tool_name("Tool123"));
-        assert!(is_valid_openai_tool_name("a"));
-    }
-
-    #[test]
-    fn invalid_openai_tool_names() {
-        assert!(!is_valid_openai_tool_name(""));
-        assert!(!is_valid_openai_tool_name("mcp:server.tool"));
-        assert!(!is_valid_openai_tool_name("node.js"));
-        assert!(!is_valid_openai_tool_name("tool name"));
-        assert!(!is_valid_openai_tool_name(
-            "this_tool_name_is_way_too_long_and_exceeds_the_sixty_four_character_limit_xxxxx"
-        ));
-    }
-
-    #[test]
-    fn convert_tools_skips_invalid_names() {
-        use crate::tools::ToolSpec;
-
-        let tools = vec![
-            ToolSpec {
-                name: "valid_tool".into(),
-                description: "A valid tool".into(),
-                parameters: serde_json::json!({"type": "object"}),
-            },
-            ToolSpec {
-                name: "mcp:server.bad".into(),
-                description: "Invalid name".into(),
-                parameters: serde_json::json!({"type": "object"}),
-            },
-            ToolSpec {
-                name: "another-valid".into(),
-                description: "Also valid".into(),
-                parameters: serde_json::json!({"type": "object"}),
-            },
-        ];
-
-        let result = OpenRouterProvider::convert_tools(Some(&tools)).unwrap();
-        assert_eq!(result.len(), 2);
-        assert_eq!(result[0].function.name, "valid_tool");
-        assert_eq!(result[1].function.name, "another-valid");
-    }
-
-    #[test]
-    fn convert_tools_returns_none_when_all_invalid() {
-        use crate::tools::ToolSpec;
-
-        let tools = vec![ToolSpec {
-            name: "mcp:bad.name".into(),
-            description: "Invalid".into(),
-            parameters: serde_json::json!({"type": "object"}),
-        }];
-
-        assert!(OpenRouterProvider::convert_tools(Some(&tools)).is_none());
     }
 }

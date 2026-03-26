@@ -11,16 +11,16 @@
 //! Both firmware files are compiled into the binary with `include_bytes!` so
 //! users never need to download them separately.
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use std::path::{Path, PathBuf};
 
 // ── Embedded firmware ─────────────────────────────────────────────────────────
 
 /// MicroPython UF2 binary — copied to RPI-RP2 to install the base runtime.
-const PICO_UF2: &[u8] = include_bytes!("../../firmware/pico/zeroclaw-pico.uf2");
+const PICO_UF2: &[u8] = include_bytes!("../firmware/pico/zeroclaw-pico.uf2");
 
 /// ZeroClaw serial protocol handler — written to the Pico after MicroPython boots.
-pub const PICO_MAIN_PY: &[u8] = include_bytes!("../../firmware/pico/main.py");
+pub const PICO_MAIN_PY: &[u8] = include_bytes!("../firmware/pico/main.py");
 
 /// UF2 magic word 1 (little-endian bytes at offset 0 of every UF2 block).
 const UF2_MAGIC1: [u8; 4] = [0x55, 0x46, 0x32, 0x0A];

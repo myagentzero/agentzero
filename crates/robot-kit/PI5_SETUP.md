@@ -171,7 +171,7 @@ sudo usermod -aG dialout $USER
 
 ```bash
 # Clone repo (or copy from USB)
-git clone https://github.com/zeroclaw-labs/zeroclaw
+git clone https://github.com/myagentzero/zeroclaw
 cd zeroclaw
 
 # Build robot kit

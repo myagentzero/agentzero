@@ -1,6 +1,6 @@
 use crate::providers::traits::{
     ChatMessage, ChatRequest as ProviderChatRequest, ChatResponse as ProviderChatResponse,
-    Provider, TokenUsage, ToolCall as ProviderToolCall,
+    NormalizedStopReason, Provider, TokenUsage, ToolCall as ProviderToolCall,
 };
 use crate::tools::ToolSpec;
 use async_trait::async_trait;
@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 pub struct OpenAiProvider {
     base_url: String,
     credential: Option<String>,
-    max_tokens: Option<u32>,
+    max_tokens_override: Option<u32>,
 }
 
 #[derive(Debug, Serialize)]
@@ -36,6 +36,8 @@ struct ChatResponse {
 #[derive(Debug, Deserialize)]
 struct Choice {
     message: ResponseMessage,
+    #[serde(default)]
+    finish_reason: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -62,11 +64,11 @@ struct NativeChatRequest {
     messages: Vec<NativeMessage>,
     temperature: f64,
     #[serde(skip_serializing_if = "Option::is_none")]
+    max_tokens: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     tools: Option<Vec<NativeToolSpec>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tool_choice: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    max_tokens: Option<u32>,
 }
 
 #[derive(Debug, Serialize)]
@@ -153,6 +155,8 @@ struct PromptTokensDetails {
 #[derive(Debug, Deserialize)]
 struct NativeChoice {
     message: NativeResponseMessage,
+    #[serde(default)]
+    finish_reason: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -177,56 +181,26 @@ impl NativeResponseMessage {
 
 impl OpenAiProvider {
     pub fn new(credential: Option<&str>) -> Self {
-        Self::with_base_url(None, credential)
+        Self::with_base_url_and_max_tokens(None, credential, None)
     }
 
     /// Create a provider with an optional custom base URL.
     /// Defaults to `https://api.openai.com/v1` when `base_url` is `None`.
     pub fn with_base_url(base_url: Option<&str>, credential: Option<&str>) -> Self {
+        Self::with_base_url_and_max_tokens(base_url, credential, None)
+    }
+
+    pub fn with_base_url_and_max_tokens(
+        base_url: Option<&str>,
+        credential: Option<&str>,
+        max_tokens_override: Option<u32>,
+    ) -> Self {
         Self {
             base_url: base_url
                 .map(|u| u.trim_end_matches('/').to_string())
                 .unwrap_or_else(|| "https://api.openai.com/v1".to_string()),
             credential: credential.map(ToString::to_string),
-            max_tokens: None,
-        }
-    }
-
-    /// Set the maximum output tokens for API requests.
-    pub fn with_max_tokens(mut self, max_tokens: Option<u32>) -> Self {
-        self.max_tokens = max_tokens;
-        self
-    }
-
-    /// Adjust temperature for models that have specific requirements.
-    /// Some OpenAI models (like gpt-5-mini, o1, o3, etc) only accept temperature=1.0.
-    fn adjust_temperature_for_model(model: &str, requested_temperature: f64) -> f64 {
-        // Models that require temperature=1.0
-        let requires_1_0 = matches!(
-            model,
-            "gpt-5"
-                | "gpt-5-2025-08-07"
-                | "gpt-5-mini"
-                | "gpt-5-mini-2025-08-07"
-                | "gpt-5-nano"
-                | "gpt-5-nano-2025-08-07"
-                | "gpt-5.1-chat-latest"
-                | "gpt-5.2-chat-latest"
-                | "gpt-5.3-chat-latest"
-                | "o1"
-                | "o1-2024-12-17"
-                | "o3"
-                | "o3-2025-04-16"
-                | "o3-mini"
-                | "o3-mini-2025-01-31"
-                | "o4-mini"
-                | "o4-mini-2025-04-16"
-        );
-
-        if requires_1_0 {
-            1.0
-        } else {
-            requested_temperature
+            max_tokens_override: max_tokens_override.filter(|value| *value > 0),
         }
     }
 
@@ -320,7 +294,12 @@ impl OpenAiProvider {
             .collect()
     }
 
-    fn parse_native_response(message: NativeResponseMessage) -> ProviderChatResponse {
+    fn parse_native_response(choice: NativeChoice) -> ProviderChatResponse {
+        let raw_stop_reason = choice.finish_reason;
+        let stop_reason = raw_stop_reason
+            .as_deref()
+            .map(NormalizedStopReason::from_openai_finish_reason);
+        let message = choice.message;
         let text = message.effective_content();
         let reasoning_content = message.reasoning_content.clone();
         let tool_calls = message
@@ -339,6 +318,9 @@ impl OpenAiProvider {
             tool_calls,
             usage: None,
             reasoning_content,
+            quota_metadata: None,
+            stop_reason,
+            raw_stop_reason,
         }
     }
 
@@ -360,8 +342,6 @@ impl Provider for OpenAiProvider {
             anyhow::anyhow!("OpenAI API key not set. Set OPENAI_API_KEY or edit config.toml.")
         })?;
 
-        let adjusted_temperature = Self::adjust_temperature_for_model(model, temperature);
-
         let mut messages = Vec::new();
 
         if let Some(sys) = system_prompt {
@@ -379,8 +359,8 @@ impl Provider for OpenAiProvider {
         let request = ChatRequest {
             model: model.to_string(),
             messages,
-            temperature: adjusted_temperature,
-            max_tokens: self.max_tokens,
+            temperature,
+            max_tokens: self.max_tokens_override,
         };
 
         let response = self
@@ -415,16 +395,14 @@ impl Provider for OpenAiProvider {
             anyhow::anyhow!("OpenAI API key not set. Set OPENAI_API_KEY or edit config.toml.")
         })?;
 
-        let adjusted_temperature = Self::adjust_temperature_for_model(model, temperature);
-
         let tools = Self::convert_tools(request.tools);
         let native_request = NativeChatRequest {
             model: model.to_string(),
             messages: Self::convert_messages(request.messages),
-            temperature: adjusted_temperature,
+            temperature,
+            max_tokens: self.max_tokens_override,
             tool_choice: tools.as_ref().map(|_| "auto".to_string()),
             tools,
-            max_tokens: self.max_tokens,
         };
 
         let response = self
@@ -439,20 +417,24 @@ impl Provider for OpenAiProvider {
             return Err(super::api_error("OpenAI", response).await);
         }
 
+        // Extract quota metadata from response headers before consuming body
+        let quota_extractor = super::quota_adapter::UniversalQuotaExtractor::new();
+        let quota_metadata = quota_extractor.extract("openai", response.headers(), None);
+
         let native_response: NativeChatResponse = response.json().await?;
         let usage = native_response.usage.map(|u| TokenUsage {
             input_tokens: u.prompt_tokens,
             output_tokens: u.completion_tokens,
             cached_input_tokens: u.prompt_tokens_details.and_then(|d| d.cached_tokens),
         });
-        let message = native_response
+        let choice = native_response
             .choices
             .into_iter()
             .next()
-            .map(|c| c.message)
             .ok_or_else(|| anyhow::anyhow!("No response from OpenAI"))?;
-        let mut result = Self::parse_native_response(message);
+        let mut result = Self::parse_native_response(choice);
         result.usage = usage;
+        result.quota_metadata = quota_metadata;
         Ok(result)
     }
 
@@ -471,8 +453,6 @@ impl Provider for OpenAiProvider {
             anyhow::anyhow!("OpenAI API key not set. Set OPENAI_API_KEY or edit config.toml.")
         })?;
 
-        let adjusted_temperature = Self::adjust_temperature_for_model(model, temperature);
-
         let native_tools: Option<Vec<NativeToolSpec>> = if tools.is_empty() {
             None
         } else {
@@ -488,10 +468,10 @@ impl Provider for OpenAiProvider {
         let native_request = NativeChatRequest {
             model: model.to_string(),
             messages: Self::convert_messages(messages),
-            temperature: adjusted_temperature,
+            temperature,
+            max_tokens: self.max_tokens_override,
             tool_choice: native_tools.as_ref().map(|_| "auto".to_string()),
             tools: native_tools,
-            max_tokens: self.max_tokens,
         };
 
         let response = self
@@ -506,20 +486,24 @@ impl Provider for OpenAiProvider {
             return Err(super::api_error("OpenAI", response).await);
         }
 
+        // Extract quota metadata from response headers before consuming body
+        let quota_extractor = super::quota_adapter::UniversalQuotaExtractor::new();
+        let quota_metadata = quota_extractor.extract("openai", response.headers(), None);
+
         let native_response: NativeChatResponse = response.json().await?;
         let usage = native_response.usage.map(|u| TokenUsage {
             input_tokens: u.prompt_tokens,
             output_tokens: u.completion_tokens,
             cached_input_tokens: u.prompt_tokens_details.and_then(|d| d.cached_tokens),
         });
-        let message = native_response
+        let choice = native_response
             .choices
             .into_iter()
             .next()
-            .map(|c| c.message)
             .ok_or_else(|| anyhow::anyhow!("No response from OpenAI"))?;
-        let mut result = Self::parse_native_response(message);
+        let mut result = Self::parse_native_response(choice);
         result.usage = usage;
+        result.quota_metadata = quota_metadata;
         Ok(result)
     }
 
@@ -752,10 +736,12 @@ mod tests {
 
         let result = p.chat_with_tools(&messages, &tools, "gpt-4o", 0.7).await;
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Invalid OpenAI tool specification"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Invalid OpenAI tool specification")
+        );
     }
 
     #[test]
@@ -808,21 +794,25 @@ mod tests {
             "content":"answer",
             "reasoning_content":"thinking step",
             "tool_calls":[{"id":"call_1","type":"function","function":{"name":"shell","arguments":"{}"}}]
-        }}]}"#;
+        },"finish_reason":"length"}]}"#;
         let resp: NativeChatResponse = serde_json::from_str(json).unwrap();
-        let message = resp.choices.into_iter().next().unwrap().message;
-        let parsed = OpenAiProvider::parse_native_response(message);
+        let choice = resp.choices.into_iter().next().unwrap();
+        let parsed = OpenAiProvider::parse_native_response(choice);
         assert_eq!(parsed.reasoning_content.as_deref(), Some("thinking step"));
         assert_eq!(parsed.tool_calls.len(), 1);
+        assert_eq!(parsed.stop_reason, Some(NormalizedStopReason::MaxTokens));
+        assert_eq!(parsed.raw_stop_reason.as_deref(), Some("length"));
     }
 
     #[test]
     fn parse_native_response_none_reasoning_content_for_normal_model() {
-        let json = r#"{"choices":[{"message":{"content":"hello"}}]}"#;
+        let json = r#"{"choices":[{"message":{"content":"hello"},"finish_reason":"stop"}]}"#;
         let resp: NativeChatResponse = serde_json::from_str(json).unwrap();
-        let message = resp.choices.into_iter().next().unwrap().message;
-        let parsed = OpenAiProvider::parse_native_response(message);
+        let choice = resp.choices.into_iter().next().unwrap();
+        let parsed = OpenAiProvider::parse_native_response(choice);
         assert!(parsed.reasoning_content.is_none());
+        assert_eq!(parsed.stop_reason, Some(NormalizedStopReason::EndTurn));
+        assert_eq!(parsed.raw_stop_reason.as_deref(), Some("stop"));
     }
 
     #[test]
@@ -892,126 +882,5 @@ mod tests {
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains("reasoning_content"));
         assert!(json.contains("thinking..."));
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════
-    // Temperature adjustment tests
-    // ═══════════════════════════════════════════════════════════════════════
-
-    #[test]
-    fn adjust_temperature_for_o1_models() {
-        assert_eq!(OpenAiProvider::adjust_temperature_for_model("o1", 0.7), 1.0);
-        assert_eq!(
-            OpenAiProvider::adjust_temperature_for_model("o1-2024-12-17", 0.5),
-            1.0
-        );
-    }
-
-    #[test]
-    fn adjust_temperature_for_o3_models() {
-        assert_eq!(OpenAiProvider::adjust_temperature_for_model("o3", 0.7), 1.0);
-        assert_eq!(
-            OpenAiProvider::adjust_temperature_for_model("o3-2025-04-16", 0.5),
-            1.0
-        );
-        assert_eq!(
-            OpenAiProvider::adjust_temperature_for_model("o3-mini", 0.3),
-            1.0
-        );
-        assert_eq!(
-            OpenAiProvider::adjust_temperature_for_model("o3-mini-2025-01-31", 0.8),
-            1.0
-        );
-    }
-
-    #[test]
-    fn adjust_temperature_for_o4_models() {
-        assert_eq!(
-            OpenAiProvider::adjust_temperature_for_model("o4-mini", 0.7),
-            1.0
-        );
-        assert_eq!(
-            OpenAiProvider::adjust_temperature_for_model("o4-mini-2025-04-16", 0.5),
-            1.0
-        );
-    }
-
-    #[test]
-    fn adjust_temperature_for_gpt5_models() {
-        assert_eq!(
-            OpenAiProvider::adjust_temperature_for_model("gpt-5", 0.7),
-            1.0
-        );
-        assert_eq!(
-            OpenAiProvider::adjust_temperature_for_model("gpt-5-2025-08-07", 0.5),
-            1.0
-        );
-        assert_eq!(
-            OpenAiProvider::adjust_temperature_for_model("gpt-5-mini", 0.3),
-            1.0
-        );
-        assert_eq!(
-            OpenAiProvider::adjust_temperature_for_model("gpt-5-mini-2025-08-07", 0.8),
-            1.0
-        );
-        assert_eq!(
-            OpenAiProvider::adjust_temperature_for_model("gpt-5-nano", 0.6),
-            1.0
-        );
-        assert_eq!(
-            OpenAiProvider::adjust_temperature_for_model("gpt-5-nano-2025-08-07", 0.4),
-            1.0
-        );
-    }
-
-    #[test]
-    fn adjust_temperature_for_gpt5_chat_latest_models() {
-        assert_eq!(
-            OpenAiProvider::adjust_temperature_for_model("gpt-5.1-chat-latest", 0.7),
-            1.0
-        );
-        assert_eq!(
-            OpenAiProvider::adjust_temperature_for_model("gpt-5.2-chat-latest", 0.5),
-            1.0
-        );
-        assert_eq!(
-            OpenAiProvider::adjust_temperature_for_model("gpt-5.3-chat-latest", 0.3),
-            1.0
-        );
-    }
-
-    #[test]
-    fn adjust_temperature_preserves_for_standard_models() {
-        assert_eq!(
-            OpenAiProvider::adjust_temperature_for_model("gpt-4o", 0.7),
-            0.7
-        );
-        assert_eq!(
-            OpenAiProvider::adjust_temperature_for_model("gpt-4-turbo", 0.5),
-            0.5
-        );
-        assert_eq!(
-            OpenAiProvider::adjust_temperature_for_model("gpt-3.5-turbo", 0.3),
-            0.3
-        );
-        assert_eq!(
-            OpenAiProvider::adjust_temperature_for_model("gpt-4", 1.0),
-            1.0
-        );
-    }
-
-    #[test]
-    fn adjust_temperature_handles_edge_cases() {
-        // Temperature 0.0 should be preserved for standard models
-        assert_eq!(
-            OpenAiProvider::adjust_temperature_for_model("gpt-4o", 0.0),
-            0.0
-        );
-        // Temperature 1.0 should be preserved for all models
-        assert_eq!(OpenAiProvider::adjust_temperature_for_model("o1", 1.0), 1.0);
-        assert_eq!(
-            OpenAiProvider::adjust_temperature_for_model("gpt-4o", 1.0),
-            1.0
-        );
     }
 }

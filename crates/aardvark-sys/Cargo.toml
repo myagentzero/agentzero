@@ -1,11 +1,11 @@
 [package]
 name = "aardvark-sys"
 version = "0.1.0"
-edition = "2021"
-authors = ["theonlyhennygod"]
+edition = "2024"
+authors = ["myagentzero"]
 license = "MIT OR Apache-2.0"
 description = "Low-level bindings for the Total Phase Aardvark I2C/SPI/GPIO USB adapter"
-repository = "https://github.com/zeroclaw-labs/zeroclaw"
+repository = "https://github.com/myagentzero/zeroclaw"
 
 # NOTE: This crate is the ONLY place in ZeroClaw where unsafe code is permitted.
 # The rest of the workspace remains #![forbid(unsafe_code)].

@@ -1,4 +1,4 @@
-# documentation: https://github.com/zeroclaw-labs/zeroclaw
+# documentation: https://github.com/myagentzero/zeroclaw
 # slogan: Fast, small, fully autonomous AI personal assistant infrastructure — deploy anywhere, swap anything
 # tags: ai, agent, assistant, self-hosted, llm, chatbot, rust
 # logo: svgs/zeroclaw.png
@@ -6,7 +6,7 @@
 
 services:
   zeroclaw:
-    image: ghcr.io/zeroclaw-labs/zeroclaw:latest
+    image: ghcr.io/myagentzero/zeroclaw:latest
     restart: unless-stopped
     environment:
       - API_KEY=${SERVICE_PASSWORD_APIKEY:-}

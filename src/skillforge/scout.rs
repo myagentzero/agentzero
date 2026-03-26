@@ -13,8 +13,6 @@ use tracing::{debug, warn};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ScoutSource {
     GitHub,
-    ClawHub,
-    HuggingFace,
 }
 
 impl std::str::FromStr for ScoutSource {
@@ -23,8 +21,6 @@ impl std::str::FromStr for ScoutSource {
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         Ok(match s.to_lowercase().as_str() {
             "github" => Self::GitHub,
-            "clawhub" => Self::ClawHub,
-            "huggingface" | "hf" => Self::HuggingFace,
             _ => {
                 warn!(source = s, "Unknown scout source, defaulting to GitHub");
                 Self::GitHub
@@ -243,18 +239,6 @@ mod tests {
         assert_eq!(
             "GitHub".parse::<ScoutSource>().unwrap(),
             ScoutSource::GitHub
-        );
-        assert_eq!(
-            "clawhub".parse::<ScoutSource>().unwrap(),
-            ScoutSource::ClawHub
-        );
-        assert_eq!(
-            "huggingface".parse::<ScoutSource>().unwrap(),
-            ScoutSource::HuggingFace
-        );
-        assert_eq!(
-            "hf".parse::<ScoutSource>().unwrap(),
-            ScoutSource::HuggingFace
         );
         // unknown falls back to GitHub
         assert_eq!(

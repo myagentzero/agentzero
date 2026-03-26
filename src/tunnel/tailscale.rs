@@ -1,5 +1,5 @@
-use super::{kill_shared, new_shared_process, SharedProcess, Tunnel, TunnelProcess};
-use anyhow::{bail, Result};
+use super::{SharedProcess, Tunnel, TunnelProcess, kill_shared, new_shared_process};
+use anyhow::{Result, bail};
 use tokio::process::Command;
 
 /// Tailscale Tunnel — uses `tailscale serve` (tailnet-only) or
@@ -50,10 +50,11 @@ impl Tunnel for TailscaleTunnel {
 
             let status: serde_json::Value =
                 serde_json::from_slice(&output.stdout).unwrap_or_default();
-            status["Self"]["DNSName"]
-                .as_str()
+            status["Self"]["TailscaleIPs"]
+                .as_array()
+                .and_then(|ips| ips.first())
+                .and_then(|ip| ip.as_str())
                 .unwrap_or("localhost")
-                .trim_end_matches('.')
                 .to_string()
         };
 

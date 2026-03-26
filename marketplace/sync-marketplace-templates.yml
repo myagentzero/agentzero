@@ -34,7 +34,7 @@ jobs:
       - name: Checkout Coolify fork
         uses: actions/checkout@v4
         with:
-          repository: zeroclaw-labs/coolify
+          repository: myagentzero/coolify
           token: ${{ secrets.MARKETPLACE_PAT }}
           ref: next
           path: coolify
@@ -45,7 +45,7 @@ jobs:
           VERSION: ${{ steps.ver.outputs.version }}
         run: |
           cat > templates/compose/zeroclaw.yaml << 'TEMPLATE'
-          # documentation: https://github.com/zeroclaw-labs/zeroclaw
+          # documentation: https://github.com/myagentzero/zeroclaw
           # slogan: Fast, small, fully autonomous AI personal assistant infrastructure — deploy anywhere, swap anything
           # tags: ai, agent, assistant, self-hosted, llm, chatbot, rust
           # logo: svgs/zeroclaw.png
@@ -53,7 +53,7 @@ jobs:
 
           services:
             zeroclaw:
-              image: ghcr.io/zeroclaw-labs/zeroclaw:latest
+              image: ghcr.io/myagentzero/zeroclaw:latest
               restart: unless-stopped
               environment:
                 - API_KEY=${SERVICE_PASSWORD_APIKEY:-}
@@ -88,7 +88,7 @@ jobs:
         run: |
           if [ ! -f svgs/zeroclaw.png ]; then
             curl -fsSL -o svgs/zeroclaw.png \
-              "https://raw.githubusercontent.com/zeroclaw-labs/zeroclaw/master/.github/assets/zeroclaw-logo.png"
+              "https://raw.githubusercontent.com/myagentzero/zeroclaw/master/.github/assets/zeroclaw-logo.png"
           fi
 
       - name: Create PR
@@ -114,7 +114,7 @@ jobs:
             --body "$(cat <<'EOF'
           ## Summary
           - Adds/updates the ZeroClaw one-click service template
-          - Image: `ghcr.io/zeroclaw-labs/zeroclaw:latest`
+          - Image: `ghcr.io/myagentzero/zeroclaw:latest`
           - ZeroClaw is a fast, small, fully autonomous AI personal assistant (100% Rust)
           - Multi-arch: linux/amd64 + linux/arm64
 
@@ -124,8 +124,8 @@ jobs:
           - Gateway accessible on port 42617
 
           ## Links
-          - https://github.com/zeroclaw-labs/zeroclaw
-          - https://github.com/orgs/zeroclaw-labs/packages/container/package/zeroclaw
+          - https://github.com/myagentzero/zeroclaw
+          - https://github.com/orgs/myagentzero/packages/container/package/zeroclaw
           EOF
           )"
 
@@ -144,7 +144,7 @@ jobs:
       - name: Checkout Dokploy templates fork
         uses: actions/checkout@v4
         with:
-          repository: zeroclaw-labs/templates
+          repository: myagentzero/templates
           token: ${{ secrets.MARKETPLACE_PAT }}
           ref: main
           path: templates
@@ -161,7 +161,7 @@ jobs:
           version: "3.8"
           services:
             zeroclaw:
-              image: ghcr.io/zeroclaw-labs/zeroclaw:${VERSION}
+              image: ghcr.io/myagentzero/zeroclaw:${VERSION}
               restart: unless-stopped
               environment:
                 - API_KEY=\${API_KEY}
@@ -199,7 +199,7 @@ jobs:
           # Copy logo if missing
           if [ ! -f blueprints/zeroclaw/zeroclaw.png ]; then
             curl -fsSL -o blueprints/zeroclaw/zeroclaw.png \
-              "https://raw.githubusercontent.com/zeroclaw-labs/zeroclaw/master/.github/assets/zeroclaw-logo.png"
+              "https://raw.githubusercontent.com/myagentzero/zeroclaw/master/.github/assets/zeroclaw-logo.png"
           fi
 
       - name: Update meta.json
@@ -215,9 +215,9 @@ jobs:
             "description": "Fast, small, and fully autonomous AI personal assistant infrastructure. Deploy anywhere, swap anything. 100% Rust.",
             "logo": "zeroclaw.png",
             "links": {
-              "github": "https://github.com/zeroclaw-labs/zeroclaw",
+              "github": "https://github.com/myagentzero/zeroclaw",
               "website": "https://zeroclaw.com/",
-              "docs": "https://github.com/zeroclaw-labs/zeroclaw#readme"
+              "docs": "https://github.com/myagentzero/zeroclaw#readme"
             },
             "tags": ["ai", "self-hosted"]
           }
@@ -262,7 +262,7 @@ jobs:
             --body "$(cat <<'EOF'
           ## Summary
           - Adds/updates ZeroClaw template to v${VERSION}
-          - Image: `ghcr.io/zeroclaw-labs/zeroclaw:${VERSION}`
+          - Image: `ghcr.io/myagentzero/zeroclaw:${VERSION}`
           - ZeroClaw is a fast, small, fully autonomous AI personal assistant (100% Rust)
           - Multi-arch: linux/amd64 + linux/arm64
 
@@ -277,8 +277,8 @@ jobs:
           - Health check passes
 
           ## Links
-          - https://github.com/zeroclaw-labs/zeroclaw
-          - https://github.com/orgs/zeroclaw-labs/packages/container/package/zeroclaw
+          - https://github.com/myagentzero/zeroclaw
+          - https://github.com/orgs/myagentzero/packages/container/package/zeroclaw
           EOF
           )"
 
@@ -297,7 +297,7 @@ jobs:
       - name: Checkout EasyPanel templates fork
         uses: actions/checkout@v4
         with:
-          repository: zeroclaw-labs/templates-1
+          repository: myagentzero/templates-1
           token: ${{ secrets.MARKETPLACE_PAT }}
           ref: main
           path: easypanel
@@ -312,7 +312,7 @@ jobs:
           # Copy logo if missing
           if [ ! -f templates/zeroclaw/assets/logo.png ]; then
             curl -fsSL -o templates/zeroclaw/assets/logo.png \
-              "https://raw.githubusercontent.com/zeroclaw-labs/zeroclaw/master/.github/assets/zeroclaw-logo.png"
+              "https://raw.githubusercontent.com/myagentzero/zeroclaw/master/.github/assets/zeroclaw-logo.png"
           fi
 
           # meta.yaml — update version and changelog
@@ -340,15 +340,15 @@ jobs:
 
           links:
             - label: Website
-              url: https://zeroclaw.com
+              url: https://github.com/myagentzero
             - label: Documentation
-              url: https://github.com/zeroclaw-labs/zeroclaw#readme
+              url: https://github.com/myagentzero/zeroclaw#readme
             - label: Github
-              url: https://github.com/zeroclaw-labs/zeroclaw
+              url: https://github.com/myagentzero/zeroclaw
 
           contributors:
-            - name: theonlyhennygod
-              url: https://github.com/theonlyhennygod
+            - name: myagentzero
+              url: https://github.com/myagentzero
 
           schema:
             type: object
@@ -365,7 +365,7 @@ jobs:
               appServiceImage:
                 type: string
                 title: App Service Image
-                default: ghcr.io/zeroclaw-labs/zeroclaw:${VERSION}
+                default: ghcr.io/myagentzero/zeroclaw:${VERSION}
               apiKey:
                 type: string
                 title: LLM Provider API Key
@@ -495,7 +495,7 @@ jobs:
             --body "$(cat <<'EOF'
           ## Summary
           - Adds/updates ZeroClaw template to v${VERSION}
-          - Image: `ghcr.io/zeroclaw-labs/zeroclaw:${VERSION}`
+          - Image: `ghcr.io/myagentzero/zeroclaw:${VERSION}`
           - ZeroClaw is a fast, small, fully autonomous AI personal assistant (100% Rust)
           - Multi-arch: linux/amd64 + linux/arm64
 
@@ -503,7 +503,7 @@ jobs:
           - [x] Logo: high quality PNG, square
           - [x] meta.yaml: static pinned version, all links, instructions included
           - [x] index.ts: no unused variables, no hardcoded secrets, volumes included
-          - [x] Uses official GHCR image from zeroclaw-labs org
+          - [x] Uses official GHCR image from myagentzero org
           - [x] Tested via templates playground
 
           ## Testing
@@ -512,7 +512,7 @@ jobs:
           - Health check passes
 
           ## Links
-          - https://github.com/zeroclaw-labs/zeroclaw
-          - https://github.com/orgs/zeroclaw-labs/packages/container/package/zeroclaw
+          - https://github.com/myagentzero/zeroclaw
+          - https://github.com/orgs/myagentzero/packages/container/package/zeroclaw
           EOF
           )"

@@ -1,5 +1,7 @@
+pub mod boot_script;
 pub mod command_logger;
-pub mod webhook_audit;
+pub mod session_memory;
 
+pub use boot_script::BootScriptHook;
 pub use command_logger::CommandLoggerHook;
-pub use webhook_audit::WebhookAuditHook;
+pub use session_memory::SessionMemoryHook;

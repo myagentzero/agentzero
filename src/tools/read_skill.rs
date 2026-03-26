@@ -94,11 +94,14 @@ impl Tool for ReadSkillTool {
         };
 
         match tokio::fs::read_to_string(location).await {
-            Ok(output) => Ok(ToolResult {
-                success: true,
-                output,
-                error: None,
-            }),
+            Ok(output) => {
+                tracing::info!("📖 read_skill: successfully loaded skill '{}'", skill.name);
+                Ok(ToolResult {
+                    success: true,
+                    output,
+                    error: None,
+                })
+            }
             Err(err) => Ok(ToolResult {
                 success: false,
                 output: String::new(),

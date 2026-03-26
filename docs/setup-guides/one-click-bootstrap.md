@@ -13,7 +13,7 @@ brew install zeroclaw
 ## Option A (Recommended): Clone + local script
 
 ```bash
-git clone https://github.com/zeroclaw-labs/zeroclaw.git
+git clone https://github.com/myagentzero/zeroclaw.git
 cd zeroclaw
 ./install.sh
 ```
@@ -69,7 +69,7 @@ Notes:
 ## Option B: Remote one-liner
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/zeroclaw-labs/zeroclaw/master/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/myagentzero/zeroclaw/master/install.sh | bash
 ```
 
 For high-security environments, prefer Option A so you can review the script before execution.
@@ -96,7 +96,7 @@ workspace/config mounts remain writable inside the container.
 
 If you add `--skip-build`, the installer skips local image build. It first tries the local
 Docker tag (`ZEROCLAW_DOCKER_IMAGE`, default: `zeroclaw-bootstrap:local`); if missing,
-it pulls `ghcr.io/zeroclaw-labs/zeroclaw:latest` and tags it locally before running.
+it pulls `ghcr.io/myagentzero/zeroclaw:latest` and tags it locally before running.
 
 ### Stopping and restarting a Docker/Podman container
 
@@ -211,7 +211,7 @@ ZEROCLAW_API_KEY="sk-..." ZEROCLAW_PROVIDER="openrouter" ./install.sh
 
 - `--install-system-deps`
 - `--install-rust`
-- `--skip-build` (in `--docker` mode: use local image if present, otherwise pull `ghcr.io/zeroclaw-labs/zeroclaw:latest`)
+- `--skip-build` (in `--docker` mode: use local image if present, otherwise pull `ghcr.io/myagentzero/zeroclaw:latest`)
 - `--skip-install`
 - `--provider <id>`
 

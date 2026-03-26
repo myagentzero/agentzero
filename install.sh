@@ -343,7 +343,7 @@ should_attempt_prebuilt_for_resources() {
 
 resolve_asset_url() {
   local asset_name="$1"
-  local api_url="https://api.github.com/repos/zeroclaw-labs/zeroclaw/releases"
+  local api_url="https://api.github.com/repos/myagentzero/zeroclaw/releases"
   local releases_json download_url
 
   # Fetch up to 10 recent releases (includes prereleases) and find the first
@@ -398,7 +398,7 @@ install_prebuilt_binary() {
   # that actually contains the asset, then fall back to /releases/latest/.
   archive_url="$(resolve_asset_url "$asset_name" || true)"
   if [[ -z "$archive_url" ]]; then
-    archive_url="https://github.com/zeroclaw-labs/zeroclaw/releases/latest/download/${asset_name}"
+    archive_url="https://github.com/myagentzero/zeroclaw/releases/latest/download/${asset_name}"
   fi
 
   temp_dir="$(mktemp -d -t zeroclaw-prebuilt-XXXXXX)"
@@ -1050,7 +1050,7 @@ run_docker_bootstrap() {
   local config_mount workspace_mount
   local -a container_run_user_args container_run_namespace_args
   docker_image="${ZEROCLAW_DOCKER_IMAGE:-zeroclaw-bootstrap:local}"
-  fallback_image="ghcr.io/zeroclaw-labs/zeroclaw:latest"
+  fallback_image="ghcr.io/myagentzero/zeroclaw:latest"
   if [[ "$TEMP_CLONE" == true ]]; then
     default_data_dir="$HOME/.zeroclaw-docker"
   else
@@ -1144,7 +1144,7 @@ run_docker_bootstrap() {
 SCRIPT_PATH="${BASH_SOURCE[0]:-$0}"
 SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" >/dev/null 2>&1 && pwd || pwd)"
 ROOT_DIR="$SCRIPT_DIR"
-REPO_URL="https://github.com/zeroclaw-labs/zeroclaw.git"
+REPO_URL="https://github.com/myagentzero/zeroclaw.git"
 ORIGINAL_ARG_COUNT=$#
 GUIDED_MODE="auto"
 

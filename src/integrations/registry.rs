@@ -82,11 +82,11 @@ pub fn all_integrations() -> Vec<IntegrationEntry> {
             },
         },
         IntegrationEntry {
-            name: "iMessage",
-            description: "macOS AppleScript bridge",
+            name: "Email",
+            description: "IMAP/SMTP email channel",
             category: IntegrationCategory::Chat,
             status_fn: |c| {
-                if c.channels_config.imessage.is_some() {
+                if c.channels_config.email.is_some() {
                     IntegrationStatus::Active
                 } else {
                     IntegrationStatus::Available
@@ -94,65 +94,11 @@ pub fn all_integrations() -> Vec<IntegrationEntry> {
             },
         },
         IntegrationEntry {
-            name: "Microsoft Teams",
-            description: "Enterprise chat support",
-            category: IntegrationCategory::Chat,
-            status_fn: |_| IntegrationStatus::ComingSoon,
-        },
-        IntegrationEntry {
-            name: "Matrix",
-            description: "Matrix protocol (Element)",
+            name: "IRC",
+            description: "IRC over TLS",
             category: IntegrationCategory::Chat,
             status_fn: |c| {
-                if c.channels_config.matrix.is_some() {
-                    IntegrationStatus::Active
-                } else {
-                    IntegrationStatus::Available
-                }
-            },
-        },
-        IntegrationEntry {
-            name: "Nostr",
-            description: "Decentralized DMs (NIP-04)",
-            category: IntegrationCategory::Chat,
-            status_fn: |_| IntegrationStatus::ComingSoon,
-        },
-        IntegrationEntry {
-            name: "WebChat",
-            description: "Browser-based chat UI",
-            category: IntegrationCategory::Chat,
-            status_fn: |_| IntegrationStatus::ComingSoon,
-        },
-        IntegrationEntry {
-            name: "Nextcloud Talk",
-            description: "Self-hosted Nextcloud chat",
-            category: IntegrationCategory::Chat,
-            status_fn: |_| IntegrationStatus::ComingSoon,
-        },
-        IntegrationEntry {
-            name: "Zalo",
-            description: "Zalo Bot API",
-            category: IntegrationCategory::Chat,
-            status_fn: |_| IntegrationStatus::ComingSoon,
-        },
-        IntegrationEntry {
-            name: "DingTalk",
-            description: "DingTalk Stream Mode",
-            category: IntegrationCategory::Chat,
-            status_fn: |c| {
-                if c.channels_config.dingtalk.is_some() {
-                    IntegrationStatus::Active
-                } else {
-                    IntegrationStatus::Available
-                }
-            },
-        },
-        IntegrationEntry {
-            name: "QQ Official",
-            description: "Tencent QQ Bot SDK",
-            category: IntegrationCategory::Chat,
-            status_fn: |c| {
-                if c.channels_config.qq.is_some() {
+                if c.channels_config.irc.is_some() {
                     IntegrationStatus::Active
                 } else {
                     IntegrationStatus::Available
@@ -174,7 +120,7 @@ pub fn all_integrations() -> Vec<IntegrationEntry> {
         },
         IntegrationEntry {
             name: "Anthropic",
-            description: "Claude 3.5/4 Sonnet & Opus",
+            description: "Claude Sonnet 4.6, Claude Opus 4.6",
             category: IntegrationCategory::AiModel,
             status_fn: |c| {
                 if c.default_provider.as_deref() == Some("anthropic") {
@@ -186,7 +132,7 @@ pub fn all_integrations() -> Vec<IntegrationEntry> {
         },
         IntegrationEntry {
             name: "OpenAI",
-            description: "GPT-4o, GPT-5, o1",
+            description: "GPT-5.2, GPT-5.2-Codex",
             category: IntegrationCategory::AiModel,
             status_fn: |c| {
                 if c.default_provider.as_deref() == Some("openai") {
@@ -198,7 +144,7 @@ pub fn all_integrations() -> Vec<IntegrationEntry> {
         },
         IntegrationEntry {
             name: "Google",
-            description: "Gemini 2.5 Pro/Flash",
+            description: "Gemini 3.1 Pro, Gemini 3 Flash",
             category: IntegrationCategory::AiModel,
             status_fn: |c| {
                 if c.default_model
@@ -213,7 +159,7 @@ pub fn all_integrations() -> Vec<IntegrationEntry> {
         },
         IntegrationEntry {
             name: "DeepSeek",
-            description: "DeepSeek V3 & R1",
+            description: "DeepSeek-Reasoner, DeepSeek-Chat",
             category: IntegrationCategory::AiModel,
             status_fn: |c| {
                 if c.default_model
@@ -228,7 +174,7 @@ pub fn all_integrations() -> Vec<IntegrationEntry> {
         },
         IntegrationEntry {
             name: "xAI",
-            description: "Grok 3 & 4",
+            description: "Grok 4, Grok 3",
             category: IntegrationCategory::AiModel,
             status_fn: |c| {
                 if c.default_model
@@ -243,7 +189,7 @@ pub fn all_integrations() -> Vec<IntegrationEntry> {
         },
         IntegrationEntry {
             name: "Mistral",
-            description: "Mistral Large & Codestral",
+            description: "Mistral Large Latest, Codestral",
             category: IntegrationCategory::AiModel,
             status_fn: |c| {
                 if c.default_model
@@ -270,7 +216,7 @@ pub fn all_integrations() -> Vec<IntegrationEntry> {
         },
         IntegrationEntry {
             name: "Perplexity",
-            description: "Search-augmented AI",
+            description: "Sonar Pro, Sonar Reasoning Pro",
             category: IntegrationCategory::AiModel,
             status_fn: |c| {
                 if c.default_provider.as_deref() == Some("perplexity") {
@@ -281,16 +227,19 @@ pub fn all_integrations() -> Vec<IntegrationEntry> {
             },
         },
         IntegrationEntry {
-            name: "Hugging Face",
-            description: "Open-source models",
-            category: IntegrationCategory::AiModel,
-            status_fn: |_| IntegrationStatus::ComingSoon,
-        },
-        IntegrationEntry {
             name: "LM Studio",
             description: "Local model server",
             category: IntegrationCategory::AiModel,
-            status_fn: |_| IntegrationStatus::ComingSoon,
+            status_fn: |c| {
+                if c.default_provider.as_deref().is_some_and(|provider| {
+                    provider.eq_ignore_ascii_case("lmstudio")
+                        || provider.eq_ignore_ascii_case("lm-studio")
+                }) {
+                    IntegrationStatus::Active
+                } else {
+                    IntegrationStatus::Available
+                }
+            },
         },
         IntegrationEntry {
             name: "Venice",
@@ -358,18 +307,6 @@ pub fn all_integrations() -> Vec<IntegrationEntry> {
             category: IntegrationCategory::AiModel,
             status_fn: |c| {
                 if c.default_provider.as_deref() == Some("opencode") {
-                    IntegrationStatus::Active
-                } else {
-                    IntegrationStatus::Available
-                }
-            },
-        },
-        IntegrationEntry {
-            name: "OpenCode Go",
-            description: "Subsidized Code-focused AI models",
-            category: IntegrationCategory::AiModel,
-            status_fn: |c| {
-                if c.default_provider.as_deref() == Some("opencode-go") {
                     IntegrationStatus::Active
                 } else {
                     IntegrationStatus::Available
@@ -485,18 +422,6 @@ pub fn all_integrations() -> Vec<IntegrationEntry> {
             },
         },
         IntegrationEntry {
-            name: "Novita AI",
-            description: "Affordable open-source inference",
-            category: IntegrationCategory::AiModel,
-            status_fn: |c| {
-                if c.default_provider.as_deref() == Some("novita") {
-                    IntegrationStatus::Active
-                } else {
-                    IntegrationStatus::Available
-                }
-            },
-        },
-        IntegrationEntry {
             name: "Cohere",
             description: "Command R+ & embeddings",
             category: IntegrationCategory::AiModel,
@@ -510,121 +435,23 @@ pub fn all_integrations() -> Vec<IntegrationEntry> {
         },
         // ── Productivity ────────────────────────────────────────
         IntegrationEntry {
-            name: "Google Workspace",
-            description: "Drive, Gmail, Calendar, Sheets, Docs via gws CLI",
+            name: "GitHub",
+            description: "Code, issues, PRs",
             category: IntegrationCategory::Productivity,
             status_fn: |c| {
-                if c.google_workspace.enabled {
+                if c.channels_config.github.is_some() {
                     IntegrationStatus::Active
                 } else {
                     IntegrationStatus::Available
                 }
             },
-        },
-        IntegrationEntry {
-            name: "GitHub",
-            description: "Code, issues, PRs",
-            category: IntegrationCategory::Productivity,
-            status_fn: |_| IntegrationStatus::ComingSoon,
-        },
-        IntegrationEntry {
-            name: "Notion",
-            description: "Workspace & databases",
-            category: IntegrationCategory::Productivity,
-            status_fn: |_| IntegrationStatus::ComingSoon,
-        },
-        IntegrationEntry {
-            name: "Apple Notes",
-            description: "Native macOS/iOS notes",
-            category: IntegrationCategory::Productivity,
-            status_fn: |_| IntegrationStatus::ComingSoon,
-        },
-        IntegrationEntry {
-            name: "Apple Reminders",
-            description: "Task management",
-            category: IntegrationCategory::Productivity,
-            status_fn: |_| IntegrationStatus::ComingSoon,
-        },
-        IntegrationEntry {
-            name: "Obsidian",
-            description: "Knowledge graph notes",
-            category: IntegrationCategory::Productivity,
-            status_fn: |_| IntegrationStatus::ComingSoon,
-        },
-        IntegrationEntry {
-            name: "Things 3",
-            description: "GTD task manager",
-            category: IntegrationCategory::Productivity,
-            status_fn: |_| IntegrationStatus::ComingSoon,
-        },
-        IntegrationEntry {
-            name: "Bear Notes",
-            description: "Markdown notes",
-            category: IntegrationCategory::Productivity,
-            status_fn: |_| IntegrationStatus::ComingSoon,
-        },
-        IntegrationEntry {
-            name: "Trello",
-            description: "Kanban boards",
-            category: IntegrationCategory::Productivity,
-            status_fn: |_| IntegrationStatus::ComingSoon,
-        },
-        IntegrationEntry {
-            name: "Linear",
-            description: "Issue tracking",
-            category: IntegrationCategory::Productivity,
-            status_fn: |_| IntegrationStatus::ComingSoon,
-        },
-        // ── Music & Audio ───────────────────────────────────────
-        IntegrationEntry {
-            name: "Spotify",
-            description: "Music playback control",
-            category: IntegrationCategory::MusicAudio,
-            status_fn: |_| IntegrationStatus::ComingSoon,
-        },
-        IntegrationEntry {
-            name: "Sonos",
-            description: "Multi-room audio",
-            category: IntegrationCategory::MusicAudio,
-            status_fn: |_| IntegrationStatus::ComingSoon,
-        },
-        IntegrationEntry {
-            name: "Shazam",
-            description: "Song recognition",
-            category: IntegrationCategory::MusicAudio,
-            status_fn: |_| IntegrationStatus::ComingSoon,
-        },
-        // ── Smart Home ──────────────────────────────────────────
-        IntegrationEntry {
-            name: "Home Assistant",
-            description: "Home automation hub",
-            category: IntegrationCategory::SmartHome,
-            status_fn: |_| IntegrationStatus::ComingSoon,
-        },
-        IntegrationEntry {
-            name: "Philips Hue",
-            description: "Smart lighting",
-            category: IntegrationCategory::SmartHome,
-            status_fn: |_| IntegrationStatus::ComingSoon,
-        },
-        IntegrationEntry {
-            name: "8Sleep",
-            description: "Smart mattress",
-            category: IntegrationCategory::SmartHome,
-            status_fn: |_| IntegrationStatus::ComingSoon,
         },
         // ── Tools & Automation ──────────────────────────────────
         IntegrationEntry {
             name: "Browser",
             description: "Chrome/Chromium control",
             category: IntegrationCategory::ToolsAutomation,
-            status_fn: |c| {
-                if c.browser.enabled {
-                    IntegrationStatus::Active
-                } else {
-                    IntegrationStatus::Available
-                }
-            },
+            status_fn: |_| IntegrationStatus::Available,
         },
         IntegrationEntry {
             name: "Shell",
@@ -642,87 +469,13 @@ pub fn all_integrations() -> Vec<IntegrationEntry> {
             name: "Cron",
             description: "Scheduled tasks",
             category: IntegrationCategory::ToolsAutomation,
-            status_fn: |c| {
-                if c.cron.enabled {
-                    IntegrationStatus::Active
-                } else {
-                    IntegrationStatus::Available
-                }
-            },
-        },
-        IntegrationEntry {
-            name: "Voice",
-            description: "Voice wake + talk mode",
-            category: IntegrationCategory::ToolsAutomation,
-            status_fn: |_| IntegrationStatus::ComingSoon,
-        },
-        IntegrationEntry {
-            name: "Gmail",
-            description: "Email triggers & send",
-            category: IntegrationCategory::ToolsAutomation,
-            status_fn: |_| IntegrationStatus::ComingSoon,
-        },
-        IntegrationEntry {
-            name: "1Password",
-            description: "Secure credentials",
-            category: IntegrationCategory::ToolsAutomation,
-            status_fn: |_| IntegrationStatus::ComingSoon,
+            status_fn: |_| IntegrationStatus::Available,
         },
         IntegrationEntry {
             name: "Weather",
             description: "Forecasts & conditions",
             category: IntegrationCategory::ToolsAutomation,
             status_fn: |_| IntegrationStatus::Active,
-        },
-        IntegrationEntry {
-            name: "Canvas",
-            description: "Visual workspace + A2UI",
-            category: IntegrationCategory::ToolsAutomation,
-            status_fn: |_| IntegrationStatus::ComingSoon,
-        },
-        // ── Media & Creative ────────────────────────────────────
-        IntegrationEntry {
-            name: "Image Gen",
-            description: "AI image generation",
-            category: IntegrationCategory::MediaCreative,
-            status_fn: |_| IntegrationStatus::ComingSoon,
-        },
-        IntegrationEntry {
-            name: "GIF Search",
-            description: "Find the perfect GIF",
-            category: IntegrationCategory::MediaCreative,
-            status_fn: |_| IntegrationStatus::ComingSoon,
-        },
-        IntegrationEntry {
-            name: "Screen Capture",
-            description: "Screenshot & screen control",
-            category: IntegrationCategory::MediaCreative,
-            status_fn: |_| IntegrationStatus::ComingSoon,
-        },
-        IntegrationEntry {
-            name: "Camera",
-            description: "Photo/video capture",
-            category: IntegrationCategory::MediaCreative,
-            status_fn: |_| IntegrationStatus::ComingSoon,
-        },
-        // ── Social ──────────────────────────────────────────────
-        IntegrationEntry {
-            name: "Twitter/X",
-            description: "Tweet, reply, search",
-            category: IntegrationCategory::Social,
-            status_fn: |_| IntegrationStatus::ComingSoon,
-        },
-        IntegrationEntry {
-            name: "Email",
-            description: "IMAP/SMTP email channel",
-            category: IntegrationCategory::Social,
-            status_fn: |c| {
-                if c.channels_config.email.is_some() {
-                    IntegrationStatus::Active
-                } else {
-                    IntegrationStatus::Available
-                }
-            },
         },
         // ── Platforms ───────────────────────────────────────────
         IntegrationEntry {
@@ -773,15 +526,15 @@ pub fn all_integrations() -> Vec<IntegrationEntry> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::schema::{IMessageConfig, MatrixConfig, StreamMode, TelegramConfig};
     use crate::config::Config;
+    use crate::config::schema::{ProgressMode, StreamMode, TelegramConfig};
 
     #[test]
     fn registry_has_entries() {
         let entries = all_integrations();
         assert!(
-            entries.len() >= 50,
-            "Expected 50+ integrations, got {}",
+            entries.len() >= 45,
+            "Expected 45+ integrations, got {}",
             entries.len()
         );
     }
@@ -789,7 +542,15 @@ mod tests {
     #[test]
     fn all_categories_represented() {
         let entries = all_integrations();
-        for cat in IntegrationCategory::all() {
+        // Only assert categories that currently have registry entries.
+        let expected = [
+            IntegrationCategory::Chat,
+            IntegrationCategory::AiModel,
+            IntegrationCategory::Productivity,
+            IntegrationCategory::ToolsAutomation,
+            IntegrationCategory::Platform,
+        ];
+        for cat in &expected {
             let count = entries.iter().filter(|e| e.category == *cat).count();
             assert!(count > 0, "Category {cat:?} has no entries");
         }
@@ -840,8 +601,10 @@ mod tests {
             draft_update_interval_ms: 1000,
             interrupt_on_new_message: false,
             mention_only: false,
-            ack_reactions: None,
-            proxy_url: None,
+            progress_mode: ProgressMode::default(),
+            ack_enabled: true,
+            group_reply: None,
+            base_url: None,
         });
         let entries = all_integrations();
         let tg = entries.iter().find(|e| e.name == "Telegram").unwrap();
@@ -860,70 +623,35 @@ mod tests {
     }
 
     #[test]
-    fn imessage_active_when_configured() {
-        let mut config = Config::default();
-        config.channels_config.imessage = Some(IMessageConfig {
-            allowed_contacts: vec!["*".into()],
-        });
-        let entries = all_integrations();
-        let im = entries.iter().find(|e| e.name == "iMessage").unwrap();
-        assert!(matches!((im.status_fn)(&config), IntegrationStatus::Active));
-    }
-
-    #[test]
-    fn imessage_available_when_not_configured() {
+    fn lm_studio_available_when_not_selected_as_default_provider() {
         let config = Config::default();
         let entries = all_integrations();
-        let im = entries.iter().find(|e| e.name == "iMessage").unwrap();
+        let lm_studio = entries.iter().find(|e| e.name == "LM Studio").unwrap();
         assert!(matches!(
-            (im.status_fn)(&config),
+            (lm_studio.status_fn)(&config),
             IntegrationStatus::Available
         ));
     }
 
     #[test]
-    fn matrix_active_when_configured() {
-        let mut config = Config::default();
-        config.channels_config.matrix = Some(MatrixConfig {
-            homeserver: "https://m.org".into(),
-            access_token: "tok".into(),
-            user_id: None,
-            device_id: None,
-            room_id: "!r:m".into(),
-            allowed_users: vec![],
-            allowed_rooms: vec![],
-            interrupt_on_new_message: false,
-            stream_mode: crate::config::StreamMode::default(),
-            draft_update_interval_ms: 1500,
-            multi_message_delay_ms: 800,
-        });
+    fn lm_studio_active_for_lmstudio_default_provider_aliases() {
         let entries = all_integrations();
-        let mx = entries.iter().find(|e| e.name == "Matrix").unwrap();
-        assert!(matches!((mx.status_fn)(&config), IntegrationStatus::Active));
-    }
+        let lm_studio = entries.iter().find(|e| e.name == "LM Studio").unwrap();
 
-    #[test]
-    fn matrix_available_when_not_configured() {
-        let config = Config::default();
-        let entries = all_integrations();
-        let mx = entries.iter().find(|e| e.name == "Matrix").unwrap();
+        let mut config = Config {
+            default_provider: Some("lmstudio".to_string()),
+            ..Config::default()
+        };
         assert!(matches!(
-            (mx.status_fn)(&config),
-            IntegrationStatus::Available
+            (lm_studio.status_fn)(&config),
+            IntegrationStatus::Active
         ));
-    }
 
-    #[test]
-    fn coming_soon_integrations_stay_coming_soon() {
-        let config = Config::default();
-        let entries = all_integrations();
-        for name in ["Nostr", "Spotify", "Home Assistant"] {
-            let entry = entries.iter().find(|e| e.name == name).unwrap();
-            assert!(
-                matches!((entry.status_fn)(&config), IntegrationStatus::ComingSoon),
-                "{name} should be ComingSoon"
-            );
-        }
+        config.default_provider = Some("lm-studio".to_string());
+        assert!(matches!(
+            (lm_studio.status_fn)(&config),
+            IntegrationStatus::Active
+        ));
     }
 
     #[test]
@@ -949,58 +677,10 @@ mod tests {
     }
 
     #[test]
-    fn cron_active_when_enabled() {
-        let mut config = Config::default();
-        config.cron.enabled = true;
-        let entries = all_integrations();
-        let cron = entries.iter().find(|e| e.name == "Cron").unwrap();
-        assert!(matches!(
-            (cron.status_fn)(&config),
-            IntegrationStatus::Active
-        ));
-    }
-
-    #[test]
-    fn cron_available_when_disabled() {
-        let mut config = Config::default();
-        config.cron.enabled = false;
-        let entries = all_integrations();
-        let cron = entries.iter().find(|e| e.name == "Cron").unwrap();
-        assert!(matches!(
-            (cron.status_fn)(&config),
-            IntegrationStatus::Available
-        ));
-    }
-
-    #[test]
-    fn browser_active_when_enabled() {
-        let mut config = Config::default();
-        config.browser.enabled = true;
-        let entries = all_integrations();
-        let browser = entries.iter().find(|e| e.name == "Browser").unwrap();
-        assert!(matches!(
-            (browser.status_fn)(&config),
-            IntegrationStatus::Active
-        ));
-    }
-
-    #[test]
-    fn browser_available_when_disabled() {
-        let mut config = Config::default();
-        config.browser.enabled = false;
-        let entries = all_integrations();
-        let browser = entries.iter().find(|e| e.name == "Browser").unwrap();
-        assert!(matches!(
-            (browser.status_fn)(&config),
-            IntegrationStatus::Available
-        ));
-    }
-
-    #[test]
     fn shell_and_filesystem_always_active() {
         let config = Config::default();
         let entries = all_integrations();
-        for name in ["Shell", "File System", "Weather"] {
+        for name in ["Shell", "File System"] {
             let entry = entries.iter().find(|e| e.name == name).unwrap();
             assert!(
                 matches!((entry.status_fn)(&config), IntegrationStatus::Active),

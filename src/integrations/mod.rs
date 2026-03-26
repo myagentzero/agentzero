@@ -135,11 +135,6 @@ fn show_integration_info(config: &Config, name: &str) -> Result<()> {
             println!("    2. Pull a model: ollama pull llama3");
             println!("    3. Set provider to 'ollama' in config.toml");
         }
-        "iMessage" => {
-            println!("  Setup (macOS only):");
-            println!("    Uses AppleScript bridge to send/receive iMessages.");
-            println!("    Requires Full Disk Access in System Settings → Privacy.");
-        }
         "GitHub" => {
             println!("  Setup:");
             println!("    1. Create a personal access token at https://github.com/settings/tokens");
@@ -160,7 +155,7 @@ fn show_integration_info(config: &Config, name: &str) -> Result<()> {
             println!("    Fetches live conditions from wttr.in — no API key required.");
             println!("    Supports city names, IATA airport codes, GPS coordinates,");
             println!("    postal/zip codes, and Unicode location names.");
-            println!("    Ask the agent: \"What's the weather in Tulsa?\"");
+            println!("    Ask the agent: \"What's the weather in Peoria, AZ?\"");
         }
         "Webhooks" => {
             println!("  Built-in:");
@@ -170,7 +165,7 @@ fn show_integration_info(config: &Config, name: &str) -> Result<()> {
         _ => {
             if status == IntegrationStatus::ComingSoon {
                 println!("  This integration is planned. Stay tuned!");
-                println!("  Track progress: https://github.com/zeroclaw-labs/zeroclaw");
+                println!("  Track progress: https://github.com/myagentzero/zeroclaw");
             }
         }
     }

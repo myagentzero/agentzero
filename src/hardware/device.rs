@@ -27,8 +27,6 @@ pub enum DeviceRuntime {
     Nucleus,
     /// Linux / Raspberry Pi — ssh/shell execution (future).
     Linux,
-    /// Total Phase Aardvark I2C/SPI/GPIO USB adapter.
-    Aardvark,
 }
 
 impl DeviceRuntime {
@@ -38,7 +36,6 @@ impl DeviceRuntime {
             DeviceKind::Pico | DeviceKind::Esp32 | DeviceKind::Generic => Self::MicroPython,
             DeviceKind::Arduino => Self::Arduino,
             DeviceKind::Nucleo => Self::Nucleus,
-            DeviceKind::Aardvark => Self::Aardvark,
         }
     }
 }
@@ -51,7 +48,6 @@ impl std::fmt::Display for DeviceRuntime {
             Self::Arduino => write!(f, "Arduino"),
             Self::Nucleus => write!(f, "Nucleus"),
             Self::Linux => write!(f, "Linux"),
-            Self::Aardvark => write!(f, "Aardvark"),
         }
     }
 }
@@ -74,8 +70,6 @@ pub enum DeviceKind {
     Nucleo,
     /// Unknown VID that passed the ZeroClaw firmware ping handshake.
     Generic,
-    /// Total Phase Aardvark USB adapter (VID `0x2B76`).
-    Aardvark,
 }
 
 impl DeviceKind {
@@ -87,7 +81,6 @@ impl DeviceKind {
             0x2341 => Some(Self::Arduino),
             0x10c4 => Some(Self::Esp32),
             0x0483 => Some(Self::Nucleo),
-            0x2b76 => Some(Self::Aardvark),
             _ => None,
         }
     }
@@ -101,7 +94,6 @@ impl std::fmt::Display for DeviceKind {
             Self::Esp32 => write!(f, "esp32"),
             Self::Nucleo => write!(f, "nucleo"),
             Self::Generic => write!(f, "generic"),
-            Self::Aardvark => write!(f, "aardvark"),
         }
     }
 }
@@ -111,7 +103,6 @@ impl std::fmt::Display for DeviceKind {
 /// Populated from device handshake or static board metadata.
 /// Tools can check capabilities before attempting unsupported operations.
 #[derive(Debug, Clone, Default)]
-#[allow(clippy::struct_excessive_bools)]
 pub struct DeviceCapabilities {
     pub gpio: bool,
     pub i2c: bool,
@@ -379,62 +370,6 @@ impl DeviceRegistry {
         Ok((device_alias, ctx))
     }
 
-    /// Return `true` when at least one Aardvark adapter is registered.
-    pub fn has_aardvark(&self) -> bool {
-        self.devices
-            .values()
-            .any(|e| e.device.kind == DeviceKind::Aardvark)
-    }
-
-    /// Resolve an Aardvark device from tool arguments.
-    ///
-    /// If `args["device"]` is provided, uses that alias directly.
-    /// Otherwise auto-selects the single Aardvark device, returning an error
-    /// description if zero or multiple Aardvark devices are available.
-    ///
-    /// Returns `(alias, DeviceContext)` — both are owned/Arc-based so the
-    /// caller can drop the registry lock before doing async I/O.
-    pub fn resolve_aardvark_device(
-        &self,
-        args: &serde_json::Value,
-    ) -> Result<(String, DeviceContext), String> {
-        let device_alias: String = match args.get("device").and_then(|v| v.as_str()) {
-            Some(a) => a.to_string(),
-            None => {
-                let aardvark_aliases: Vec<String> = self
-                    .aliases()
-                    .into_iter()
-                    .filter(|a| {
-                        self.devices
-                            .get(*a)
-                            .map(|e| e.device.kind == DeviceKind::Aardvark)
-                            .unwrap_or(false)
-                    })
-                    .map(|a| a.to_string())
-                    .collect();
-                match aardvark_aliases.as_slice() {
-                    [single] => single.clone(),
-                    [] => {
-                        return Err("no Aardvark adapter found; is it plugged in?".to_string());
-                    }
-                    _ => {
-                        return Err(format!(
-                            "multiple Aardvark adapters available ({}); \
-                             specify \"device\" parameter",
-                            aardvark_aliases.join(", ")
-                        ));
-                    }
-                }
-            }
-        };
-
-        let ctx = self.context(&device_alias).ok_or_else(|| {
-            format!("device '{device_alias}' not found or has no transport attached")
-        })?;
-
-        Ok((device_alias, ctx))
-    }
-
     /// Number of registered devices.
     pub fn len(&self) -> usize {
         self.devices.len()
@@ -489,7 +424,7 @@ impl DeviceRegistry {
     pub async fn discover() -> Self {
         use super::{
             discover::scan_serial_devices,
-            serial::{HardwareSerialTransport, DEFAULT_BAUD},
+            serial::{DEFAULT_BAUD, HardwareSerialTransport},
         };
 
         let mut registry = Self::new();
@@ -563,7 +498,7 @@ impl DeviceRegistry {
     /// pass `None` to reuse the device's current path.
     #[cfg(feature = "hardware")]
     pub async fn reconnect(&mut self, alias: &str, new_port: Option<&str>) -> anyhow::Result<()> {
-        use super::serial::{HardwareSerialTransport, DEFAULT_BAUD};
+        use super::serial::{DEFAULT_BAUD, HardwareSerialTransport};
 
         let entry = self
             .devices
@@ -758,7 +693,7 @@ mod tests {
         reg.register("pico", None, None, None, None);
         reg.register("arduino-uno", None, None, None, None);
         let mut aliases = reg.aliases();
-        aliases.sort_unstable();
+        aliases.sort();
         assert_eq!(aliases, vec!["arduino0", "pico0"]);
     }
 

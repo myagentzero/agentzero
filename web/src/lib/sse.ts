@@ -1,6 +1,5 @@
 import type { SSEEvent } from '../types/api';
 import { getToken } from './auth';
-import { apiOrigin, basePath } from './basePath';
 
 export type SSEEventHandler = (event: SSEEvent) => void;
 export type SSEErrorHandler = (error: Event | Error) => void;
@@ -42,7 +41,7 @@ export class SSEClient {
   private readonly autoReconnect: boolean;
 
   constructor(options: SSEClientOptions = {}) {
-    this.path = options.path ?? `${apiOrigin}${basePath}/api/events`;
+    this.path = options.path ?? '/api/events';
     this.reconnectDelay = options.reconnectDelay ?? DEFAULT_RECONNECT_DELAY;
     this.maxReconnectDelay = options.maxReconnectDelay ?? MAX_RECONNECT_DELAY;
     this.autoReconnect = options.autoReconnect ?? true;
@@ -53,6 +52,7 @@ export class SSEClient {
   connect(): void {
     this.intentionallyClosed = false;
     this.clearReconnectTimer();
+
     this.controller = new AbortController();
 
     const token = getToken();
@@ -115,8 +115,8 @@ export class SSEClient {
 
         buffer += decoder.decode(value, { stream: true });
 
-        // SSE events are separated by double newlines
-        const parts = buffer.split('\n\n');
+        // SSE events are separated by double newlines (handle \r\n line endings)
+        const parts = buffer.split(/\r?\n\r?\n/);
         buffer = parts.pop() ?? '';
 
         for (const part of parts) {

@@ -1,181 +1,80 @@
-use std::fs;
-use std::path::Path;
+use std::env;
+use std::path::PathBuf;
 use std::process::Command;
-use std::time::SystemTime;
 
-fn main() {
-    let dist_dir = Path::new("web/dist");
-    let web_dir = Path::new("web");
+fn git_short_sha(manifest_dir: &str) -> Option<String> {
+    let output = Command::new("git")
+        .args(["rev-parse", "--short", "HEAD"])
+        .current_dir(manifest_dir)
+        .output()
+        .ok()?;
 
-    // Tell Cargo to re-run this script when web sources or bundled assets change.
-    println!("cargo:rerun-if-changed=web/src");
-    println!("cargo:rerun-if-changed=web/public");
-    println!("cargo:rerun-if-changed=web/index.html");
-    println!("cargo:rerun-if-changed=docs/assets/zeroclaw-trans.png");
-    println!("cargo:rerun-if-changed=web/package.json");
-    println!("cargo:rerun-if-changed=web/package-lock.json");
-    println!("cargo:rerun-if-changed=web/tsconfig.json");
-    println!("cargo:rerun-if-changed=web/tsconfig.app.json");
-    println!("cargo:rerun-if-changed=web/tsconfig.node.json");
-    println!("cargo:rerun-if-changed=web/vite.config.ts");
-    println!("cargo:rerun-if-changed=web/dist");
-
-    // Attempt to build the web frontend if npm is available and web/dist is
-    // missing or stale.  The build is best-effort: when Node.js is not
-    // installed (e.g. CI containers, cross-compilation, minimal dev setups)
-    // we fall back to the existing stub/empty dist directory so the Rust
-    // build still succeeds.
-    let needs_build = web_build_required(web_dir, dist_dir);
-
-    if needs_build && web_dir.join("package.json").exists() {
-        if let Ok(npm) = which_npm() {
-            eprintln!("cargo:warning=Building web frontend (web/dist is missing or stale)...");
-
-            // npm ci / npm install
-            let install_status = Command::new(&npm)
-                .args(["ci", "--ignore-scripts"])
-                .current_dir(web_dir)
-                .status();
-
-            match install_status {
-                Ok(s) if s.success() => {}
-                Ok(s) => {
-                    // Fall back to `npm install` if `npm ci` fails (no lockfile, etc.)
-                    eprintln!("cargo:warning=npm ci exited with {s}, trying npm install...");
-                    let fallback = Command::new(&npm)
-                        .args(["install"])
-                        .current_dir(web_dir)
-                        .status();
-                    if !matches!(fallback, Ok(s) if s.success()) {
-                        eprintln!("cargo:warning=npm install failed — skipping web build");
-                        ensure_dist_dir(dist_dir);
-                        return;
-                    }
-                }
-                Err(e) => {
-                    eprintln!("cargo:warning=Could not run npm: {e} — skipping web build");
-                    ensure_dist_dir(dist_dir);
-                    return;
-                }
-            }
-
-            // npm run build
-            let build_status = Command::new(&npm)
-                .args(["run", "build"])
-                .current_dir(web_dir)
-                .status();
-
-            match build_status {
-                Ok(s) if s.success() => {
-                    eprintln!("cargo:warning=Web frontend built successfully.");
-                }
-                Ok(s) => {
-                    eprintln!(
-                        "cargo:warning=npm run build exited with {s} — web dashboard may be unavailable"
-                    );
-                }
-                Err(e) => {
-                    eprintln!(
-                        "cargo:warning=Could not run npm build: {e} — web dashboard may be unavailable"
-                    );
-                }
-            }
-        }
-    }
-
-    ensure_dist_dir(dist_dir);
-    ensure_dashboard_assets(dist_dir);
-}
-
-fn web_build_required(web_dir: &Path, dist_dir: &Path) -> bool {
-    let Some(dist_mtime) = latest_modified(dist_dir) else {
-        return true;
-    };
-
-    [
-        web_dir.join("src"),
-        web_dir.join("public"),
-        web_dir.join("index.html"),
-        web_dir.join("package.json"),
-        web_dir.join("package-lock.json"),
-        web_dir.join("tsconfig.json"),
-        web_dir.join("tsconfig.app.json"),
-        web_dir.join("tsconfig.node.json"),
-        web_dir.join("vite.config.ts"),
-    ]
-    .into_iter()
-    .filter_map(|path| latest_modified(&path))
-    .any(|mtime| mtime > dist_mtime)
-}
-
-fn latest_modified(path: &Path) -> Option<SystemTime> {
-    let metadata = fs::metadata(path).ok()?;
-    if metadata.is_file() {
-        return metadata.modified().ok();
-    }
-    if !metadata.is_dir() {
+    if !output.status.success() {
         return None;
     }
 
-    let mut latest = metadata.modified().ok();
-    let entries = fs::read_dir(path).ok()?;
-    for entry in entries.flatten() {
-        if let Some(child_mtime) = latest_modified(&entry.path()) {
-            latest = Some(match latest {
-                Some(current) if current >= child_mtime => current,
-                _ => child_mtime,
-            });
-        }
-    }
-    latest
-}
-
-/// Ensure the dist directory exists so `rust-embed` does not fail at compile
-/// time even when the web frontend is not built.
-fn ensure_dist_dir(dist_dir: &Path) {
-    if !dist_dir.exists() {
-        std::fs::create_dir_all(dist_dir).expect("failed to create web/dist/");
+    let short_sha = String::from_utf8(output.stdout).ok()?;
+    let trimmed = short_sha.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
     }
 }
 
-fn ensure_dashboard_assets(dist_dir: &Path) {
-    // The Rust gateway serves `web/dist/` via rust-embed under `/_app/*`.
-    // Some builds may end up with missing/blank logo assets, so we ensure the
-    // expected image is always present in `web/dist/` at compile time.
-    let src = Path::new("docs/assets/zeroclaw-trans.png");
-    if !src.exists() {
-        eprintln!(
-            "cargo:warning=docs/assets/zeroclaw-trans.png not found; skipping dashboard asset copy"
-        );
+fn emit_git_rerun_hints(manifest_dir: &str) {
+    let output = Command::new("git")
+        .args(["rev-parse", "--git-dir"])
+        .current_dir(manifest_dir)
+        .output();
+
+    let Ok(output) = output else {
+        return;
+    };
+    if !output.status.success() {
         return;
     }
 
-    let dst = dist_dir.join("zeroclaw-trans.png");
-    if let Err(e) = fs::copy(src, &dst) {
-        eprintln!("cargo:warning=Failed to copy zeroclaw-trans.png into web/dist/: {e}");
+    let Ok(git_dir_raw) = String::from_utf8(output.stdout) else {
+        return;
+    };
+    let git_dir_raw = git_dir_raw.trim();
+    if git_dir_raw.is_empty() {
+        return;
     }
-}
 
-/// Locate the `npm` binary on the system PATH.
-fn which_npm() -> Result<String, ()> {
-    let cmd = if cfg!(target_os = "windows") {
-        "where"
+    let git_dir = if PathBuf::from(git_dir_raw).is_absolute() {
+        PathBuf::from(git_dir_raw)
     } else {
-        "which"
+        PathBuf::from(manifest_dir).join(git_dir_raw)
     };
 
-    Command::new(cmd)
-        .arg("npm")
-        .output()
+    println!("cargo:rerun-if-changed={}", git_dir.join("HEAD").display());
+    println!("cargo:rerun-if-changed={}", git_dir.join("refs").display());
+}
+
+fn main() {
+    println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-env-changed=ZEROCLAW_GIT_SHORT_SHA");
+
+    let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| ".".to_string());
+    emit_git_rerun_hints(&manifest_dir);
+
+    let package_version = env::var("CARGO_PKG_VERSION").unwrap_or_else(|_| "0.0.0".to_string());
+    let short_sha = env::var("ZEROCLAW_GIT_SHORT_SHA")
         .ok()
-        .and_then(|output| {
-            if output.status.success() {
-                String::from_utf8(output.stdout)
-                    .ok()
-                    .map(|s| s.lines().next().unwrap_or("npm").trim().to_string())
-            } else {
-                None
-            }
-        })
-        .ok_or(())
+        .filter(|v| !v.trim().is_empty())
+        .or_else(|| git_short_sha(&manifest_dir));
+
+    let build_version = if let Some(sha) = short_sha.as_deref() {
+        format!("{package_version} ({sha})")
+    } else {
+        package_version
+    };
+
+    println!("cargo:rustc-env=ZEROCLAW_BUILD_VERSION={build_version}");
+    println!(
+        "cargo:rustc-env=ZEROCLAW_GIT_SHORT_SHA={}",
+        short_sha.unwrap_or_default()
+    );
 }

@@ -31,6 +31,7 @@ pub const DEFAULT_BAUD: u32 = 115_200;
 const PING_TIMEOUT_MS: u64 = 300;
 
 /// Allowed serial device path prefixes — reject arbitrary paths for security.
+/// Uses the shared allowlist from `crate::util`.
 use crate::util::is_serial_path_allowed as is_path_allowed;
 
 /// Serial transport for ZeroClaw hardware devices.

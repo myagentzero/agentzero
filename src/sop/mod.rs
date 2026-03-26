@@ -2,17 +2,20 @@ pub mod audit;
 pub mod condition;
 pub mod dispatch;
 pub mod engine;
+#[cfg(feature = "ampersona-gates")]
+pub mod gates;
 pub mod metrics;
 pub mod types;
 
 pub use audit::SopAuditLogger;
 pub use engine::SopEngine;
+#[cfg(feature = "ampersona-gates")]
+pub use gates::GateEvalState;
 pub use metrics::SopMetricsCollector;
 #[allow(unused_imports)]
 pub use types::{
-    DeterministicRunState, DeterministicSavings, Sop, SopEvent, SopExecutionMode, SopPriority,
-    SopRun, SopRunAction, SopRunStatus, SopStep, SopStepKind, SopStepResult, SopStepStatus,
-    SopTrigger, SopTriggerSource, StepSchema,
+    Sop, SopEvent, SopExecutionMode, SopPriority, SopRun, SopRunAction, SopRunStatus, SopStep,
+    SopStepResult, SopStepStatus, SopTrigger, SopTriggerSource,
 };
 
 use anyhow::Result;
@@ -20,19 +23,6 @@ use std::path::{Path, PathBuf};
 use tracing::warn;
 
 use types::{SopManifest, SopMeta};
-
-/// Parse an execution mode string into `SopExecutionMode`, falling back to
-/// `Supervised` for unknown values.
-pub fn parse_execution_mode(s: &str) -> SopExecutionMode {
-    match s.trim().to_lowercase().as_str() {
-        "auto" => SopExecutionMode::Auto,
-        "step_by_step" => SopExecutionMode::StepByStep,
-        "priority_based" => SopExecutionMode::PriorityBased,
-        "deterministic" => SopExecutionMode::Deterministic,
-        // "supervised" and any unknown value
-        _ => SopExecutionMode::Supervised,
-    }
-}
 
 // ── SOP directory helpers ───────────────────────────────────────
 
@@ -122,28 +112,19 @@ fn load_sop(sop_dir: &Path, default_execution_mode: SopExecutionMode) -> Result<
         execution_mode,
         cooldown_secs,
         max_concurrent,
-        deterministic,
     } = manifest.sop;
-
-    // When deterministic=true, override execution_mode to Deterministic
-    let effective_mode = if deterministic {
-        SopExecutionMode::Deterministic
-    } else {
-        execution_mode.unwrap_or(default_execution_mode)
-    };
 
     Ok(Sop {
         name,
         description,
         version,
         priority,
-        execution_mode: effective_mode,
+        execution_mode: execution_mode.unwrap_or(default_execution_mode),
         triggers: manifest.triggers,
         steps,
         cooldown_secs,
         max_concurrent,
         location: Some(sop_dir.to_path_buf()),
-        deterministic,
     })
 }
 
@@ -162,7 +143,6 @@ pub fn parse_steps(md: &str) -> Vec<SopStep> {
     let mut current_body = String::new();
     let mut current_tools: Vec<String> = Vec::new();
     let mut current_requires_confirmation = false;
-    let mut current_kind = SopStepKind::Execute;
 
     for line in md.lines() {
         let trimmed = line.trim();
@@ -184,7 +164,6 @@ pub fn parse_steps(md: &str) -> Vec<SopStep> {
                     &mut current_body,
                     &mut current_tools,
                     &mut current_requires_confirmation,
-                    &mut current_kind,
                 );
                 in_steps_section = false;
             }
@@ -205,7 +184,6 @@ pub fn parse_steps(md: &str) -> Vec<SopStep> {
                 &mut current_body,
                 &mut current_tools,
                 &mut current_requires_confirmation,
-                &mut current_kind,
             );
 
             let step_num = u32::try_from(steps.len())
@@ -239,15 +217,6 @@ pub fn parse_steps(md: &str) -> Vec<SopStep> {
                 if let Some(val) = bullet.strip_prefix("requires_confirmation:") {
                     current_requires_confirmation = val.trim().eq_ignore_ascii_case("true");
                 }
-            } else if bullet.starts_with("kind:") {
-                if let Some(val) = bullet.strip_prefix("kind:") {
-                    let val = val.trim();
-                    if val.eq_ignore_ascii_case("checkpoint") {
-                        current_kind = SopStepKind::Checkpoint;
-                    } else {
-                        current_kind = SopStepKind::Execute;
-                    }
-                }
             } else {
                 // Continuation body line
                 if !current_body.is_empty() {
@@ -275,7 +244,6 @@ pub fn parse_steps(md: &str) -> Vec<SopStep> {
         &mut current_body,
         &mut current_tools,
         &mut current_requires_confirmation,
-        &mut current_kind,
     );
 
     steps
@@ -289,7 +257,6 @@ fn flush_step(
     body: &mut String,
     tools: &mut Vec<String>,
     requires_confirmation: &mut bool,
-    kind: &mut SopStepKind,
 ) {
     if let Some(n) = number.take() {
         steps.push(SopStep {
@@ -298,12 +265,9 @@ fn flush_step(
             body: body.trim().to_string(),
             suggested_tools: std::mem::take(tools),
             requires_confirmation: *requires_confirmation,
-            kind: *kind,
-            schema: None,
         });
         *body = String::new();
         *requires_confirmation = false;
-        *kind = SopStepKind::Execute;
     }
 }
 
@@ -385,7 +349,7 @@ pub fn handle_command(command: crate::SopCommands, config: &crate::config::Confi
             let sops = load_sops(
                 &config.workspace_dir,
                 sops_dir_override,
-                parse_execution_mode(&config.sop.default_execution_mode),
+                config.sop.default_execution_mode,
             );
             if sops.is_empty() {
                 println!("No SOPs found.");
@@ -429,7 +393,7 @@ pub fn handle_command(command: crate::SopCommands, config: &crate::config::Confi
             let sops = load_sops(
                 &config.workspace_dir,
                 sops_dir_override,
-                parse_execution_mode(&config.sop.default_execution_mode),
+                config.sop.default_execution_mode,
             );
             let matching: Vec<&Sop> = if let Some(ref name) = name {
                 sops.iter().filter(|s| s.name == *name).collect()
@@ -479,7 +443,7 @@ pub fn handle_command(command: crate::SopCommands, config: &crate::config::Confi
             let sops = load_sops(
                 &config.workspace_dir,
                 sops_dir_override,
-                parse_execution_mode(&config.sop.default_execution_mode),
+                config.sop.default_execution_mode,
             );
             let sop = sops
                 .iter()
@@ -510,23 +474,16 @@ pub fn handle_command(command: crate::SopCommands, config: &crate::config::Confi
             if !sop.steps.is_empty() {
                 println!("Steps:");
                 for step in &sop.steps {
-                    let mut tags = Vec::new();
-                    if step.requires_confirmation {
-                        tags.push("requires confirmation");
-                    }
-                    if step.kind == SopStepKind::Checkpoint {
-                        tags.push("checkpoint");
-                    }
-                    let tag_str = if tags.is_empty() {
-                        String::new()
+                    let confirm_tag = if step.requires_confirmation {
+                        " [requires confirmation]"
                     } else {
-                        format!(" [{}]", tags.join(", "))
+                        ""
                     };
                     println!(
                         "  {}. {}{}",
                         step.number,
                         console::style(&step.title).bold(),
-                        tag_str
+                        confirm_tag
                     );
                     if !step.body.is_empty() {
                         for line in step.body.lines() {
@@ -748,7 +705,6 @@ type = "manual"
             cooldown_secs: 0,
             max_concurrent: 1,
             location: None,
-            deterministic: false,
         };
 
         let warnings = validate_sop(&sop);
@@ -773,13 +729,10 @@ type = "manual"
                 body: "Do the thing".into(),
                 suggested_tools: vec!["shell".into()],
                 requires_confirmation: false,
-                kind: SopStepKind::default(),
-                schema: None,
             }],
             cooldown_secs: 0,
             max_concurrent: 1,
             location: None,
-            deterministic: false,
         };
 
         let warnings = validate_sop(&sop);
@@ -859,76 +812,5 @@ type = "manual"
             SopTrigger::Peripheral { .. }
         ));
         assert!(matches!(manifest.triggers[4], SopTrigger::Manual));
-    }
-
-    #[test]
-    fn deterministic_flag_overrides_execution_mode() {
-        let dir = tempfile::tempdir().unwrap();
-        let sop_dir = dir.path().join("det-sop");
-        fs::create_dir_all(&sop_dir).unwrap();
-
-        fs::write(
-            sop_dir.join("SOP.toml"),
-            r#"
-[sop]
-name = "det-sop"
-description = "A deterministic SOP"
-deterministic = true
-
-[[triggers]]
-type = "manual"
-"#,
-        )
-        .unwrap();
-
-        fs::write(
-            sop_dir.join("SOP.md"),
-            r#"# Det SOP
-
-## Steps
-
-1. **Step one** — First step.
-   - kind: execute
-
-2. **Checkpoint** — Pause for approval.
-   - kind: checkpoint
-
-3. **Step three** — Final step.
-"#,
-        )
-        .unwrap();
-
-        let sops = load_sops_from_directory(dir.path(), SopExecutionMode::Supervised);
-        assert_eq!(sops.len(), 1);
-
-        let sop = &sops[0];
-        assert_eq!(sop.name, "det-sop");
-        assert_eq!(sop.execution_mode, SopExecutionMode::Deterministic);
-        assert!(sop.deterministic);
-        assert_eq!(sop.steps.len(), 3);
-        assert_eq!(sop.steps[0].kind, SopStepKind::Execute);
-        assert_eq!(sop.steps[1].kind, SopStepKind::Checkpoint);
-        assert_eq!(sop.steps[2].kind, SopStepKind::Execute);
-    }
-
-    #[test]
-    fn parse_steps_with_checkpoint_kind() {
-        let md = r#"## Steps
-
-1. **Read data** — Read from sensor.
-   - tools: gpio_read
-   - kind: execute
-
-2. **Review** — Human review checkpoint.
-   - kind: checkpoint
-
-3. **Apply** — Apply changes.
-"#;
-        let steps = parse_steps(md);
-        assert_eq!(steps.len(), 3);
-        assert_eq!(steps[0].kind, SopStepKind::Execute);
-        assert_eq!(steps[1].kind, SopStepKind::Checkpoint);
-        // Default kind should be Execute
-        assert_eq!(steps[2].kind, SopStepKind::Execute);
     }
 }

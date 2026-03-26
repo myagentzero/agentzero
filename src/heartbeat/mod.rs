@@ -1,5 +1,4 @@
 pub mod engine;
-pub mod store;
 
 #[cfg(test)]
 mod tests {

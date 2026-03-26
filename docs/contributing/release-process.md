@@ -127,7 +127,7 @@ Run `Pub Scoop Manifest` manually:
 Required repository settings for non-dry-run:
 
 - secret: `SCOOP_BUCKET_TOKEN` (PAT with push access to the bucket repo)
-- variable: `SCOOP_BUCKET_REPO` (for example `zeroclaw-labs/scoop-zeroclaw`)
+- variable: `SCOOP_BUCKET_REPO` (for example `myagentzero/scoop-zeroclaw`)
 
 Workflow guardrails:
 

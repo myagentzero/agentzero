@@ -11,6 +11,7 @@ web/dist/*
 __pycache__/
 *.pyc
 docker-compose.override.yml
+/dev/config.wasm.*.toml
 
 # Environment files (may contain secrets)
 .env

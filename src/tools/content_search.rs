@@ -171,10 +171,7 @@ impl Tool for ContentSearchTool {
         }
 
         // --- Path security checks ---
-        // Reject absolute paths unless they fall under an explicit allowed root.
-        if std::path::Path::new(search_path).is_absolute()
-            && !self.security.is_under_allowed_root(search_path)
-        {
+        if std::path::Path::new(search_path).is_absolute() {
             return Ok(ToolResult {
                 success: false,
                 output: String::new(),
@@ -705,10 +702,12 @@ mod tests {
         assert!(schema["properties"]["pattern"].is_object());
         assert!(schema["properties"]["path"].is_object());
         assert!(schema["properties"]["output_mode"].is_object());
-        assert!(schema["required"]
-            .as_array()
-            .unwrap()
-            .contains(&json!("pattern")));
+        assert!(
+            schema["required"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("pattern"))
+        );
     }
 
     #[tokio::test]
@@ -855,11 +854,13 @@ mod tests {
             .unwrap();
 
         assert!(!result.success);
-        assert!(result
-            .error
-            .as_ref()
-            .unwrap()
-            .contains("Invalid output_mode"));
+        assert!(
+            result
+                .error
+                .as_ref()
+                .unwrap()
+                .contains("Invalid output_mode")
+        );
     }
 
     #[tokio::test]

@@ -2,26 +2,6 @@
 //!
 //! This module contains reusable helper functions used across the codebase.
 
-/// Allowed serial device path prefixes — reject arbitrary paths for security.
-/// Used by hardware serial transport and peripherals.
-const SERIAL_ALLOWED_PATH_PREFIXES: &[&str] = &[
-    "/dev/ttyACM",
-    "/dev/ttyUSB",
-    "/dev/tty.usbmodem",
-    "/dev/cu.usbmodem",
-    "/dev/tty.usbserial",
-    "/dev/cu.usbserial", // Arduino Uno (FTDI), clones
-    "COM",               // Windows
-];
-
-/// Returns true if the path is an allowed serial device (USB CDC, FTDI, etc.).
-/// Rejects arbitrary paths like /etc/passwd or /dev/sda.
-pub fn is_serial_path_allowed(path: &str) -> bool {
-    SERIAL_ALLOWED_PATH_PREFIXES
-        .iter()
-        .any(|prefix| path.starts_with(prefix))
-}
-
 /// Truncate a string to at most `max_chars` characters, appending "..." if truncated.
 ///
 /// This function safely handles multi-byte UTF-8 characters (emoji, CJK, accented characters)
@@ -61,6 +41,132 @@ pub fn truncate_with_ellipsis(s: &str, max_chars: usize) -> String {
         }
         None => s.to_string(),
     }
+}
+
+/// Return the greatest valid UTF-8 char boundary at or below `index`.
+///
+/// This mirrors `str::floor_char_boundary` behavior while remaining compatible
+/// with stable toolchains where that API is not available.
+pub fn floor_utf8_char_boundary(s: &str, index: usize) -> usize {
+    if index >= s.len() {
+        return s.len();
+    }
+
+    let mut i = index;
+    while i > 0 && !s.is_char_boundary(i) {
+        i -= 1;
+    }
+    i
+}
+
+/// Allowed serial device path prefixes shared across hardware transports.
+pub const ALLOWED_SERIAL_PATH_PREFIXES: &[&str] = &[
+    "/dev/ttyACM",
+    "/dev/ttyUSB",
+    "/dev/tty.usbmodem",
+    "/dev/cu.usbmodem",
+    "/dev/tty.usbserial",
+    "/dev/cu.usbserial",
+    "COM",
+];
+
+/// Validate serial device path against per-platform rules.
+pub fn is_serial_path_allowed(path: &str) -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        use std::sync::OnceLock;
+        if !std::path::Path::new(path).is_absolute() {
+            return false;
+        }
+        static PAT: OnceLock<regex::Regex> = OnceLock::new();
+        let re = PAT.get_or_init(|| {
+            regex::Regex::new(r"^/dev/tty(ACM|USB|S|AMA|MFD)\d+$").expect("valid regex")
+        });
+        return re.is_match(path);
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        use std::sync::OnceLock;
+        if !std::path::Path::new(path).is_absolute() {
+            return false;
+        }
+        static PAT: OnceLock<regex::Regex> = OnceLock::new();
+        let re = PAT.get_or_init(|| {
+            regex::Regex::new(r"^/dev/(tty|cu)\.(usbmodem|usbserial)[^\x00/]*$")
+                .expect("valid regex")
+        });
+        return re.is_match(path);
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        use std::sync::OnceLock;
+        static PAT: OnceLock<regex::Regex> = OnceLock::new();
+        let re = PAT.get_or_init(|| regex::Regex::new(r"^COM\d{1,3}$").expect("valid regex"));
+        return re.is_match(path);
+    }
+
+    #[allow(unreachable_code)]
+    false
+}
+
+/// Strip Unicode format control characters that can cause LLM provider API rejections.
+///
+/// Removes C1 control characters (U+0080–U+009F, Unicode `Cc`), Unicode General Category
+/// `Cf` (format controls), and deprecated tag characters (U+E0001–U+E007F), while preserving
+/// normal whitespace (`\n`, `\r`, `\t`), printable text, emoji, and CJK characters.
+pub fn strip_unicode_format_controls(s: &str) -> String {
+    s.chars()
+        .filter(|&c| {
+            // Keep normal ASCII whitespace
+            if c == '\n' || c == '\r' || c == '\t' {
+                return true;
+            }
+            // Strip non-printable ASCII controls (0x00–0x1F, 0x7F) except the whitespace above
+            if c.is_ascii_control() {
+                return false;
+            }
+            // Strip C1 control characters (0x80–0x9F, Unicode Cc) — not caught by is_ascii_control()
+            if ('\u{0080}'..='\u{009F}').contains(&c) {
+                return false;
+            }
+            // Strip Unicode General Category Cf (format controls)
+            if is_unicode_format_control(c) {
+                return false;
+            }
+            // Strip deprecated tag characters U+E0001–U+E007F
+            if ('\u{E0001}'..='\u{E007F}').contains(&c) {
+                return false;
+            }
+            true
+        })
+        .collect()
+}
+
+/// Check if a character is a Unicode format control (General Category Cf).
+fn is_unicode_format_control(c: char) -> bool {
+    matches!(c,
+        '\u{00AD}'           // SOFT HYPHEN
+        | '\u{0600}'..='\u{0605}' // Arabic number signs
+        | '\u{061C}'         // ARABIC LETTER MARK
+        | '\u{06DD}'         // ARABIC END OF AYAH
+        | '\u{070F}'         // SYRIAC ABBREVIATION MARK
+        | '\u{0890}'..='\u{0891}' // Arabic pound/piastre marks
+        | '\u{08E2}'         // ARABIC DISPUTED END OF AYAH
+        | '\u{180E}'         // MONGOLIAN VOWEL SEPARATOR
+        | '\u{200B}'..='\u{200F}' // ZWSP, ZWNJ, ZWJ, LRM, RLM
+        | '\u{202A}'..='\u{202E}' // Bidi embedding/override
+        | '\u{2060}'..='\u{2064}' // WJ, function application, etc.
+        | '\u{2066}'..='\u{2069}' // Bidi isolates
+        | '\u{FEFF}'         // BOM / ZWNBSP
+        | '\u{FFF9}'..='\u{FFFB}' // Interlinear annotation anchors
+        | '\u{110BD}'        // KAITHI NUMBER SIGN
+        | '\u{110CD}'        // KAITHI NUMBER SIGN ABOVE
+        | '\u{13430}'..='\u{1343F}' // Egyptian hieroglyph format controls
+        | '\u{1BCA0}'..='\u{1BCA3}' // Shorthand format controls
+        | '\u{1D173}'..='\u{1D17A}' // Musical symbol format controls
+    )
 }
 
 /// Utility enum for handling optional values.
@@ -161,5 +267,73 @@ mod tests {
     fn test_truncate_zero_max_chars() {
         // Edge case: max_chars = 0
         assert_eq!(truncate_with_ellipsis("hello", 0), "...");
+    }
+
+    #[test]
+    fn test_floor_utf8_char_boundary_ascii() {
+        assert_eq!(floor_utf8_char_boundary("hello", 0), 0);
+        assert_eq!(floor_utf8_char_boundary("hello", 3), 3);
+        assert_eq!(floor_utf8_char_boundary("hello", 99), 5);
+    }
+
+    #[test]
+    fn test_floor_utf8_char_boundary_multibyte() {
+        let s = "aé你🦀";
+        assert_eq!(floor_utf8_char_boundary(s, 1), 1);
+        // Index 2 is inside "é" (2-byte char), floor should move back to 1.
+        assert_eq!(floor_utf8_char_boundary(s, 2), 1);
+        // Index 5 is inside "你" (3-byte char), floor should move back to 3.
+        assert_eq!(floor_utf8_char_boundary(s, 5), 3);
+    }
+
+    #[test]
+    fn strip_unicode_format_controls_removes_word_joiner() {
+        let input = "hello\u{2060}world";
+        assert_eq!(strip_unicode_format_controls(input), "helloworld");
+    }
+
+    #[test]
+    fn strip_unicode_format_controls_removes_zwsp_and_bom() {
+        let input = "\u{FEFF}hello\u{200B}world";
+        assert_eq!(strip_unicode_format_controls(input), "helloworld");
+    }
+
+    #[test]
+    fn strip_unicode_format_controls_removes_bidi_and_soft_hyphen() {
+        let input = "ab\u{200E}cd\u{00AD}ef\u{202A}gh";
+        assert_eq!(strip_unicode_format_controls(input), "abcdefgh");
+    }
+
+    #[test]
+    fn strip_unicode_format_controls_removes_tag_characters() {
+        let input = "hello\u{E0001}\u{E0041}world";
+        assert_eq!(strip_unicode_format_controls(input), "helloworld");
+    }
+
+    #[test]
+    fn strip_unicode_format_controls_preserves_normal_text() {
+        let input = "Hello, World! 🦀 你好 café\nnewline\ttab\r\n";
+        assert_eq!(strip_unicode_format_controls(input), input);
+    }
+
+    #[test]
+    fn strip_unicode_format_controls_empty_string() {
+        assert_eq!(strip_unicode_format_controls(""), "");
+    }
+
+    #[test]
+    fn strip_unicode_format_controls_only_controls() {
+        let input = "\u{200B}\u{200C}\u{200D}\u{2060}\u{FEFF}";
+        assert_eq!(strip_unicode_format_controls(input), "");
+    }
+
+    #[test]
+    fn strip_unicode_format_controls_removes_c1_controls() {
+        // U+0095 MESSAGE WAITING — the specific character from the API error
+        let input = "hello\u{0095}world";
+        assert_eq!(strip_unicode_format_controls(input), "helloworld");
+        // Full C1 range U+0080–U+009F
+        let input2 = "a\u{0080}b\u{008A}c\u{009F}d";
+        assert_eq!(strip_unicode_format_controls(input2), "abcd");
     }
 }

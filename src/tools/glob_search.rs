@@ -57,10 +57,7 @@ impl Tool for GlobSearchTool {
             });
         }
 
-        // Security: reject absolute paths unless under an explicit allowed root.
-        if (pattern.starts_with('/') || pattern.starts_with('\\'))
-            && !self.security.is_under_allowed_root(pattern)
-        {
+        if pattern.starts_with('/') || pattern.starts_with('\\') {
             return Ok(ToolResult {
                 success: false,
                 output: String::new(),
@@ -212,10 +209,12 @@ mod tests {
 
         let schema = tool.parameters_schema();
         assert!(schema["properties"]["pattern"].is_object());
-        assert!(schema["required"]
-            .as_array()
-            .unwrap()
-            .contains(&json!("pattern")));
+        assert!(
+            schema["required"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("pattern"))
+        );
     }
 
     #[tokio::test]
@@ -414,10 +413,12 @@ mod tests {
         let result = tool.execute(json!({"pattern": "[invalid"})).await.unwrap();
 
         assert!(!result.success);
-        assert!(result
-            .error
-            .as_ref()
-            .unwrap()
-            .contains("Invalid glob pattern"));
+        assert!(
+            result
+                .error
+                .as_ref()
+                .unwrap()
+                .contains("Invalid glob pattern")
+        );
     }
 }

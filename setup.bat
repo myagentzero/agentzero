@@ -10,7 +10,7 @@ setlocal enabledelayedexpansion
 set "VERSION=0.6.2"
 set "RUST_MIN_VERSION=1.87"
 set "TARGET=x86_64-pc-windows-msvc"
-set "REPO=https://github.com/zeroclaw-labs/zeroclaw"
+set "REPO=https://github.com/myagentzero/zeroclaw"
 
 :: Colors via ANSI (Windows 10+ Terminal)
 set "GREEN=[32m"
@@ -158,7 +158,7 @@ if %ERRORLEVEL% EQU 0 (
 
 if not defined DOWNLOAD_URL (
     :: Fallback: construct URL from known release pattern
-    set "DOWNLOAD_URL=https://github.com/zeroclaw-labs/zeroclaw/releases/latest/download/zeroclaw-%TARGET%.zip"
+    set "DOWNLOAD_URL=https://github.com/myagentzero/zeroclaw/releases/latest/download/zeroclaw-%TARGET%.zip"
 )
 
 echo   Downloading from release...
@@ -289,10 +289,10 @@ echo     2. Run: zeroclaw init
 echo     3. Configure your API key in %%USERPROFILE%%\.zeroclaw\config.toml
 echo.
 echo   Alternative install via Scoop:
-echo     scoop bucket add zeroclaw https://github.com/zeroclaw-labs/scoop-zeroclaw
+echo     scoop bucket add zeroclaw https://github.com/myagentzero/scoop-zeroclaw
 echo     scoop install zeroclaw
 echo.
-echo   Documentation: https://github.com/zeroclaw-labs/zeroclaw
+echo   Documentation: https://github.com/myagentzero/zeroclaw
 echo.
 goto :end
 

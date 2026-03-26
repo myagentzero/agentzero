@@ -33,13 +33,13 @@ on self-hosted PaaS platforms.
       cp apps/tauri/icons/icon.svg .github/assets/zeroclaw.svg
       git add .github/assets/zeroclaw.svg && git commit -m "chore: add SVG logo for marketplace templates"
       ```
-- [ ] **Fork all three upstream repos** into the `zeroclaw-labs` org:
-      - Fork `coollabsio/coolify` -> `zeroclaw-labs/coolify`
-      - Fork `Dokploy/templates` -> `zeroclaw-labs/templates`
-      - Fork `easypanel-io/templates` -> `zeroclaw-labs/easypanel-templates`
+- [ ] **Fork all three upstream repos** into the `myagentzero` org:
+      - Fork `coollabsio/coolify` -> `myagentzero/coolify`
+      - Fork `Dokploy/templates` -> `myagentzero/templates`
+      - Fork `easypanel-io/templates` -> `myagentzero/easypanel-templates`
 - [ ] **Create a GitHub PAT** (`MARKETPLACE_PAT`) with `repo` + `workflow` scopes
       that can push to the forks and create PRs on the upstream repos
-- [ ] **Add the secret** `MARKETPLACE_PAT` to the `zeroclaw-labs/zeroclaw` repo secrets
+- [ ] **Add the secret** `MARKETPLACE_PAT` to the `myagentzero/zeroclaw` repo secrets
 
 ### 2. Install the Workflow
 

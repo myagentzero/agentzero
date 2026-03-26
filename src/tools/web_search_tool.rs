@@ -1,5 +1,5 @@
 use super::traits::{Tool, ToolResult};
-use super::web_search_provider_routing::{resolve_web_search_provider, WebSearchProviderRoute};
+use super::web_search_provider_routing::{WebSearchProviderRoute, resolve_web_search_provider};
 use async_trait::async_trait;
 use regex::Regex;
 use serde_json::json;
@@ -426,7 +426,7 @@ impl Tool for WebSearchTool {
 
         Ok(ToolResult {
             success: true,
-            output: result,
+            output: crate::util::strip_unicode_format_controls(&result),
             error: None,
         })
     }
@@ -446,6 +446,19 @@ mod tests {
     fn test_tool_description() {
         let tool = WebSearchTool::new("duckduckgo".to_string(), None, 5, 15);
         assert!(tool.description().contains("Search the web"));
+    }
+
+    /// Write a full, parseable `config.toml` with optional web_search field overrides.
+    fn write_test_config(
+        path: &std::path::Path,
+        brave_api_key: Option<&str>,
+        searxng_instance_url: Option<&str>,
+    ) {
+        let mut config = crate::config::Config::default();
+        config.web_search.brave_api_key = brave_api_key.map(|s| s.to_string());
+        config.web_search.searxng_instance_url = searxng_instance_url.map(|s| s.to_string());
+        let toml_str = toml::to_string(&config).expect("default config should serialize");
+        std::fs::write(path, toml_str).unwrap();
     }
 
     #[test]
@@ -544,11 +557,7 @@ mod tests {
     fn test_resolve_brave_api_key_reloads_from_config() {
         let tmp = tempfile::TempDir::new().unwrap();
         let config_path = tmp.path().join("config.toml");
-        std::fs::write(
-            &config_path,
-            "[web_search]\nbrave_api_key = \"fresh-key-from-disk\"\n",
-        )
-        .unwrap();
+        write_test_config(&config_path, Some("fresh-key-from-disk"), None);
 
         // No boot key -- forces reload from config
         let tool = WebSearchTool::new_with_config(
@@ -571,11 +580,7 @@ mod tests {
         let encrypted = store.encrypt("brave-secret-key").unwrap();
 
         let config_path = tmp.path().join("config.toml");
-        std::fs::write(
-            &config_path,
-            format!("[web_search]\nbrave_api_key = \"{}\"\n", encrypted),
-        )
-        .unwrap();
+        write_test_config(&config_path, Some(&encrypted), None);
 
         // Boot key is the encrypted blob -- should trigger reload + decrypt
         let tool = WebSearchTool::new_with_config(
@@ -595,7 +600,7 @@ mod tests {
     async fn test_execute_searxng_without_instance_url() {
         let tmp = tempfile::TempDir::new().unwrap();
         let config_path = tmp.path().join("config.toml");
-        std::fs::write(&config_path, "[web_search]\n").unwrap();
+        write_test_config(&config_path, None, None);
 
         let tool = WebSearchTool::new_with_config(
             "searxng".to_string(),
@@ -608,10 +613,12 @@ mod tests {
         );
         let result = tool.execute(json!({"query": "test"})).await;
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("SearXNG instance URL not configured"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("SearXNG instance URL not configured")
+        );
     }
 
     #[test]
@@ -652,10 +659,12 @@ mod tests {
         let json = serde_json::json!({"error": "bad request"});
         let result = tool.parse_searxng_results(&json, "test");
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Invalid SearXNG API response"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Invalid SearXNG API response")
+        );
     }
 
     #[test]
@@ -677,11 +686,7 @@ mod tests {
     fn test_resolve_searxng_instance_url_reloads_from_config() {
         let tmp = tempfile::TempDir::new().unwrap();
         let config_path = tmp.path().join("config.toml");
-        std::fs::write(
-            &config_path,
-            "[web_search]\nsearxng_instance_url = \"https://search.local\"\n",
-        )
-        .unwrap();
+        write_test_config(&config_path, None, Some("https://search.local"));
 
         let tool = WebSearchTool::new_with_config(
             "searxng".to_string(),
@@ -702,7 +707,7 @@ mod tests {
         let config_path = tmp.path().join("config.toml");
 
         // Start with no key in config
-        std::fs::write(&config_path, "[web_search]\n").unwrap();
+        write_test_config(&config_path, None, None);
 
         let tool = WebSearchTool::new_with_config(
             "brave".to_string(),
@@ -717,12 +722,8 @@ mod tests {
         // Key not configured yet -- should fail
         assert!(tool.resolve_brave_api_key().is_err());
 
-        // Simulate runtime config update (e.g. via web_search_config set)
-        std::fs::write(
-            &config_path,
-            "[web_search]\nbrave_api_key = \"runtime-updated-key\"\n",
-        )
-        .unwrap();
+        // Simulate runtime config update
+        write_test_config(&config_path, Some("runtime-updated-key"), None);
 
         // Now should succeed with the updated key
         let key = tool.resolve_brave_api_key().unwrap();

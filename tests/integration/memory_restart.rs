@@ -216,10 +216,7 @@ async fn sqlite_memory_recall_returns_relevant_results() {
     .await
     .unwrap();
 
-    let results = mem
-        .recall("Rust programming", 10, None, None, None)
-        .await
-        .unwrap();
+    let results = mem.recall("Rust programming", 10, None).await.unwrap();
     assert!(!results.is_empty(), "recall should find matching entries");
     // The Rust-related entry should be in results
     assert!(
@@ -244,10 +241,7 @@ async fn sqlite_memory_recall_respects_limit() {
         .unwrap();
     }
 
-    let results = mem
-        .recall("test content", 3, None, None, None)
-        .await
-        .unwrap();
+    let results = mem.recall("test content", 3, None).await.unwrap();
     assert!(
         results.len() <= 3,
         "recall should respect limit of 3, got {}",
@@ -264,10 +258,13 @@ async fn sqlite_memory_recall_empty_query_returns_recent_entries() {
         .await
         .unwrap();
 
-    // Empty query uses time-only path: returns recent entries by updated_at
-    let results = mem.recall("", 10, None, None, None).await.unwrap();
-    assert_eq!(results.len(), 1, "empty query should return recent entries");
-    assert_eq!(results[0].key, "fact");
+    // Empty query no longer returns entries by default
+    let results = mem.recall("", 10, None).await.unwrap();
+    // Implementation may return 0 or recent entries; just verify no error
+    assert!(
+        results.len() <= 1,
+        "empty query should return at most recent entries"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -1,6 +1,6 @@
 use crate::tools::ToolSpec;
 use async_trait::async_trait;
-use futures_util::{stream, StreamExt};
+use futures_util::{StreamExt, stream};
 use serde::{Deserialize, Serialize};
 use std::fmt::Write;
 
@@ -11,31 +11,40 @@ pub struct ChatMessage {
     pub content: String,
 }
 
+pub const ROLE_SYSTEM: &str = "system";
+pub const ROLE_USER: &str = "user";
+pub const ROLE_ASSISTANT: &str = "assistant";
+pub const ROLE_TOOL: &str = "tool";
+
+pub fn is_user_or_assistant_role(role: &str) -> bool {
+    role == ROLE_USER || role == ROLE_ASSISTANT
+}
+
 impl ChatMessage {
     pub fn system(content: impl Into<String>) -> Self {
         Self {
-            role: "system".into(),
+            role: ROLE_SYSTEM.into(),
             content: content.into(),
         }
     }
 
     pub fn user(content: impl Into<String>) -> Self {
         Self {
-            role: "user".into(),
+            role: ROLE_USER.into(),
             content: content.into(),
         }
     }
 
     pub fn assistant(content: impl Into<String>) -> Self {
         Self {
-            role: "assistant".into(),
+            role: ROLE_ASSISTANT.into(),
             content: content.into(),
         }
     }
 
     pub fn tool(content: impl Into<String>) -> Self {
         Self {
-            role: "tool".into(),
+            role: ROLE_TOOL.into(),
             content: content.into(),
         }
     }
@@ -59,6 +68,69 @@ pub struct TokenUsage {
     pub cached_input_tokens: Option<u64>,
 }
 
+/// Provider-agnostic stop reasons used by the agent loop.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "value", rename_all = "snake_case")]
+pub enum NormalizedStopReason {
+    EndTurn,
+    ToolCall,
+    MaxTokens,
+    ContextWindowExceeded,
+    SafetyBlocked,
+    Cancelled,
+    Unknown(String),
+}
+
+impl NormalizedStopReason {
+    pub fn from_openai_finish_reason(raw: &str) -> Self {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "stop" => Self::EndTurn,
+            "tool_calls" | "function_call" => Self::ToolCall,
+            "length" | "max_tokens" => Self::MaxTokens,
+            "content_filter" => Self::SafetyBlocked,
+            "cancelled" | "canceled" => Self::Cancelled,
+            _ => Self::Unknown(raw.trim().to_string()),
+        }
+    }
+
+    pub fn from_anthropic_stop_reason(raw: &str) -> Self {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "end_turn" | "stop_sequence" => Self::EndTurn,
+            "tool_use" => Self::ToolCall,
+            "max_tokens" => Self::MaxTokens,
+            "model_context_window_exceeded" => Self::ContextWindowExceeded,
+            "safety" => Self::SafetyBlocked,
+            "cancelled" | "canceled" => Self::Cancelled,
+            _ => Self::Unknown(raw.trim().to_string()),
+        }
+    }
+
+    pub fn from_bedrock_stop_reason(raw: &str) -> Self {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "end_turn" => Self::EndTurn,
+            "tool_use" => Self::ToolCall,
+            "max_tokens" => Self::MaxTokens,
+            "guardrail_intervened" => Self::SafetyBlocked,
+            "cancelled" | "canceled" => Self::Cancelled,
+            _ => Self::Unknown(raw.trim().to_string()),
+        }
+    }
+
+    pub fn from_gemini_finish_reason(raw: &str) -> Self {
+        match raw.trim().to_ascii_uppercase().as_str() {
+            "STOP" => Self::EndTurn,
+            "MAX_TOKENS" => Self::MaxTokens,
+            "MALFORMED_FUNCTION_CALL" | "UNEXPECTED_TOOL_CALL" | "TOO_MANY_TOOL_CALLS" => {
+                Self::ToolCall
+            }
+            "SAFETY" | "RECITATION" => Self::SafetyBlocked,
+            // Observed in some integrations even though not always listed in docs.
+            "CANCELLED" => Self::Cancelled,
+            _ => Self::Unknown(raw.trim().to_string()),
+        }
+    }
+}
+
 /// An LLM response that may contain text, tool calls, or both.
 #[derive(Debug, Clone)]
 pub struct ChatResponse {
@@ -73,6 +145,13 @@ pub struct ChatResponse {
     /// sent back in subsequent API requests — some providers reject tool-call
     /// history that omits this field.
     pub reasoning_content: Option<String>,
+    /// Quota metadata extracted from response headers (if available).
+    /// Populated by providers that support quota tracking.
+    pub quota_metadata: Option<super::quota_types::QuotaMetadata>,
+    /// Normalized provider stop reason (if surfaced by the upstream API).
+    pub stop_reason: Option<NormalizedStopReason>,
+    /// Raw provider-native stop reason string for diagnostics.
+    pub raw_stop_reason: Option<String>,
 }
 
 impl ChatResponse {
@@ -124,8 +203,6 @@ pub enum ConversationMessage {
 pub struct StreamChunk {
     /// Text delta for this chunk.
     pub delta: String,
-    /// Reasoning/thinking delta (chain-of-thought from thinking models).
-    pub reasoning: Option<String>,
     /// Whether this is the final chunk.
     pub is_final: bool,
     /// Approximate token count for this chunk (estimated).
@@ -137,17 +214,6 @@ impl StreamChunk {
     pub fn delta(text: impl Into<String>) -> Self {
         Self {
             delta: text.into(),
-            reasoning: None,
-            is_final: false,
-            token_count: 0,
-        }
-    }
-
-    /// Create a reasoning/thinking chunk.
-    pub fn reasoning(text: impl Into<String>) -> Self {
-        Self {
-            delta: String::new(),
-            reasoning: Some(text.into()),
             is_final: false,
             token_count: 0,
         }
@@ -157,7 +223,6 @@ impl StreamChunk {
     pub fn final_chunk() -> Self {
         Self {
             delta: String::new(),
-            reasoning: None,
             is_final: true,
             token_count: 0,
         }
@@ -167,7 +232,6 @@ impl StreamChunk {
     pub fn error(message: impl Into<String>) -> Self {
         Self {
             delta: message.into(),
-            reasoning: None,
             is_final: true,
             token_count: 0,
         }
@@ -177,35 +241,6 @@ impl StreamChunk {
     pub fn with_token_estimate(mut self) -> Self {
         self.token_count = self.delta.len().div_ceil(4);
         self
-    }
-}
-
-/// Structured events emitted by provider streaming APIs.
-///
-/// This extends plain text chunk streaming with explicit tool-call signals so
-/// agent loops can preserve native tool semantics without parsing payload text.
-#[derive(Debug, Clone)]
-pub enum StreamEvent {
-    /// Text delta from the assistant.
-    TextDelta(StreamChunk),
-    /// Structured tool call emitted during streaming.
-    ToolCall(ToolCall),
-    /// A tool call that was already executed by the provider (e.g. Claude Code proxy).
-    /// Emitted for observability only — not re-executed by the agent's dispatcher.
-    PreExecutedToolCall { name: String, args: String },
-    /// The result of a pre-executed tool call.
-    PreExecutedToolResult { name: String, output: String },
-    /// Stream has completed.
-    Final,
-}
-
-impl StreamEvent {
-    pub(crate) fn from_chunk(chunk: StreamChunk) -> Self {
-        if chunk.is_final {
-            Self::Final
-        } else {
-            Self::TextDelta(chunk)
-        }
     }
 }
 
@@ -280,9 +315,6 @@ pub struct ProviderCapabilities {
     pub native_tool_calling: bool,
     /// Whether the provider supports vision / image inputs.
     pub vision: bool,
-    /// Whether the provider supports prompt caching (Anthropic cache_control,
-    /// OpenAI automatic prompt caching).
-    pub prompt_caching: bool,
 }
 
 /// Provider-specific tool payload formats.
@@ -413,6 +445,9 @@ pub trait Provider: Send + Sync {
                     tool_calls: Vec::new(),
                     usage: None,
                     reasoning_content: None,
+                    quota_metadata: None,
+                    stop_reason: None,
+                    raw_stop_reason: None,
                 });
             }
         }
@@ -425,6 +460,9 @@ pub trait Provider: Send + Sync {
             tool_calls: Vec::new(),
             usage: None,
             reasoning_content: None,
+            quota_metadata: None,
+            stop_reason: None,
+            raw_stop_reason: None,
         })
     }
 
@@ -460,20 +498,15 @@ pub trait Provider: Send + Sync {
             tool_calls: Vec::new(),
             usage: None,
             reasoning_content: None,
+            quota_metadata: None,
+            stop_reason: None,
+            raw_stop_reason: None,
         })
     }
 
     /// Whether provider supports streaming responses.
     /// Default implementation returns false.
     fn supports_streaming(&self) -> bool {
-        false
-    }
-
-    /// Whether provider can emit structured tool-call stream events.
-    ///
-    /// Providers should return true only when `stream_chat(...)` can produce
-    /// `StreamEvent::ToolCall` for native tool-calling requests.
-    fn supports_streaming_tool_events(&self) -> bool {
         false
     }
 
@@ -513,22 +546,6 @@ pub trait Provider: Send + Sync {
             .unwrap_or("");
         self.stream_chat_with_system(system, last_user, model, temperature, options)
     }
-
-    /// Structured streaming chat interface.
-    ///
-    /// Default implementation adapts legacy text chunks from
-    /// `stream_chat_with_history` into `StreamEvent::TextDelta` / `Final`.
-    fn stream_chat(
-        &self,
-        request: ChatRequest<'_>,
-        model: &str,
-        temperature: f64,
-        options: StreamOptions,
-    ) -> stream::BoxStream<'static, StreamResult<StreamEvent>> {
-        self.stream_chat_with_history(request.messages, model, temperature, options)
-            .map(|chunk_result| chunk_result.map(StreamEvent::from_chunk))
-            .boxed()
-    }
 }
 
 /// Build tool instructions text for prompt-guided tool calling.
@@ -567,7 +584,6 @@ pub fn build_tool_instructions_text(tools: &[ToolSpec]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use futures_util::StreamExt;
 
     struct CapabilityMockProvider;
 
@@ -577,7 +593,6 @@ mod tests {
             ProviderCapabilities {
                 native_tool_calling: true,
                 vision: true,
-                prompt_caching: false,
             }
         }
 
@@ -615,6 +630,9 @@ mod tests {
             tool_calls: vec![],
             usage: None,
             reasoning_content: None,
+            quota_metadata: None,
+            stop_reason: None,
+            raw_stop_reason: None,
         };
         assert!(!empty.has_tool_calls());
         assert_eq!(empty.text_or_empty(), "");
@@ -628,6 +646,9 @@ mod tests {
             }],
             usage: None,
             reasoning_content: None,
+            quota_metadata: None,
+            stop_reason: None,
+            raw_stop_reason: None,
         };
         assert!(with_tools.has_tool_calls());
         assert_eq!(with_tools.text_or_empty(), "Let me check");
@@ -651,6 +672,9 @@ mod tests {
                 cached_input_tokens: None,
             }),
             reasoning_content: None,
+            quota_metadata: None,
+            stop_reason: None,
+            raw_stop_reason: None,
         };
         assert_eq!(resp.usage.as_ref().unwrap().input_tokens, Some(100));
         assert_eq!(resp.usage.as_ref().unwrap().output_tokens, Some(50));
@@ -694,17 +718,14 @@ mod tests {
         let caps1 = ProviderCapabilities {
             native_tool_calling: true,
             vision: false,
-            prompt_caching: false,
         };
         let caps2 = ProviderCapabilities {
             native_tool_calling: true,
             vision: false,
-            prompt_caching: false,
         };
         let caps3 = ProviderCapabilities {
             native_tool_calling: false,
             vision: false,
-            prompt_caching: false,
         };
 
         assert_eq!(caps1, caps2);
@@ -721,6 +742,42 @@ mod tests {
     fn supports_vision_reflects_capabilities_default_mapping() {
         let provider = CapabilityMockProvider;
         assert!(provider.supports_vision());
+    }
+
+    #[test]
+    fn normalized_stop_reason_mappings_cover_core_provider_values() {
+        assert_eq!(
+            NormalizedStopReason::from_openai_finish_reason("length"),
+            NormalizedStopReason::MaxTokens
+        );
+        assert_eq!(
+            NormalizedStopReason::from_openai_finish_reason("tool_calls"),
+            NormalizedStopReason::ToolCall
+        );
+        assert_eq!(
+            NormalizedStopReason::from_anthropic_stop_reason("model_context_window_exceeded"),
+            NormalizedStopReason::ContextWindowExceeded
+        );
+        assert_eq!(
+            NormalizedStopReason::from_bedrock_stop_reason("guardrail_intervened"),
+            NormalizedStopReason::SafetyBlocked
+        );
+        assert_eq!(
+            NormalizedStopReason::from_gemini_finish_reason("MAX_TOKENS"),
+            NormalizedStopReason::MaxTokens
+        );
+        assert_eq!(
+            NormalizedStopReason::from_gemini_finish_reason("MALFORMED_FUNCTION_CALL"),
+            NormalizedStopReason::ToolCall
+        );
+        assert_eq!(
+            NormalizedStopReason::from_gemini_finish_reason("UNEXPECTED_TOOL_CALL"),
+            NormalizedStopReason::ToolCall
+        );
+        assert_eq!(
+            NormalizedStopReason::from_gemini_finish_reason("TOO_MANY_TOOL_CALLS"),
+            NormalizedStopReason::ToolCall
+        );
     }
 
     #[test]
@@ -1031,62 +1088,5 @@ mod tests {
         let message = err.to_string();
 
         assert!(message.contains("non-prompt-guided"));
-    }
-
-    struct StreamingChunkOnlyProvider;
-
-    #[async_trait]
-    impl Provider for StreamingChunkOnlyProvider {
-        async fn chat_with_system(
-            &self,
-            _system_prompt: Option<&str>,
-            _message: &str,
-            _model: &str,
-            _temperature: f64,
-        ) -> anyhow::Result<String> {
-            Ok("ok".to_string())
-        }
-
-        fn supports_streaming(&self) -> bool {
-            true
-        }
-
-        fn stream_chat_with_history(
-            &self,
-            _messages: &[ChatMessage],
-            _model: &str,
-            _temperature: f64,
-            _options: StreamOptions,
-        ) -> stream::BoxStream<'static, StreamResult<StreamChunk>> {
-            stream::iter(vec![
-                Ok(StreamChunk::delta("hello")),
-                Ok(StreamChunk::final_chunk()),
-            ])
-            .boxed()
-        }
-    }
-
-    #[tokio::test]
-    async fn provider_stream_chat_default_maps_legacy_chunks_to_events() {
-        let provider = StreamingChunkOnlyProvider;
-        let mut stream = provider.stream_chat(
-            ChatRequest {
-                messages: &[ChatMessage::user("hi")],
-                tools: None,
-            },
-            "model",
-            0.0,
-            StreamOptions::new(true),
-        );
-
-        let first = stream.next().await.unwrap().unwrap();
-        let second = stream.next().await.unwrap().unwrap();
-        assert!(stream.next().await.is_none());
-
-        match first {
-            StreamEvent::TextDelta(chunk) => assert_eq!(chunk.delta, "hello"),
-            other => panic!("expected text delta event, got {other:?}"),
-        }
-        assert!(matches!(second, StreamEvent::Final));
     }
 }

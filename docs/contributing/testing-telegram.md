@@ -298,6 +298,6 @@ If all tests pass:
 
 ## 📞 Support
 
-- Issues: https://github.com/zeroclaw-labs/zeroclaw/issues
+- Issues: https://github.com/myagentzero/zeroclaw/issues
 - Docs: [testing-telegram.md](../../tests/telegram/testing-telegram.md)
 - Help: `zeroclaw --help`

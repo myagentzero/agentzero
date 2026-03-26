@@ -304,10 +304,7 @@ fn factory_resolves_opencode_provider() {
     assert_provider_ok("opencode", Some("test-key"), None);
 }
 
-#[test]
-fn factory_resolves_opencode_go_provider() {
-    assert_provider_ok("opencode-go", Some("test-key"), None);
-}
+// opencode-go provider was removed.
 
 #[test]
 fn factory_resolves_astrai_provider() {

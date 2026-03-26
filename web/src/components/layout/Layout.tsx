@@ -1,33 +1,52 @@
-import { useState, useEffect } from 'react';
-import { Outlet, useLocation } from 'react-router-dom';
+import { Outlet } from 'react-router-dom';
+import { useState } from 'react';
 import Sidebar from '@/components/layout/Sidebar';
 import Header from '@/components/layout/Header';
-import { ErrorBoundary } from '@/App';
+
+const SIDEBAR_COLLAPSED_KEY = 'zeroclaw:sidebar-collapsed';
 
 export default function Layout() {
-  const { pathname } = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
+    if (typeof window === 'undefined') {
+      return false;
+    }
+    return window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1';
+  });
 
-  // Close sidebar on route change (mobile navigation)
-  useEffect(() => {
-    setSidebarOpen(false);
-  }, [pathname]);
+  const toggleSidebarCollapsed = () => {
+    setSidebarCollapsed((prev) => {
+      const next = !prev;
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, next ? '1' : '0');
+      }
+      return next;
+    });
+  };
 
   return (
-    <div className="min-h-screen text-white" style={{ background: 'var(--pc-bg-base)' }}>
-      {/* Fixed sidebar */}
-      <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+    <div className="app-shell min-h-screen text-white">
+      <Sidebar
+        isOpen={sidebarOpen}
+        isCollapsed={sidebarCollapsed}
+        onClose={() => setSidebarOpen(false)}
+        onToggleCollapse={toggleSidebarCollapsed}
+      />
 
-      {/* Main area offset by sidebar width on desktop, full-width on mobile */}
-      <div className="md:ml-60 ml-0 flex flex-col flex-1 min-w-0 h-screen">
-        <Header onMenuToggle={() => setSidebarOpen(true)} />
+      <div
+        className={[
+          'flex min-h-screen flex-col transition-[margin-left] duration-300 ease-out',
+          sidebarCollapsed ? 'md:ml-[6.25rem]' : 'md:ml-[17.5rem]',
+        ].join(' ')}
+      >
+        <Header
+          isSidebarCollapsed={sidebarCollapsed}
+          onToggleSidebar={() => setSidebarOpen((open) => !open)}
+          onToggleSidebarCollapse={toggleSidebarCollapsed}
+        />
 
-        {/* Page content — ErrorBoundary keyed by pathname so the nav shell
-            survives a page crash and the boundary resets on route change */}
-        <main className="flex-1 overflow-y-auto min-h-0">
-          <ErrorBoundary key={pathname}>
-            <Outlet />
-          </ErrorBoundary>
+        <main className="flex-1 overflow-y-auto px-4 pb-8 pt-5 md:px-8 md:pt-8">
+          <Outlet />
         </main>
       </div>
     </div>
