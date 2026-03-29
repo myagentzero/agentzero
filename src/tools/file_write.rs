@@ -43,6 +43,14 @@ impl Tool for FileWriteTool {
         "Write contents to a file in the workspace. Sensitive files (for example .env and key material) are blocked by default."
     }
 
+    fn prompt_hint(&self) -> Option<&str> {
+        Some("Write file contents. Use when: applying focused edits, scaffolding files, updating docs/code. Don't use when: side effects are unclear or file ownership is uncertain.")
+    }
+
+    fn prompt_hint_compact(&self) -> &str {
+        "Write file contents."
+    }
+
     fn parameters_schema(&self) -> serde_json::Value {
         json!({
             "type": "object",

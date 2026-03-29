@@ -611,6 +611,14 @@ impl Tool for ComposioTool {
          connected_account_id is auto-resolved when omitted."
     }
 
+    fn prompt_hint(&self) -> Option<&str> {
+        Some("Execute actions on 1000+ apps via Composio (Gmail, Notion, GitHub, Slack, etc.). Use action='list' to discover, 'execute' to run (optionally with connected_account_id), 'connect' to OAuth.")
+    }
+
+    fn prompt_hint_compact(&self) -> &str {
+        "Execute actions on 1000+ apps via Composio."
+    }
+
     fn parameters_schema(&self) -> serde_json::Value {
         json!({
             "type": "object",

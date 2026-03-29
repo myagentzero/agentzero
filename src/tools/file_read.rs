@@ -45,6 +45,14 @@ impl Tool for FileReadTool {
         "Read file contents with line numbers. Supports partial reading via offset and limit. Extracts text from PDF; other binary files are read with lossy UTF-8 conversion. Sensitive files (for example .env and key material) are blocked by default."
     }
 
+    fn prompt_hint(&self) -> Option<&str> {
+        Some("Read file contents. Use when: inspecting project files, configs, logs. Don't use when: a targeted search is enough.")
+    }
+
+    fn prompt_hint_compact(&self) -> &str {
+        "Read file contents."
+    }
+
     fn parameters_schema(&self) -> serde_json::Value {
         json!({
             "type": "object",

@@ -34,6 +34,14 @@ impl Tool for ReadSkillTool {
         "Read the full source file for an available skill by name. Use this in compact skills mode when you need the complete skill instructions without remembering file paths."
     }
 
+    fn prompt_hint(&self) -> Option<&str> {
+        Some("Load the full source for an available skill by name. Use when: compact mode only shows a summary and you need the complete skill instructions.")
+    }
+
+    fn prompt_hint_compact(&self) -> &str {
+        "Load the full source for an available skill by name."
+    }
+
     fn parameters_schema(&self) -> serde_json::Value {
         json!({
             "type": "object",

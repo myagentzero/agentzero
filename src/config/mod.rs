@@ -4,6 +4,7 @@ pub mod traits;
 #[allow(unused_imports)]
 pub use schema::{
     AckReactionChannelsConfig, AckReactionChatType, AckReactionConfig, AckReactionRuleAction,
+    AskUserConfig,
     AckReactionRuleConfig, AckReactionStrategy, AgentConfig, AgentLoadBalanceStrategy,
     AgentSessionBackend, AgentSessionConfig, AgentSessionStrategy, AgentTeamsConfig,
     AgentsIpcConfig, AuditConfig, AutonomyConfig, BrowserComputerUseConfig, BrowserConfig,

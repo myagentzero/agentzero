@@ -39,6 +39,7 @@ import {
   Image,
   HardDrive,
   Play,
+  Github,
 } from 'lucide-react';
 import type { SectionDef } from './types';
 
@@ -59,8 +60,8 @@ export const CONFIG_SECTIONS: SectionDef[] = [
       { key: 'default_provider', label: 'Default Provider', type: 'text', description: 'e.g. openrouter, openai, anthropic', defaultValue: 'openrouter' },
       {
         key: 'provider_api', label: 'Provider API Mode', type: 'select', options: [
-          { value: 'openai-chat-completions', label: 'OpenAI Chat Completions' },
-          { value: 'openai-responses', label: 'OpenAI Responses' },
+          { value: 'open-ai-chat-completions', label: 'OpenAI Chat Completions' },
+          { value: 'open-ai-responses', label: 'OpenAI Responses' },
         ]
       },
       { key: 'default_model', label: 'Default Model', type: 'text', description: 'e.g. anthropic/claude-sonnet-4.6', defaultValue: 'anthropic/claude-sonnet-4.6' },
@@ -126,8 +127,8 @@ export const CONFIG_SECTIONS: SectionDef[] = [
         ]
       },
       { key: 'workspace_only', label: 'Workspace Only', type: 'toggle', defaultValue: true, description: 'Restrict actions to workspace directory' },
-      { key: 'max_actions_per_hour', label: 'Max Actions / Hour', type: 'number', min: 1, defaultValue: 20, description: 'Default: 20' },
-      { key: 'max_cost_per_day_cents', label: 'Max Cost / Day (cents)', type: 'number', min: 0, defaultValue: 500, description: 'Default: 500 (= $5.00)' },
+      { key: 'max_actions_per_hour', label: 'Max Actions / Hour', type: 'number', min: 1, defaultValue: 100, description: 'Default: 100' },
+      { key: 'max_cost_per_day_cents', label: 'Max Cost / Day (cents)', type: 'number', min: 0, defaultValue: 1000, description: 'Default: 1000 (= $10.00)' },
       { key: 'require_approval_for_medium_risk', label: 'Require Approval for Medium Risk', type: 'toggle', defaultValue: true },
       { key: 'block_high_risk_commands', label: 'Block High Risk Commands', type: 'toggle', defaultValue: true },
       { key: 'allowed_commands', label: 'Allowed Commands', type: 'tag-list', tagPlaceholder: 'Add command (e.g. git, npm, cargo)' },
@@ -136,6 +137,19 @@ export const CONFIG_SECTIONS: SectionDef[] = [
       { key: 'always_ask', label: 'Always Ask Tools', type: 'tag-list', tagPlaceholder: 'e.g. shell, file_write' },
       { key: 'allowed_roots', label: 'Allowed Roots', type: 'tag-list', tagPlaceholder: 'e.g. /home/user/projects' },
       { key: 'shell_env_passthrough', label: 'Shell Env Passthrough', type: 'tag-list', tagPlaceholder: 'e.g. PATH, HOME, EDITOR' },
+      { key: 'allow_sensitive_file_reads', label: 'Allow Sensitive File Reads', type: 'toggle', defaultValue: false, description: 'Allow reading .env, keys, and credential files' },
+      { key: 'allow_sensitive_file_writes', label: 'Allow Sensitive File Writes', type: 'toggle', defaultValue: false, description: 'Allow writing .env, keys, and credential files' },
+      { key: 'non_cli_excluded_tools', label: 'Non-CLI Excluded Tools', type: 'tag-list', tagPlaceholder: 'e.g. shell, file_write', description: 'Tools hidden from non-CLI channels (Telegram, Discord, etc.)' },
+      { key: 'non_cli_approval_approvers', label: 'Non-CLI Approval Approvers', type: 'tag-list', tagPlaceholder: 'e.g. alice, telegram:bob, *', description: 'Who can manage approval commands on non-CLI channels' },
+      {
+        key: 'non_cli_natural_language_approval_mode', label: 'Non-CLI NL Approval Mode', type: 'select', defaultValue: 'direct',
+        options: [
+          { value: 'direct', label: 'Direct' },
+          { value: 'request_confirm', label: 'Request + Confirm' },
+          { value: 'disabled', label: 'Disabled' },
+        ],
+        description: 'How natural-language approval phrases are handled on non-CLI channels',
+      },
     ],
   },
 
@@ -346,14 +360,14 @@ export const CONFIG_SECTIONS: SectionDef[] = [
     path: 'reliability',
     category: 'advanced',
     title: 'Reliability',
-    description: 'Retry, fallback, and backoff settings',
+    description: 'Provider failover chain, retry, and backoff settings. For per-provider API keys (fallback_api_keys) and per-model fallback chains (model_fallbacks), use the Raw TOML editor.',
     icon: RefreshCw,
     defaultCollapsed: true,
     fields: [
-      { key: 'provider_retries', label: 'Provider Retries', type: 'number', min: 0, defaultValue: 2, description: 'Default: 2' },
-      { key: 'provider_backoff_ms', label: 'Backoff (ms)', type: 'number', min: 0, defaultValue: 500, description: 'Default: 500' },
-      { key: 'fallback_providers', label: 'Fallback Providers', type: 'tag-list', tagPlaceholder: 'e.g. openai, anthropic' },
-      { key: 'api_keys', label: 'Fallback API Keys', type: 'tag-list', tagPlaceholder: 'Add fallback API key' },
+      { key: 'fallback_providers', label: 'Fallback Providers', type: 'tag-list', tagPlaceholder: 'e.g. anthropic, openai, ollama', description: 'Provider chain tried in order when the primary fails' },
+      { key: 'provider_retries', label: 'Provider Retries', type: 'number', min: 0, defaultValue: 2, description: 'Retries per provider before failing over to the next. Default: 2' },
+      { key: 'provider_backoff_ms', label: 'Backoff (ms)', type: 'number', min: 0, defaultValue: 500, description: 'Base backoff between retries (doubles each attempt, max 10s). Default: 500' },
+      { key: 'api_keys', label: 'Round-Robin API Keys', type: 'tag-list', tagPlaceholder: 'sk-key1, sk-key2', description: 'Extra API keys rotated on 429 rate-limit errors. Primary api_key is always tried first.' },
       { key: 'channel_initial_backoff_secs', label: 'Channel Initial Backoff (s)', type: 'number', min: 1, defaultValue: 2, description: 'Default: 2' },
       { key: 'channel_max_backoff_secs', label: 'Channel Max Backoff (s)', type: 'number', min: 1, defaultValue: 60, description: 'Default: 60' },
       { key: 'scheduler_poll_secs', label: 'Scheduler Poll (s)', type: 'number', min: 1, defaultValue: 15, description: 'Default: 15' },
@@ -603,6 +617,22 @@ export const CONFIG_SECTIONS: SectionDef[] = [
     ],
   },
 
+  // ── GitHub ───────────────────────────────────────────────────────
+  {
+    path: 'channels_config.github',
+    category: 'channels',
+    title: 'GitHub',
+    description: 'GitHub issues & PR comments via webhook + REST API',
+    icon: Github,
+    defaultCollapsed: true,
+    fields: [
+      { key: 'access_token', label: 'Access Token', type: 'password', sensitive: true, description: 'Fine-grained PAT or installation token with issues:write / pull_requests:write' },
+      { key: 'webhook_secret', label: 'Webhook Secret', type: 'password', sensitive: true, description: 'Used to verify X-Hub-Signature-256' },
+      { key: 'api_base_url', label: 'API Base URL', type: 'text', description: 'For GHES. Defaults to https://api.github.com' },
+      { key: 'allowed_repos', label: 'Allowed Repos', type: 'tag-list', tagPlaceholder: 'e.g. owner/repo or owner/*' },
+    ],
+  },
+
   // ── Memory ────────────────────────────────────────────────────────
   {
     path: 'memory',
@@ -769,6 +799,21 @@ export const CONFIG_SECTIONS: SectionDef[] = [
       { key: 'brave_api_key', label: 'Brave API Key', type: 'password', sensitive: true, description: 'Brave Search API key' },
       { key: 'max_results', label: 'Max Results', type: 'number', min: 1, defaultValue: 5, description: 'Default: 5' },
       { key: 'timeout_secs', label: 'Timeout (s)', type: 'number', min: 1, defaultValue: 15, description: 'Default: 15' },
+    ],
+  },
+
+  // ── Ask User ──────────────────────────────────────────────────────
+  {
+    path: 'ask_user',
+    category: 'tools',
+    title: 'Ask User',
+    description: 'Interactive user prompting tool settings',
+    icon: MessageCircle,
+    defaultCollapsed: true,
+    fields: [
+      { key: 'enabled', label: 'Enabled', type: 'toggle', defaultValue: true },
+      { key: 'default_timeout_secs', label: 'Default Timeout (s)', type: 'number', min: 1, defaultValue: 300, description: 'Default: 300 (5 minutes)' },
+      { key: 'default_channel', label: 'Default Channel', type: 'text', description: 'Preferred channel when none specified (e.g. slack, telegram). Leave empty to use first available.' },
     ],
   },
 

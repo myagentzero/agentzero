@@ -903,14 +903,10 @@ pub fn init_skills_dir(workspace_dir: &Path) -> Result<()> {
              required parameter the agent provides at call time.\n\n\
              ## SKILL.md format (simpler)\n\n\
              Just write a markdown file with instructions for the agent.\n\
-             Optional YAML frontmatter is supported for `name`, `description`, `version`, `author`, and `tags`.\n\
+             YAML frontmatter is supported for `name`, `description`, `version`, `author`, and `tags`.\n\
              The agent will read it and follow the instructions.\n\n\
              ## Testing skills\n\n\
              Add a `TEST.sh` file with test cases: `command | exit_code | output_pattern`\n\n\
-             ## Installing community skills\n\n\
-             ```bash\n\
-             zeroclaw skills install <source>\n\
-             zeroclaw skills list\n\
              ```\n",
         )?;
     }

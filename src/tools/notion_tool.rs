@@ -175,6 +175,14 @@ impl Tool for NotionTool {
         "Interact with Notion: query databases, read/create/update pages, and search the workspace."
     }
 
+    fn prompt_hint(&self) -> Option<&str> {
+        Some("Interact with Notion: query databases, read/create/update pages, and search. Use when: user references Notion content or wants to manage Notion pages.")
+    }
+
+    fn prompt_hint_compact(&self) -> &str {
+        "Interact with Notion pages and databases."
+    }
+
     fn parameters_schema(&self) -> serde_json::Value {
         json!({
             "type": "object",

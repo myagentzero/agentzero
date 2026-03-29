@@ -1,4 +1,5 @@
 export interface StatusResponse {
+  version: string;
   provider: string | null;
   model: string;
   temperature: number;
@@ -122,6 +123,22 @@ export interface CliTool {
   path: string;
   version: string | null;
   category: string;
+}
+
+export interface SkillToolSummary {
+  name: string;
+  description: string;
+  kind: string;
+}
+
+export interface SkillSummary {
+  name: string;
+  description: string;
+  version: string;
+  author: string | null;
+  tags: string[];
+  tools: SkillToolSummary[];
+  location: string | null;
 }
 
 export interface SSEEvent {

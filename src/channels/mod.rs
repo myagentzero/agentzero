@@ -332,6 +332,8 @@ struct ChannelRuntimeContext {
     safety_heartbeat: Option<SafetyHeartbeatConfig>,
     startup_perplexity_filter: crate::config::PerplexityFilterConfig,
     gateway_pairing: Option<Arc<PairingGuard>>,
+    #[cfg(feature = "skill-creation")]
+    skill_creation: crate::config::SkillCreationConfig,
 }
 
 #[derive(Clone)]
@@ -4309,6 +4311,50 @@ If this input is legitimate, rephrase the request and avoid instruction-override
                     eprintln!("  ❌ Failed to reply on {}: {e}", channel.name());
                 }
             }
+
+            // After successful multi-step execution, attempt autonomous skill creation.
+            #[cfg(feature = "skill-creation")]
+            if ctx.skill_creation.enabled {
+                let tool_calls =
+                    crate::skills::creator::extract_tool_calls_from_history(&history);
+                tracing::debug!(
+                    tool_call_count = tool_calls.len(),
+                    channel = %msg.channel,
+                    sender = %msg.sender,
+                    "Evaluating auto skill creation from channel execution history"
+                );
+
+                if tool_calls.len() >= 2 {
+                    let creator = crate::skills::creator::SkillCreator::new(
+                        ctx.workspace_dir.as_ref().clone(),
+                        ctx.skill_creation.clone(),
+                    );
+                    match creator
+                        .create_from_execution(&msg.content, &tool_calls, None)
+                        .await
+                    {
+                        Ok(Some(slug)) => {
+                            tracing::info!(
+                                slug,
+                                tool_call_count = tool_calls.len(),
+                                channel = %msg.channel,
+                                "Auto-created skill from channel execution"
+                            );
+                        }
+                        Ok(None) => {
+                            tracing::debug!(
+                                tool_call_count = tool_calls.len(),
+                                "Channel skill creation skipped by creator"
+                            );
+                        }
+                        Err(e) => tracing::warn!(
+                            tool_call_count = tool_calls.len(),
+                            channel = %msg.channel,
+                            "Channel skill creation failed: {e}"
+                        ),
+                    }
+                }
+            }
         }
         LlmExecutionResult::Completed(Ok(Err(e))) => {
             if crate::agent::loop_::is_tool_loop_cancelled(&e) || cancellation_token.is_cancelled()
@@ -5297,6 +5343,7 @@ fn collect_configured_channels(
                     sl.effective_group_reply_mode().requires_mention(),
                     sl.group_reply_allowed_sender_ids(),
                 )
+                .with_ack_reaction(config.channels_config.ack_reaction.slack.clone())
                 .with_workspace_dir(config.workspace_dir.clone()),
             ),
         });
@@ -5765,7 +5812,7 @@ pub async fn start_channels(
 
     if !skills.is_empty() {
         println!(
-            "  🧩 Skills:   {}",
+            "  📖 Skills:   {}",
             skills
                 .iter()
                 .map(|s| s.name.as_str())
@@ -5916,6 +5963,8 @@ pub async fn start_channels(
             None
         },
         gateway_pairing,
+        #[cfg(feature = "skill-creation")]
+        skill_creation: config.skills.skill_creation.clone(),
     });
 
     run_message_dispatch_loop(rx, runtime_ctx, max_in_flight_messages).await;
@@ -6300,6 +6349,8 @@ mod tests {
             safety_heartbeat: None,
             startup_perplexity_filter: crate::config::PerplexityFilterConfig::default(),
             gateway_pairing: None,
+            #[cfg(feature = "skill-creation")]
+            skill_creation: crate::config::SkillCreationConfig::default(),
         };
 
         assert!(compact_sender_history(&ctx, &sender));
@@ -6358,6 +6409,8 @@ mod tests {
             safety_heartbeat: None,
             startup_perplexity_filter: crate::config::PerplexityFilterConfig::default(),
             gateway_pairing: None,
+            #[cfg(feature = "skill-creation")]
+            skill_creation: crate::config::SkillCreationConfig::default(),
         };
 
         append_sender_turn(&ctx, &sender, ChatMessage::user("hello"));
@@ -6419,6 +6472,8 @@ mod tests {
             safety_heartbeat: None,
             startup_perplexity_filter: crate::config::PerplexityFilterConfig::default(),
             gateway_pairing: None,
+            #[cfg(feature = "skill-creation")]
+            skill_creation: crate::config::SkillCreationConfig::default(),
         };
 
         assert!(rollback_orphan_user_turn(&ctx, &sender, "pending"));
@@ -7021,6 +7076,8 @@ BTC is currently around $65,000 based on latest tool output."#
             safety_heartbeat: None,
             startup_perplexity_filter: crate::config::PerplexityFilterConfig::default(),
             gateway_pairing: None,
+            #[cfg(feature = "skill-creation")]
+            skill_creation: crate::config::SkillCreationConfig::default(),
         });
 
         process_channel_message(
@@ -7109,6 +7166,8 @@ BTC is currently around $65,000 based on latest tool output."#
             safety_heartbeat: None,
             startup_perplexity_filter: crate::config::PerplexityFilterConfig::default(),
             gateway_pairing: None,
+            #[cfg(feature = "skill-creation")]
+            skill_creation: crate::config::SkillCreationConfig::default(),
         });
 
         process_channel_message(
@@ -7184,6 +7243,8 @@ BTC is currently around $65,000 based on latest tool output."#
             safety_heartbeat: None,
             startup_perplexity_filter: crate::config::PerplexityFilterConfig::default(),
             gateway_pairing: None,
+            #[cfg(feature = "skill-creation")]
+            skill_creation: crate::config::SkillCreationConfig::default(),
         });
 
         process_channel_message(
@@ -7273,6 +7334,8 @@ BTC is currently around $65,000 based on latest tool output."#
             safety_heartbeat: None,
             startup_perplexity_filter: crate::config::PerplexityFilterConfig::default(),
             gateway_pairing: None,
+            #[cfg(feature = "skill-creation")]
+            skill_creation: crate::config::SkillCreationConfig::default(),
         });
 
         process_channel_message(
@@ -7361,6 +7424,8 @@ BTC is currently around $65,000 based on latest tool output."#
             safety_heartbeat: None,
             startup_perplexity_filter: crate::config::PerplexityFilterConfig::default(),
             gateway_pairing: None,
+            #[cfg(feature = "skill-creation")]
+            skill_creation: crate::config::SkillCreationConfig::default(),
         });
 
         process_channel_message(
@@ -7434,6 +7499,8 @@ BTC is currently around $65,000 based on latest tool output."#
             safety_heartbeat: None,
             startup_perplexity_filter: crate::config::PerplexityFilterConfig::default(),
             gateway_pairing: None,
+            #[cfg(feature = "skill-creation")]
+            skill_creation: crate::config::SkillCreationConfig::default(),
         });
 
         process_channel_message(
@@ -7509,6 +7576,8 @@ BTC is currently around $65,000 based on latest tool output."#
             safety_heartbeat: None,
             startup_perplexity_filter: crate::config::PerplexityFilterConfig::default(),
             gateway_pairing: None,
+            #[cfg(feature = "skill-creation")]
+            skill_creation: crate::config::SkillCreationConfig::default(),
         });
 
         process_channel_message(
@@ -7586,6 +7655,8 @@ BTC is currently around $65,000 based on latest tool output."#
             safety_heartbeat: None,
             startup_perplexity_filter: crate::config::PerplexityFilterConfig::default(),
             gateway_pairing: None,
+            #[cfg(feature = "skill-creation")]
+            skill_creation: crate::config::SkillCreationConfig::default(),
         });
 
         process_channel_message(
@@ -7694,6 +7765,8 @@ BTC is currently around $65,000 based on latest tool output."#
             safety_heartbeat: None,
             startup_perplexity_filter: crate::config::PerplexityFilterConfig::default(),
             gateway_pairing: None,
+            #[cfg(feature = "skill-creation")]
+            skill_creation: crate::config::SkillCreationConfig::default(),
         });
         assert_eq!(
             runtime_ctx
@@ -7837,6 +7910,8 @@ BTC is currently around $65,000 based on latest tool output."#
             safety_heartbeat: None,
             startup_perplexity_filter: crate::config::PerplexityFilterConfig::default(),
             gateway_pairing: None,
+            #[cfg(feature = "skill-creation")]
+            skill_creation: crate::config::SkillCreationConfig::default(),
         });
 
         process_channel_message(
@@ -7927,6 +8002,8 @@ BTC is currently around $65,000 based on latest tool output."#
             safety_heartbeat: None,
             startup_perplexity_filter: crate::config::PerplexityFilterConfig::default(),
             gateway_pairing: None,
+            #[cfg(feature = "skill-creation")]
+            skill_creation: crate::config::SkillCreationConfig::default(),
         });
 
         process_channel_message(
@@ -8006,6 +8083,8 @@ BTC is currently around $65,000 based on latest tool output."#
             safety_heartbeat: None,
             startup_perplexity_filter: crate::config::PerplexityFilterConfig::default(),
             gateway_pairing: None,
+            #[cfg(feature = "skill-creation")]
+            skill_creation: crate::config::SkillCreationConfig::default(),
         });
 
         let runtime_ctx_for_first_turn = runtime_ctx.clone();
@@ -8171,6 +8250,8 @@ BTC is currently around $65,000 based on latest tool output."#
             safety_heartbeat: None,
             startup_perplexity_filter: crate::config::PerplexityFilterConfig::default(),
             gateway_pairing: None,
+            #[cfg(feature = "skill-creation")]
+            skill_creation: crate::config::SkillCreationConfig::default(),
         });
         assert_eq!(
             runtime_ctx
@@ -8289,6 +8370,8 @@ BTC is currently around $65,000 based on latest tool output."#
             safety_heartbeat: None,
             startup_perplexity_filter: crate::config::PerplexityFilterConfig::default(),
             gateway_pairing: None,
+            #[cfg(feature = "skill-creation")]
+            skill_creation: crate::config::SkillCreationConfig::default(),
         });
 
         process_channel_message(
@@ -8402,6 +8485,8 @@ BTC is currently around $65,000 based on latest tool output."#
             safety_heartbeat: None,
             startup_perplexity_filter: crate::config::PerplexityFilterConfig::default(),
             gateway_pairing: None,
+            #[cfg(feature = "skill-creation")]
+            skill_creation: crate::config::SkillCreationConfig::default(),
         });
 
         process_channel_message(
@@ -8495,6 +8580,8 @@ BTC is currently around $65,000 based on latest tool output."#
             safety_heartbeat: None,
             startup_perplexity_filter: crate::config::PerplexityFilterConfig::default(),
             gateway_pairing: None,
+            #[cfg(feature = "skill-creation")]
+            skill_creation: crate::config::SkillCreationConfig::default(),
         });
 
         process_channel_message(
@@ -8600,6 +8687,8 @@ BTC is currently around $65,000 based on latest tool output."#
             safety_heartbeat: None,
             startup_perplexity_filter: crate::config::PerplexityFilterConfig::default(),
             gateway_pairing: None,
+            #[cfg(feature = "skill-creation")]
+            skill_creation: crate::config::SkillCreationConfig::default(),
         });
 
         process_channel_message(
@@ -8706,6 +8795,8 @@ BTC is currently around $65,000 based on latest tool output."#
             safety_heartbeat: None,
             startup_perplexity_filter: crate::config::PerplexityFilterConfig::default(),
             gateway_pairing: None,
+            #[cfg(feature = "skill-creation")]
+            skill_creation: crate::config::SkillCreationConfig::default(),
         });
 
         process_channel_message(
@@ -8868,6 +8959,8 @@ BTC is currently around $65,000 based on latest tool output."#
             safety_heartbeat: None,
             startup_perplexity_filter: crate::config::PerplexityFilterConfig::default(),
             gateway_pairing: None,
+            #[cfg(feature = "skill-creation")]
+            skill_creation: crate::config::SkillCreationConfig::default(),
         });
         maybe_apply_runtime_config_update(runtime_ctx.as_ref())
             .await
@@ -8966,6 +9059,8 @@ BTC is currently around $65,000 based on latest tool output."#
             safety_heartbeat: None,
             startup_perplexity_filter: crate::config::PerplexityFilterConfig::default(),
             gateway_pairing: None,
+            #[cfg(feature = "skill-creation")]
+            skill_creation: crate::config::SkillCreationConfig::default(),
         });
 
         process_channel_message(
@@ -9117,6 +9212,8 @@ BTC is currently around $65,000 based on latest tool output."#
             safety_heartbeat: None,
             startup_perplexity_filter: crate::config::PerplexityFilterConfig::default(),
             gateway_pairing: None,
+            #[cfg(feature = "skill-creation")]
+            skill_creation: crate::config::SkillCreationConfig::default(),
         });
 
         process_channel_message(
@@ -9244,6 +9341,8 @@ BTC is currently around $65,000 based on latest tool output."#
             safety_heartbeat: None,
             startup_perplexity_filter: crate::config::PerplexityFilterConfig::default(),
             gateway_pairing: None,
+            #[cfg(feature = "skill-creation")]
+            skill_creation: crate::config::SkillCreationConfig::default(),
         });
 
         process_channel_message(
@@ -9347,6 +9446,8 @@ BTC is currently around $65,000 based on latest tool output."#
             safety_heartbeat: None,
             startup_perplexity_filter: crate::config::PerplexityFilterConfig::default(),
             gateway_pairing: None,
+            #[cfg(feature = "skill-creation")]
+            skill_creation: crate::config::SkillCreationConfig::default(),
         });
 
         process_channel_message(
@@ -9473,6 +9574,8 @@ BTC is currently around $65,000 based on latest tool output."#
             safety_heartbeat: None,
             startup_perplexity_filter: crate::config::PerplexityFilterConfig::default(),
             gateway_pairing: None,
+            #[cfg(feature = "skill-creation")]
+            skill_creation: crate::config::SkillCreationConfig::default(),
         });
 
         process_channel_message(
@@ -9594,6 +9697,8 @@ BTC is currently around $65,000 based on latest tool output."#
             safety_heartbeat: None,
             startup_perplexity_filter: crate::config::PerplexityFilterConfig::default(),
             gateway_pairing: None,
+            #[cfg(feature = "skill-creation")]
+            skill_creation: crate::config::SkillCreationConfig::default(),
         });
 
         process_channel_message(
@@ -9674,6 +9779,8 @@ BTC is currently around $65,000 based on latest tool output."#
             safety_heartbeat: None,
             startup_perplexity_filter: crate::config::PerplexityFilterConfig::default(),
             gateway_pairing: None,
+            #[cfg(feature = "skill-creation")]
+            skill_creation: crate::config::SkillCreationConfig::default(),
         });
 
         process_channel_message(
@@ -9785,6 +9892,8 @@ BTC is currently around $65,000 based on latest tool output."#
             safety_heartbeat: None,
             startup_perplexity_filter: crate::config::PerplexityFilterConfig::default(),
             gateway_pairing: None,
+            #[cfg(feature = "skill-creation")]
+            skill_creation: crate::config::SkillCreationConfig::default(),
         });
 
         process_channel_message(
@@ -9981,6 +10090,8 @@ BTC is currently around $65,000 based on latest tool output."#
             safety_heartbeat: None,
             startup_perplexity_filter: crate::config::PerplexityFilterConfig::default(),
             gateway_pairing: None,
+            #[cfg(feature = "skill-creation")]
+            skill_creation: crate::config::SkillCreationConfig::default(),
         });
 
         maybe_apply_runtime_config_update(runtime_ctx.as_ref())
@@ -10186,6 +10297,8 @@ BTC is currently around $65,000 based on latest tool output."#
             safety_heartbeat: None,
             startup_perplexity_filter: crate::config::PerplexityFilterConfig::default(),
             gateway_pairing: None,
+            #[cfg(feature = "skill-creation")]
+            skill_creation: crate::config::SkillCreationConfig::default(),
         });
 
         process_channel_message(
@@ -10255,6 +10368,8 @@ BTC is currently around $65,000 based on latest tool output."#
             safety_heartbeat: None,
             startup_perplexity_filter: crate::config::PerplexityFilterConfig::default(),
             gateway_pairing: None,
+            #[cfg(feature = "skill-creation")]
+            skill_creation: crate::config::SkillCreationConfig::default(),
         });
 
         process_channel_message(
@@ -10438,6 +10553,8 @@ BTC is currently around $65,000 based on latest tool output."#
             safety_heartbeat: None,
             startup_perplexity_filter: crate::config::PerplexityFilterConfig::default(),
             gateway_pairing: None,
+            #[cfg(feature = "skill-creation")]
+            skill_creation: crate::config::SkillCreationConfig::default(),
         });
 
         let (tx, rx) = tokio::sync::mpsc::channel::<traits::ChannelMessage>(4);
@@ -10529,6 +10646,8 @@ BTC is currently around $65,000 based on latest tool output."#
             safety_heartbeat: None,
             startup_perplexity_filter: crate::config::PerplexityFilterConfig::default(),
             gateway_pairing: None,
+            #[cfg(feature = "skill-creation")]
+            skill_creation: crate::config::SkillCreationConfig::default(),
         });
 
         let (tx, rx) = tokio::sync::mpsc::channel::<traits::ChannelMessage>(8);
@@ -10636,6 +10755,8 @@ BTC is currently around $65,000 based on latest tool output."#
             safety_heartbeat: None,
             startup_perplexity_filter: crate::config::PerplexityFilterConfig::default(),
             gateway_pairing: None,
+            #[cfg(feature = "skill-creation")]
+            skill_creation: crate::config::SkillCreationConfig::default(),
         });
 
         let (tx, rx) = tokio::sync::mpsc::channel::<traits::ChannelMessage>(8);
@@ -10721,6 +10842,8 @@ BTC is currently around $65,000 based on latest tool output."#
             safety_heartbeat: None,
             startup_perplexity_filter: crate::config::PerplexityFilterConfig::default(),
             gateway_pairing: None,
+            #[cfg(feature = "skill-creation")]
+            skill_creation: crate::config::SkillCreationConfig::default(),
         });
 
         process_channel_message(
@@ -10791,6 +10914,8 @@ BTC is currently around $65,000 based on latest tool output."#
             safety_heartbeat: None,
             startup_perplexity_filter: crate::config::PerplexityFilterConfig::default(),
             gateway_pairing: None,
+            #[cfg(feature = "skill-creation")]
+            skill_creation: crate::config::SkillCreationConfig::default(),
         });
 
         process_channel_message(
@@ -11417,6 +11542,8 @@ BTC is currently around $65,000 based on latest tool output."#
             safety_heartbeat: None,
             startup_perplexity_filter: crate::config::PerplexityFilterConfig::default(),
             gateway_pairing: None,
+            #[cfg(feature = "skill-creation")]
+            skill_creation: crate::config::SkillCreationConfig::default(),
         });
 
         process_channel_message(
@@ -11513,6 +11640,8 @@ BTC is currently around $65,000 based on latest tool output."#
             safety_heartbeat: None,
             startup_perplexity_filter: crate::config::PerplexityFilterConfig::default(),
             gateway_pairing: None,
+            #[cfg(feature = "skill-creation")]
+            skill_creation: crate::config::SkillCreationConfig::default(),
         });
 
         process_channel_message(
@@ -11613,6 +11742,8 @@ BTC is currently around $65,000 based on latest tool output."#
             safety_heartbeat: None,
             startup_perplexity_filter: crate::config::PerplexityFilterConfig::default(),
             gateway_pairing: None,
+            #[cfg(feature = "skill-creation")]
+            skill_creation: crate::config::SkillCreationConfig::default(),
         });
 
         process_channel_message(
@@ -12402,6 +12533,8 @@ BTC is currently around $65,000 based on latest tool output."#;
             safety_heartbeat: None,
             startup_perplexity_filter: crate::config::PerplexityFilterConfig::default(),
             gateway_pairing: None,
+            #[cfg(feature = "skill-creation")]
+            skill_creation: crate::config::SkillCreationConfig::default(),
         });
 
         // Simulate a photo attachment message with [IMAGE:] marker.
@@ -12479,6 +12612,8 @@ BTC is currently around $65,000 based on latest tool output."#;
             safety_heartbeat: None,
             startup_perplexity_filter: crate::config::PerplexityFilterConfig::default(),
             gateway_pairing: None,
+            #[cfg(feature = "skill-creation")]
+            skill_creation: crate::config::SkillCreationConfig::default(),
         });
 
         process_channel_message(

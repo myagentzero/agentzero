@@ -31,6 +31,14 @@ impl Tool for ArduinoUploadTool {
         "Generate Arduino sketch code and upload it to the connected Arduino. Use when: user asks to 'make a heart', 'blink LED', or run any custom pattern on Arduino. You MUST write the full .ino sketch code (setup + loop). Arduino Uno: pin 13 = built-in LED. Saves to temp dir, runs arduino-cli compile and upload. Requires arduino-cli installed."
     }
 
+    fn prompt_hint(&self) -> Option<&str> {
+        Some("Upload agent-generated Arduino sketch. Use when: user asks for 'make a heart', 'blink pattern', or custom LED behavior on Arduino. You write the full .ino code; ZeroClaw compiles and uploads it. Pin 13 = built-in LED on Uno.")
+    }
+
+    fn prompt_hint_compact(&self) -> &str {
+        "Upload Arduino sketch. Use for 'make a heart', custom patterns. You write full .ino code; ZeroClaw uploads it."
+    }
+
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",

@@ -57,6 +57,10 @@ impl Tool for CronUpdateTool {
         "Patch an existing cron job (schedule, command, prompt, enabled, delivery, model, etc.)"
     }
 
+    fn prompt_hint(&self) -> Option<&str> {
+        Some("Patch a cron job (schedule, enabled, command/prompt, model, delivery, session_target).")
+    }
+
     fn parameters_schema(&self) -> serde_json::Value {
         json!({
             "type": "object",

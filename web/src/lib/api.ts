@@ -10,6 +10,7 @@ import type {
   CostSummary,
   CliTool,
   HealthSnapshot,
+  SkillSummary,
 } from '../types/api';
 import { clearToken, getToken, setToken } from './auth';
 
@@ -271,6 +272,20 @@ export function revokePairedDevice(id: string): Promise<void> {
 export function getCost(): Promise<CostSummary> {
   return apiFetch<CostSummary | { cost: CostSummary }>('/api/cost').then((data) =>
     unwrapField(data, 'cost'),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// CLI Tools
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Skills
+// ---------------------------------------------------------------------------
+
+export function getSkills(): Promise<SkillSummary[]> {
+  return apiFetch<SkillSummary[] | { skills: SkillSummary[] }>('/api/skills').then((data) =>
+    unwrapField(data, 'skills'),
   );
 }
 

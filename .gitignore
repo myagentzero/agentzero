@@ -35,11 +35,8 @@ credentials.json
 .worktrees/
 .zeroclaw/*
 
-# Skill eval workspaces (test outputs, transcripts, grading)
-.claude/skills/*-workspace/
-
-# Claude Code agent worktrees (temporary isolated workspaces)
-.claude/worktrees/
+# Claude Code agent
+.claude/
 
 # Local state backups
 .local-state-backups/

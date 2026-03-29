@@ -239,6 +239,14 @@ impl Tool for WeatherTool {
          No API key required. Coverage is limited to US locations only."
     }
 
+    fn prompt_hint(&self) -> Option<&str> {
+        Some("Get weather forecast for US locations. Use when: user asks about weather. Requires lat/lon coordinates; US-only coverage.")
+    }
+
+    fn prompt_hint_compact(&self) -> &str {
+        "Get weather forecast for US locations."
+    }
+
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",

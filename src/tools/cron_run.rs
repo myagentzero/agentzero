@@ -28,6 +28,10 @@ impl Tool for CronRunTool {
         "Force-run a cron job immediately and record run history"
     }
 
+    fn prompt_hint(&self) -> Option<&str> {
+        Some("Force-run a cron job immediately and record a run history entry.")
+    }
+
     fn parameters_schema(&self) -> serde_json::Value {
         json!({
             "type": "object",

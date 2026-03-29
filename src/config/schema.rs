@@ -318,6 +318,10 @@ pub struct Config {
     #[serde(default)]
     pub web_search: WebSearchConfig,
 
+    /// Interactive user prompting tool configuration (`[ask_user]`).
+    #[serde(default)]
+    pub ask_user: AskUserConfig,
+
     /// Proxy configuration for outbound HTTP/HTTPS/SOCKS5 traffic (`[proxy]`).
     #[serde(default)]
     pub proxy: ProxyConfig,
@@ -2326,6 +2330,37 @@ impl Default for WebSearchConfig {
             searxng_instance_url: None,
             max_results: default_web_search_max_results(),
             timeout_secs: default_web_search_timeout_secs(),
+        }
+    }
+}
+
+// ── Ask User ───────────────────────────────────────────────────
+
+/// Interactive user prompting tool configuration (`[ask_user]` section).
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct AskUserConfig {
+    /// Enable the `ask_user` tool for interactive prompts
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Default timeout in seconds when waiting for a user response
+    #[serde(default = "default_ask_user_timeout_secs")]
+    pub default_timeout_secs: u64,
+    /// Preferred channel when none is specified (e.g. "slack", "telegram").
+    /// When empty, uses the first available channel.
+    #[serde(default)]
+    pub default_channel: Option<String>,
+}
+
+fn default_ask_user_timeout_secs() -> u64 {
+    300
+}
+
+impl Default for AskUserConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            default_timeout_secs: default_ask_user_timeout_secs(),
+            default_channel: None,
         }
     }
 }
@@ -4732,6 +4767,9 @@ pub struct AckReactionChannelsConfig {
     /// Discord ACK reaction policy.
     #[serde(default)]
     pub discord: Option<AckReactionConfig>,
+    /// Slack ACK reaction policy.
+    #[serde(default)]
+    pub slack: Option<AckReactionConfig>,
 }
 
 fn resolve_group_reply_mode(
@@ -5983,6 +6021,7 @@ impl Default for Config {
             model_support_vision: None,
             wasm: WasmConfig::default(),
             notion: NotionConfig::default(),
+            ask_user: AskUserConfig::default(),
         }
     }
 }
@@ -6446,6 +6485,79 @@ fn encrypt_map_secrets(
     Ok(())
 }
 
+/// Returns `true` if any known secret field in the config contains a non-empty,
+/// non-encrypted plaintext value.  Called **before** the decrypt pass so we can
+/// detect secrets that were hand-edited into the TOML file and auto-encrypt them.
+fn has_plaintext_secrets(config: &Config) -> bool {
+    use crate::security::SecretStore;
+
+    let is_plain = |s: &str| !s.is_empty() && !SecretStore::is_encrypted(s);
+    let is_plain_opt = |s: &Option<String>| s.as_deref().is_some_and(is_plain);
+
+    is_plain_opt(&config.api_key)
+        || config
+            .model_providers
+            .values()
+            .any(|p| is_plain_opt(&p.api_key))
+        || is_plain_opt(&config.transcription.api_key)
+        || is_plain_opt(&config.composio.api_key)
+        || is_plain_opt(&config.proxy.http_proxy)
+        || is_plain_opt(&config.proxy.https_proxy)
+        || is_plain_opt(&config.proxy.all_proxy)
+        || is_plain_opt(&config.browser.computer_use.api_key)
+        || is_plain_opt(&config.web_search.brave_api_key)
+        || is_plain_opt(&config.storage.provider.config.db_url)
+        || config.reliability.api_keys.iter().any(|s| is_plain(s))
+        || config
+            .reliability
+            .fallback_api_keys
+            .values()
+            .any(|s| is_plain(s))
+        || config.gateway.paired_tokens.iter().any(|s| is_plain(s))
+        || config
+            .agents
+            .values()
+            .any(|a| is_plain_opt(&a.api_key))
+        || has_plaintext_channel_secrets(&config.channels_config)
+        || is_plain(&config.notion.api_key)
+}
+
+fn has_plaintext_channel_secrets(channels: &ChannelsConfig) -> bool {
+    use crate::security::SecretStore;
+
+    let is_plain = |s: &str| !s.is_empty() && !SecretStore::is_encrypted(s);
+    let is_plain_opt = |s: &Option<String>| s.as_deref().is_some_and(is_plain);
+
+    channels
+        .telegram
+        .as_ref()
+        .is_some_and(|t| is_plain(&t.bot_token))
+        || channels
+            .discord
+            .as_ref()
+            .is_some_and(|d| is_plain(&d.bot_token))
+        || channels.slack.as_ref().is_some_and(|s| {
+            is_plain(&s.bot_token) || is_plain_opt(&s.app_token)
+        })
+        || channels
+            .webhook
+            .as_ref()
+            .is_some_and(|w| is_plain_opt(&w.secret))
+        || channels.whatsapp.as_ref().is_some_and(|w| {
+            is_plain_opt(&w.access_token)
+                || is_plain_opt(&w.app_secret)
+                || is_plain_opt(&w.verify_token)
+        })
+        || channels.github.as_ref().is_some_and(|g| {
+            is_plain(&g.access_token) || is_plain_opt(&g.webhook_secret)
+        })
+        || channels.irc.as_ref().is_some_and(|i| {
+            is_plain_opt(&i.server_password)
+                || is_plain_opt(&i.nickserv_password)
+                || is_plain_opt(&i.sasl_password)
+        })
+}
+
 fn decrypt_channel_secrets(
     store: &crate::security::SecretStore,
     channels: &mut ChannelsConfig,
@@ -6794,6 +6906,8 @@ impl Config {
             config.config_path = config_path.clone();
             config.workspace_dir = workspace_dir;
             let store = crate::security::SecretStore::new(&zeroclaw_dir, config.secrets.encrypt);
+            let needs_encrypt =
+                config.secrets.encrypt && has_plaintext_secrets(&config);
             decrypt_optional_secret(&store, &mut config.api_key, "config.api_key")?;
             for (profile_name, profile) in config.model_providers.iter_mut() {
                 let secret_path = format!("config.model_providers.{profile_name}.api_key");
@@ -6866,6 +6980,13 @@ impl Config {
             // Notion API key (top-level, not in ChannelsConfig)
             if !config.notion.api_key.is_empty() {
                 decrypt_secret(&store, &mut config.notion.api_key, "config.notion.api_key")?;
+            }
+
+            // If any secrets were stored as plaintext, re-save the config to
+            // encrypt them so they don't remain in the clear on disk.
+            if needs_encrypt {
+                tracing::info!("Encrypting plaintext secrets found in config file");
+                config.save().await?;
             }
 
             config.apply_env_overrides();
@@ -9339,6 +9460,7 @@ default_temperature = 0.7
             model_support_vision: None,
             wasm: WasmConfig::default(),
             notion: NotionConfig::default(),
+            ask_user: AskUserConfig::default(),
         };
 
         let toml_str = toml::to_string_pretty(&config).unwrap();
@@ -9689,6 +9811,7 @@ denied_tools = ["shell"]
             model_support_vision: None,
             wasm: WasmConfig::default(),
             notion: NotionConfig::default(),
+            ask_user: AskUserConfig::default(),
         };
 
         config.save().await.unwrap();
@@ -10161,6 +10284,7 @@ denied_tools = ["shell"]
                     }],
                 }),
                 discord: None,
+                slack: None,
             },
             ..ChannelsConfig::default()
         };

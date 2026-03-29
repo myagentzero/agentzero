@@ -28,6 +28,14 @@ impl Tool for MemoryForgetTool {
         "Remove a memory by key. Use to delete outdated facts or sensitive data. Returns whether the memory was found and removed."
     }
 
+    fn prompt_hint(&self) -> Option<&str> {
+        Some("Delete a memory entry. Use when: memory is incorrect/stale or explicitly requested for removal. Don't use when: impact is uncertain.")
+    }
+
+    fn prompt_hint_compact(&self) -> &str {
+        "Delete a memory entry."
+    }
+
     fn parameters_schema(&self) -> serde_json::Value {
         json!({
             "type": "object",

@@ -934,6 +934,14 @@ impl Tool for BrowserTool {
         )
     }
 
+    fn prompt_hint(&self) -> Option<&str> {
+        Some("Automate browser actions (open/click/type/scroll/screenshot) with backend-aware safety checks.")
+    }
+
+    fn prompt_hint_compact(&self) -> &str {
+        "Automate browser interactions."
+    }
+
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",

@@ -51,6 +51,14 @@ impl Tool for GpioWriteTool {
         "Set a GPIO pin HIGH (1) or LOW (0) on a connected hardware device"
     }
 
+    fn prompt_hint(&self) -> Option<&str> {
+        Some("Set GPIO pin high (1) or low (0) on connected hardware. Use when: turning LED on/off, controlling actuators.")
+    }
+
+    fn prompt_hint_compact(&self) -> &str {
+        "Set GPIO pin high or low on connected hardware."
+    }
+
     fn parameters_schema(&self) -> serde_json::Value {
         json!({
             "type": "object",
@@ -176,6 +184,14 @@ impl Tool for GpioReadTool {
 
     fn description(&self) -> &str {
         "Read the current HIGH/LOW state of a GPIO pin on a connected device"
+    }
+
+    fn prompt_hint(&self) -> Option<&str> {
+        Some("Read GPIO pin value (0 or 1) on connected hardware (STM32, Arduino). Use when: checking sensor/button state, LED status.")
+    }
+
+    fn prompt_hint_compact(&self) -> &str {
+        "Read GPIO pin value on connected hardware."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {

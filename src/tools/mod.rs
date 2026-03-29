@@ -18,6 +18,7 @@
 pub mod agent_load_tracker;
 pub mod agent_selection;
 pub mod agents_ipc;
+pub mod ask_user;
 pub mod auth_profile;
 pub mod bg_run;
 pub mod browser;
@@ -64,7 +65,6 @@ pub mod pipeline;
 pub mod pptx_read;
 pub mod provider_status;
 pub mod proxy_config;
-pub mod quota_tools;
 pub mod reaction;
 pub mod read_skill;
 pub mod schedule;
@@ -88,6 +88,7 @@ pub mod web_search_tool;
 pub mod xlsx_read;
 
 pub use agent_load_tracker::AgentLoadTracker;
+pub use ask_user::AskUserTool;
 #[allow(unused_imports)]
 pub use bg_run::{
     BgJob, BgJobStatus, BgJobStore, BgRunTool, BgStatusTool, format_bg_result_for_injection,
@@ -154,7 +155,6 @@ pub use web_search_tool::WebSearchTool;
 pub use xlsx_read::XlsxReadTool;
 
 pub use auth_profile::ManageAuthProfileTool;
-pub use quota_tools::{CheckProviderQuotaTool, EstimateQuotaCostTool, SwitchProviderTool};
 
 use crate::config::{Config, DelegateAgentConfig};
 use crate::memory::Memory;
@@ -442,13 +442,18 @@ pub fn all_tools_with_runtime(
         Arc::new(ProxyConfigTool::new(config.clone(), security.clone())),
         Arc::new(WebAccessConfigTool::new(config.clone(), security.clone())),
         Arc::new(ManageAuthProfileTool::new(config.clone())),
-        Arc::new(CheckProviderQuotaTool::new(config.clone())),
-        Arc::new(SwitchProviderTool::new(config.clone())),
-        Arc::new(EstimateQuotaCostTool),
         Arc::new(CalculatorTool::new()),
         Arc::new(WeatherTool::new()),
         Arc::new(ReactionTool::new(security.clone())),
     ];
+
+    // Interactive ask_user tool — conditionally registered.
+    if root_config.ask_user.enabled {
+        tool_arcs.push(Arc::new(AskUserTool::new(
+            security.clone(),
+            root_config.ask_user.clone(),
+        )));
+    }
 
     // LiteLLM proxy status tool — only when using a custom provider
     if root_config

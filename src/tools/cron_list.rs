@@ -25,6 +25,10 @@ impl Tool for CronListTool {
         "List all scheduled cron jobs"
     }
 
+    fn prompt_hint(&self) -> Option<&str> {
+        Some("List all cron jobs with schedule, status, and metadata.")
+    }
+
     fn parameters_schema(&self) -> serde_json::Value {
         json!({
             "type": "object",

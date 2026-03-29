@@ -8,6 +8,7 @@ const routeTitles: Record<string, string> = {
   '/': 'nav.dashboard',
   '/agent': 'nav.agent',
   '/tools': 'nav.tools',
+  '/skills': 'nav.skills',
   '/cron': 'nav.cron',
   '/integrations': 'nav.integrations',
   '/memory': 'nav.memory',

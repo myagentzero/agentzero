@@ -35,6 +35,14 @@ impl Tool for MemoryObserveTool {
         "Store an observation entry in observation memory for long-horizon context continuity."
     }
 
+    fn prompt_hint(&self) -> Option<&str> {
+        Some("Store observation memory. Use when: capturing patterns/signals that should remain searchable over long horizons.")
+    }
+
+    fn prompt_hint_compact(&self) -> &str {
+        "Store observation memory."
+    }
+
     fn parameters_schema(&self) -> serde_json::Value {
         json!({
             "type": "object",

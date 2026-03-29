@@ -384,6 +384,14 @@ impl Tool for WebSearchTool {
         "Search the web for information. Returns relevant search results with titles, URLs, and descriptions. Use this to find current information, news, or research topics."
     }
 
+    fn prompt_hint(&self) -> Option<&str> {
+        Some("Search the web for information. Use when: current events, recent data, or external knowledge is needed. Don't use when: answer is in project files or memory.")
+    }
+
+    fn prompt_hint_compact(&self) -> &str {
+        "Search the web for information."
+    }
+
     fn parameters_schema(&self) -> serde_json::Value {
         json!({
             "type": "object",

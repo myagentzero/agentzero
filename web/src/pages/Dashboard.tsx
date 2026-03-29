@@ -181,6 +181,7 @@ export default function Dashboard() {
             <p className="mt-2 max-w-2xl text-sm text-[#b3cbf8] md:text-base">
               Real-time telemetry, cost pulse, and operations status in a single collapsible surface.
             </p>
+            <p className="mt-2 text-xs text-[#6e94d4]">v{status.version}</p>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">

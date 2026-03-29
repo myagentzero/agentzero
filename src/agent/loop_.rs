@@ -120,14 +120,6 @@ fn filter_primary_agent_tools_or_fail(
     Ok(filtered_tools)
 }
 
-fn retain_visible_tool_descriptions<'a>(
-    tool_descs: &mut Vec<(&'a str, &'a str)>,
-    tools_registry: &[Box<dyn Tool>],
-) {
-    let visible_tools: HashSet<&str> = tools_registry.iter().map(|tool| tool.name()).collect();
-    tool_descs.retain(|(name, _)| visible_tools.contains(*name));
-}
-
 fn should_treat_provider_as_vision_capable(provider_name: &str, provider: &dyn Provider) -> bool {
     if provider.supports_vision() {
         return true;
@@ -784,6 +776,35 @@ fn maybe_inject_cron_add_delivery(
         args_obj.insert(
             "model".to_string(),
             serde_json::Value::String(active_model.to_string()),
+        );
+    }
+}
+
+/// Auto-inject the `recipient` field into `ask_user` tool calls so the
+/// question is routed to the conversation that triggered the agent.
+fn maybe_inject_ask_user_recipient(
+    tool_name: &str,
+    tool_args: &mut serde_json::Value,
+    reply_target: Option<&str>,
+) {
+    if tool_name != "ask_user" {
+        return;
+    }
+    let Some(reply_target) = reply_target.map(str::trim).filter(|v| !v.is_empty()) else {
+        return;
+    };
+    let Some(args_obj) = tool_args.as_object_mut() else {
+        return;
+    };
+    // Only inject if the LLM didn't explicitly provide a recipient
+    if args_obj
+        .get("recipient")
+        .and_then(serde_json::Value::as_str)
+        .is_none_or(|v| v.trim().is_empty())
+    {
+        args_obj.insert(
+            "recipient".to_string(),
+            serde_json::Value::String(reply_target.to_string()),
         );
     }
 }
@@ -2072,6 +2093,12 @@ pub async fn run_tool_call_loop(
                 active_model.as_str(),
             );
 
+            maybe_inject_ask_user_recipient(
+                &tool_name,
+                &mut tool_args,
+                channel_reply_target.as_deref(),
+            );
+
             if excluded_tools.iter().any(|ex| ex == &tool_name) {
                 let blocked = format!("Tool '{tool_name}' is not available in this channel.");
                 runtime_trace::record_event(
@@ -2770,136 +2797,11 @@ pub async fn run(
 
     // ── Build system prompt from workspace MD files (OpenClaw framework) ──
     let skills = crate::skills::load_skills_with_config(&config.workspace_dir, &config);
-    let mut tool_descs: Vec<(&str, &str)> = vec![
-        (
-            "shell",
-            "Execute terminal commands. Use when: running local checks, build/test commands, diagnostics. Don't use when: a safer dedicated tool exists, or command is destructive without approval.",
-        ),
-        (
-            "file_read",
-            "Read file contents. Use when: inspecting project files, configs, logs. Don't use when: a targeted search is enough.",
-        ),
-        (
-            "file_write",
-            "Write file contents. Use when: applying focused edits, scaffolding files, updating docs/code. Don't use when: side effects are unclear or file ownership is uncertain.",
-        ),
-        (
-            "memory_store",
-            "Save to memory. Use when: preserving durable preferences, decisions, key context. Don't use when: information is transient/noisy/sensitive without need.",
-        ),
-        (
-            "memory_observe",
-            "Store observation memory. Use when: capturing patterns/signals that should remain searchable over long horizons.",
-        ),
-        (
-            "memory_recall",
-            "Search memory. Use when: retrieving prior decisions, user preferences, historical context. Don't use when: answer is already in current context.",
-        ),
-        (
-            "memory_forget",
-            "Delete a memory entry. Use when: memory is incorrect/stale or explicitly requested for removal. Don't use when: impact is uncertain.",
-        ),
-    ];
-    if matches!(
-        config.skills.prompt_injection_mode,
-        crate::config::SkillsPromptInjectionMode::Compact
-    ) {
-        tool_descs.push((
-            "read_skill",
-            "Load the full source for an available skill by name. Use when: compact mode only shows a summary and you need the complete skill instructions.",
-        ));
-    }
-    tool_descs.push((
-        "cron_add",
-        "Create a cron job. Supports schedule kinds: cron, at, every; and job types: shell or agent.",
-    ));
-    tool_descs.push((
-        "cron_list",
-        "List all cron jobs with schedule, status, and metadata.",
-    ));
-    tool_descs.push(("cron_remove", "Remove a cron job by job_id."));
-    tool_descs.push((
-        "cron_update",
-        "Patch a cron job (schedule, enabled, command/prompt, model, delivery, session_target).",
-    ));
-    tool_descs.push((
-        "cron_run",
-        "Force-run a cron job immediately and record a run history entry.",
-    ));
-    tool_descs.push(("cron_runs", "Show recent run history for a cron job."));
-    tool_descs.push((
-        "screenshot",
-        "Capture a screenshot of the current screen. Returns file path and base64-encoded PNG. Use when: visual verification, UI inspection, debugging displays.",
-    ));
-    tool_descs.push((
-        "image_info",
-        "Read image file metadata (format, dimensions, size) and optionally base64-encode it. Use when: inspecting images, preparing visual data for analysis.",
-    ));
-    if config.browser.enabled {
-        tool_descs.push((
-            "browser",
-            "Automate browser actions (open/click/type/scroll/screenshot) with backend-aware safety checks.",
-        ));
-    }
-    if config.composio.enabled {
-        tool_descs.push((
-            "composio",
-            "Execute actions on 1000+ apps via Composio (Gmail, Notion, GitHub, Slack, etc.). Use action='list' to discover, 'execute' to run (optionally with connected_account_id), 'connect' to OAuth.",
-        ));
-    }
-    tool_descs.push((
-        "schedule",
-        "Manage scheduled tasks (create/list/get/cancel/pause/resume). Supports recurring cron and one-shot delays.",
-    ));
-    tool_descs.push((
-        "model_routing_config",
-        "Configure default model, scenario routing, and delegate agents. Use for natural-language requests like: 'set conversation to kimi and coding to gpt-5.3-codex'.",
-    ));
-    tool_descs.push((
-        "web_search_config",
-        "Configure web search providers/keys/fallbacks at runtime.",
-    ));
-    tool_descs.push((
-        "web_access_config",
-        "Configure shared URL access policy (first-visit approval, allowlist/blocklist, approved domains).",
-    ));
-    if !config.agents.is_empty() {
-        tool_descs.push((
-            "delegate",
-            "Delegate a sub-task to a specialized agent. Use when: task needs different model/capability, or to parallelize work.",
-        ));
-    }
-    if config.peripherals.enabled && !config.peripherals.boards.is_empty() {
-        tool_descs.push((
-            "gpio_read",
-            "Read GPIO pin value (0 or 1) on connected hardware (STM32, Arduino). Use when: checking sensor/button state, LED status.",
-        ));
-        tool_descs.push((
-            "gpio_write",
-            "Set GPIO pin high (1) or low (0) on connected hardware. Use when: turning LED on/off, controlling actuators.",
-        ));
-        tool_descs.push((
-            "arduino_upload",
-            "Upload agent-generated Arduino sketch. Use when: user asks for 'make a heart', 'blink pattern', or custom LED behavior on Arduino. You write the full .ino code; ZeroClaw compiles and uploads it. Pin 13 = built-in LED on Uno.",
-        ));
-        tool_descs.push((
-            "hardware_memory_map",
-            "Return flash and RAM address ranges for connected hardware. Use when: user asks for 'upper and lower memory addresses', 'memory map', or 'readable addresses'.",
-        ));
-        tool_descs.push((
-            "hardware_board_info",
-            "Return full board info (chip, architecture, memory map) for connected hardware. Use when: user asks for 'board info', 'what board do I have', 'connected hardware', 'chip info', or 'what hardware'.",
-        ));
-        tool_descs.push((
-            "hardware_memory_read",
-            "Read actual memory/register values from Nucleo via USB. Use when: user asks to 'read register values', 'read memory', 'dump lower memory 0-126', 'give address and value'. Params: address (hex, default 0x20000000), length (bytes, default 128).",
-        ));
-        tool_descs.push((
-            "hardware_capabilities",
-            "Query connected hardware for reported GPIO pins and LED pin. Use when: user asks what pins are available.",
-        ));
-    }
-    retain_visible_tool_descriptions(&mut tool_descs, &tools_registry);
+    // Build tool descriptions from the registry (each tool provides its own prompt_hint).
+    let tool_descs: Vec<(&str, &str)> = tools_registry
+        .iter()
+        .filter_map(|t| t.prompt_hint().map(|h| (t.name(), h)))
+        .collect();
     let bootstrap_max_chars = if config.agent.compact_context {
         Some(6000)
     } else {
@@ -3020,22 +2922,50 @@ pub async fn run(
         #[cfg(feature = "skill-creation")]
         if config.skills.skill_creation.enabled {
             let tool_calls = crate::skills::creator::extract_tool_calls_from_history(&history);
+            tracing::debug!(
+                tool_call_count = tool_calls.len(),
+                "Evaluating auto skill creation from execution history"
+            );
+
             if tool_calls.len() >= 2 {
                 let creator = crate::skills::creator::SkillCreator::new(
                     config.workspace_dir.clone(),
                     config.skills.skill_creation.clone(),
                 );
+                tracing::debug!(
+                    tool_call_count = tool_calls.len(),
+                    "Attempting auto skill creation"
+                );
+
                 match creator.create_from_execution(&msg, &tool_calls, None).await {
                     Ok(Some(slug)) => {
-                        tracing::info!(slug, "Auto-created skill from execution");
+                        tracing::info!(
+                            slug,
+                            tool_call_count = tool_calls.len(),
+                            "Auto-created skill from execution"
+                        );
                     }
                     Ok(None) => {
-                        tracing::debug!("Skill creation skipped (duplicate or disabled)");
+                        tracing::debug!(
+                            tool_call_count = tool_calls.len(),
+                            "Skill creation skipped by creator"
+                        );
                     }
-                    Err(e) => tracing::warn!("Skill creation failed: {e}"),
+                    Err(e) => tracing::warn!(
+                        tool_call_count = tool_calls.len(),
+                        "Skill creation failed: {e}"
+                    ),
                 }
+            } else {
+                tracing::debug!(
+                    tool_call_count = tool_calls.len(),
+                    "Skill creation skipped: requires at least 2 tool calls"
+                );
             }
+        } else {
+            tracing::debug!("Skill creation disabled by config");
         }
+
         final_output = response.clone();
         if config.memory.auto_save && response.chars().count() >= AUTOSAVE_MIN_MESSAGE_CHARS {
             let assistant_key = autosave_memory_key("assistant_resp");
@@ -3498,72 +3428,21 @@ pub async fn process_message_with_session(
         .collect();
 
     let skills = crate::skills::load_skills_with_config(&config.workspace_dir, &config);
-    let mut tool_descs: Vec<(&str, &str)> = vec![
-        ("shell", "Execute terminal commands."),
-        ("file_read", "Read file contents."),
-        ("file_write", "Write file contents."),
-        ("memory_store", "Save to memory."),
-        ("memory_observe", "Store observation memory."),
-        ("memory_recall", "Search memory."),
-        ("memory_forget", "Delete a memory entry."),
-        (
-            "model_routing_config",
-            "Configure default model, scenario routing, and delegate agents.",
-        ),
-        (
-            "web_search_config",
-            "Configure web search providers/keys/fallbacks.",
-        ),
-        (
-            "web_access_config",
-            "Configure shared URL access policy for network tools.",
-        ),
-        ("screenshot", "Capture a screenshot."),
-        ("image_info", "Read image metadata."),
-    ];
-    if matches!(
-        config.skills.prompt_injection_mode,
-        crate::config::SkillsPromptInjectionMode::Compact
-    ) {
-        tool_descs.push((
-            "read_skill",
-            "Load the full source for an available skill by name.",
-        ));
-    }
-    if config.browser.enabled {
-        tool_descs.push(("browser", "Automate browser interactions."));
-    }
-    if config.composio.enabled {
-        tool_descs.push(("composio", "Execute actions on 1000+ apps via Composio."));
-    }
-    if config.peripherals.enabled && !config.peripherals.boards.is_empty() {
-        tool_descs.push(("gpio_read", "Read GPIO pin value on connected hardware."));
-        tool_descs.push((
-            "gpio_write",
-            "Set GPIO pin high or low on connected hardware.",
-        ));
-        tool_descs.push((
-            "arduino_upload",
-            "Upload Arduino sketch. Use for 'make a heart', custom patterns. You write full .ino code; ZeroClaw uploads it.",
-        ));
-        tool_descs.push((
-            "hardware_memory_map",
-            "Return flash and RAM address ranges. Use when user asks for memory addresses or memory map.",
-        ));
-        tool_descs.push((
-            "hardware_board_info",
-            "Return full board info (chip, architecture, memory map). Use when user asks for board info, what board, connected hardware, or chip info.",
-        ));
-        tool_descs.push((
-            "hardware_memory_read",
-            "Read actual memory/register values from Nucleo. Use when user asks to read registers, read memory, dump lower memory 0-126, or give address and value.",
-        ));
-        tool_descs.push((
-            "hardware_capabilities",
-            "Query connected hardware for reported GPIO pins and LED pin. Use when user asks what pins are available.",
-        ));
-    }
-    retain_visible_tool_descriptions(&mut tool_descs, &tools_registry);
+    // Build compact tool descriptions from the registry.
+    let tool_descs: Vec<(&str, &str)> = tools_registry
+        .iter()
+        .filter_map(|t| {
+            let hint = t.prompt_hint_compact();
+            // Only include tools that have a non-default compact hint
+            // (i.e. tools that define prompt_hint, since prompt_hint_compact
+            // defaults to description() which is always present).
+            if t.prompt_hint().is_some() {
+                Some((t.name(), hint))
+            } else {
+                None
+            }
+        })
+        .collect();
     let bootstrap_max_chars = if config.agent.compact_context {
         Some(6000)
     } else {
@@ -3789,6 +3668,40 @@ mod tests {
         );
 
         assert_eq!(args["model"], "gpt-4o-mini");
+    }
+
+    #[test]
+    fn maybe_inject_ask_user_recipient_populates_from_reply_target() {
+        let mut args = serde_json::json!({ "question": "Proceed?" });
+        maybe_inject_ask_user_recipient("ask_user", &mut args, Some("C0123456789"));
+        assert_eq!(args["recipient"], "C0123456789");
+    }
+
+    #[test]
+    fn maybe_inject_ask_user_recipient_does_not_override_explicit() {
+        let mut args = serde_json::json!({
+            "question": "Proceed?",
+            "recipient": "C_EXPLICIT"
+        });
+        maybe_inject_ask_user_recipient("ask_user", &mut args, Some("C_FROM_CONTEXT"));
+        assert_eq!(args["recipient"], "C_EXPLICIT");
+    }
+
+    #[test]
+    fn maybe_inject_ask_user_recipient_skips_other_tools() {
+        let mut args = serde_json::json!({ "command": "ls" });
+        maybe_inject_ask_user_recipient("shell", &mut args, Some("C0123456789"));
+        assert!(args.get("recipient").is_none());
+    }
+
+    #[test]
+    fn maybe_inject_ask_user_recipient_skips_empty_reply_target() {
+        let mut args = serde_json::json!({ "question": "Proceed?" });
+        maybe_inject_ask_user_recipient("ask_user", &mut args, None);
+        assert!(args.get("recipient").is_none());
+
+        maybe_inject_ask_user_recipient("ask_user", &mut args, Some("  "));
+        assert!(args.get("recipient").is_none());
     }
 
     #[test]

@@ -87,6 +87,7 @@ pub async fn handle_api_status(
     }
 
     let body = serde_json::json!({
+        "version": env!("ZEROCLAW_BUILD_VERSION"),
         "provider": format_provider_display(&config.default_provider),
         "model": state.model,
         "temperature": state.temperature,
@@ -240,6 +241,41 @@ pub async fn handle_api_tools(
         .collect();
 
     Json(serde_json::json!({"tools": tools})).into_response()
+}
+
+/// GET /api/skills — list installed skills
+pub async fn handle_api_skills(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    if let Err(e) = require_auth(&state, &headers) {
+        return e.into_response();
+    }
+
+    let config_guard = state.config.lock();
+    let skills =
+        crate::skills::load_skills_with_config(&config_guard.workspace_dir, &config_guard);
+
+    let skills_json: Vec<serde_json::Value> = skills
+        .into_iter()
+        .map(|s| {
+            serde_json::json!({
+                "name": s.name,
+                "description": s.description,
+                "version": s.version,
+                "author": s.author,
+                "tags": s.tags,
+                "tools": s.tools.iter().map(|t| serde_json::json!({
+                    "name": t.name,
+                    "description": t.description,
+                    "kind": t.kind,
+                })).collect::<Vec<_>>(),
+                "location": s.location.map(|p| p.display().to_string()),
+            })
+        })
+        .collect();
+
+    Json(serde_json::json!({"skills": skills_json})).into_response()
 }
 
 /// GET /api/cron — list cron jobs
@@ -470,6 +506,21 @@ pub async fn handle_api_integrations_credentials_put(
             }
             config.default_provider = Some("ollama".to_string());
         }
+        "notion" => {
+            if let Some(api_key) = fields.get("api_key").and_then(|v| v.as_str()) {
+                if !api_key.is_empty() && api_key != MASKED_SECRET {
+                    config.notion.api_key = api_key.to_string();
+                }
+            }
+            if let Some(database_id) = fields.get("database_id").and_then(|v| v.as_str()) {
+                if !database_id.is_empty() {
+                    config.notion.database_id = database_id.to_string();
+                }
+            }
+            if !config.notion.api_key.is_empty() && !config.notion.database_id.is_empty() {
+                config.notion.enabled = true;
+            }
+        }
         _ => {
             // Channel integrations - not implemented for credentials update via this endpoint
             return (
@@ -536,6 +587,7 @@ fn provider_key_from_integration_id(id: &str) -> Option<&'static str> {
         "volcengine-ark" => Some("ark"),
         "siliconflow" => Some("siliconflow"),
         "ollama" => Some("ollama"),
+        "notion" => Some("notion"),
         _ => None,
     }
 }
@@ -690,6 +742,32 @@ fn integration_settings_fields(
                 }),
             ];
             (has_key, fields)
+        }
+        "Notion" => {
+            let has_key = !config.notion.api_key.is_empty();
+            let has_db = !config.notion.database_id.is_empty();
+            let configured = has_key && has_db;
+            let fields = vec![
+                serde_json::json!({
+                    "key": "api_key",
+                    "label": "API Key",
+                    "required": true,
+                    "has_value": has_key,
+                    "input_type": "secret",
+                    "options": [],
+                    "masked_value": if has_key { Some(MASKED_SECRET) } else { None::<&str> },
+                }),
+                serde_json::json!({
+                    "key": "database_id",
+                    "label": "Database ID",
+                    "required": true,
+                    "has_value": has_db,
+                    "input_type": "text",
+                    "options": [],
+                    "current_value": if has_db { &config.notion.database_id } else { "" },
+                }),
+            ];
+            (configured, fields)
         }
         _ => {
             // Default: no configurable fields
@@ -1002,11 +1080,33 @@ fn restore_vec_secrets(values: &mut [String], current: &[String]) {
     }
 }
 
+fn mask_map_secrets(values: &mut std::collections::HashMap<String, String>) {
+    for value in values.values_mut() {
+        if !value.is_empty() {
+            *value = MASKED_SECRET.to_string();
+        }
+    }
+}
+
+fn restore_map_secrets(
+    values: &mut std::collections::HashMap<String, String>,
+    current: &std::collections::HashMap<String, String>,
+) {
+    for (key, value) in values.iter_mut() {
+        if is_masked_secret(value) {
+            if let Some(existing) = current.get(key) {
+                *value = existing.clone();
+            }
+        }
+    }
+}
+
 fn mask_sensitive_fields(config: &crate::config::Config) -> crate::config::Config {
     let mut masked = config.clone();
 
     mask_optional_secret(&mut masked.api_key);
     mask_vec_secrets(&mut masked.reliability.api_keys);
+    mask_map_secrets(&mut masked.reliability.fallback_api_keys);
     mask_optional_secret(&mut masked.composio.api_key);
     mask_optional_secret(&mut masked.proxy.http_proxy);
     mask_optional_secret(&mut masked.proxy.https_proxy);
@@ -1025,6 +1125,11 @@ fn mask_sensitive_fields(config: &crate::config::Config) -> crate::config::Confi
     for agent in masked.agents.values_mut() {
         mask_optional_secret(&mut agent.api_key);
     }
+    for provider in masked.model_providers.values_mut() {
+        mask_optional_secret(&mut provider.api_key);
+    }
+    mask_vec_secrets(&mut masked.gateway.paired_tokens);
+    mask_required_secret(&mut masked.notion.api_key);
 
     if let Some(telegram) = masked.channels_config.telegram.as_mut() {
         mask_required_secret(&mut telegram.bot_token);
@@ -1068,6 +1173,10 @@ fn restore_masked_sensitive_fields(
         &mut incoming.reliability.api_keys,
         &current.reliability.api_keys,
     );
+    restore_map_secrets(
+        &mut incoming.reliability.fallback_api_keys,
+        &current.reliability.fallback_api_keys,
+    );
     restore_optional_secret(&mut incoming.composio.api_key, &current.composio.api_key);
     restore_optional_secret(&mut incoming.proxy.http_proxy, &current.proxy.http_proxy);
     restore_optional_secret(&mut incoming.proxy.https_proxy, &current.proxy.https_proxy);
@@ -1107,6 +1216,16 @@ fn restore_masked_sensitive_fields(
             restore_optional_secret(&mut agent.api_key, &current_agent.api_key);
         }
     }
+    for (name, provider) in &mut incoming.model_providers {
+        if let Some(current_provider) = current.model_providers.get(name) {
+            restore_optional_secret(&mut provider.api_key, &current_provider.api_key);
+        }
+    }
+    restore_vec_secrets(
+        &mut incoming.gateway.paired_tokens,
+        &current.gateway.paired_tokens,
+    );
+    restore_required_secret(&mut incoming.notion.api_key, &current.notion.api_key);
 
     if let (Some(incoming_ch), Some(current_ch)) = (
         incoming.channels_config.telegram.as_mut(),

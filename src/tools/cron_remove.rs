@@ -57,6 +57,10 @@ impl Tool for CronRemoveTool {
         "Remove a cron job by id"
     }
 
+    fn prompt_hint(&self) -> Option<&str> {
+        Some("Remove a cron job by job_id.")
+    }
+
     fn parameters_schema(&self) -> serde_json::Value {
         json!({
             "type": "object",

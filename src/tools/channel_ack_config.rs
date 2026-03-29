@@ -18,6 +18,7 @@ use std::sync::Arc;
 enum AckChannel {
     Telegram,
     Discord,
+    Slack,
 }
 
 impl AckChannel {
@@ -25,6 +26,7 @@ impl AckChannel {
         match self {
             Self::Telegram => "telegram",
             Self::Discord => "discord",
+            Self::Slack => "slack",
         }
     }
 
@@ -32,8 +34,9 @@ impl AckChannel {
         match raw.trim().to_ascii_lowercase().as_str() {
             "telegram" => Ok(Self::Telegram),
             "discord" => Ok(Self::Discord),
+            "slack" => Ok(Self::Slack),
             other => {
-                anyhow::bail!("Unsupported channel '{other}'. Use telegram|discord")
+                anyhow::bail!("Unsupported channel '{other}'. Use telegram|discord|slack")
             }
         }
     }
@@ -147,6 +150,7 @@ impl ChannelAckConfigTool {
         match channel {
             AckChannel::Telegram => vec!["⚡️", "👌", "👀", "🔥", "👍"],
             AckChannel::Discord => vec!["⚡️", "🦀", "🙌", "💪", "👌", "👀", "👣"],
+            AckChannel::Slack => vec!["⚡", "👀", "🔥", "👍", "🎉"],
         }
         .into_iter()
         .map(ToOwned::to_owned)
@@ -213,6 +217,7 @@ impl ChannelAckConfigTool {
         match channel {
             AckChannel::Telegram => channels.telegram.as_ref(),
             AckChannel::Discord => channels.discord.as_ref(),
+            AckChannel::Slack => channels.slack.as_ref(),
         }
     }
 
@@ -223,6 +228,7 @@ impl ChannelAckConfigTool {
         match channel {
             AckChannel::Telegram => &mut channels.telegram,
             AckChannel::Discord => &mut channels.discord,
+            AckChannel::Slack => &mut channels.slack,
         }
     }
 
@@ -245,6 +251,7 @@ impl ChannelAckConfigTool {
         json!({
             "telegram": Self::snapshot_one(channels.telegram.as_ref()),
             "discord": Self::snapshot_one(channels.discord.as_ref()),
+            "slack": Self::snapshot_one(channels.slack.as_ref()),
         })
     }
 
@@ -575,7 +582,7 @@ impl Tool for ChannelAckConfigTool {
     }
 
     fn description(&self) -> &str {
-        "Inspect and update configurable ACK emoji reaction policies for Telegram/Discord under [channels_config.ack_reaction]. Supports enabling/disabling reactions, setting emoji pools, and rule-based conditions."
+        "Inspect and update configurable ACK emoji reaction policies for Telegram/Discord/Slack under [channels_config.ack_reaction]. Supports enabling/disabling reactions, setting emoji pools, and rule-based conditions."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -589,7 +596,7 @@ impl Tool for ChannelAckConfigTool {
                 },
                 "channel": {
                     "type": "string",
-                    "enum": ["telegram", "discord"]
+                    "enum": ["telegram", "discord", "slack"]
                 },
                 "enabled": {"type": "boolean"},
                 "strategy": {"type": ["string", "null"], "enum": ["random", "first", null]},

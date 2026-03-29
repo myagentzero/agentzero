@@ -39,6 +39,10 @@ impl Tool for CronRunsTool {
         "List recent run history for a cron job"
     }
 
+    fn prompt_hint(&self) -> Option<&str> {
+        Some("Show recent run history for a cron job.")
+    }
+
     fn parameters_schema(&self) -> serde_json::Value {
         json!({
             "type": "object",

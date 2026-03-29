@@ -154,6 +154,14 @@ impl Tool for ImageInfoTool {
         "Read image file metadata (format, dimensions, size) and optionally return base64-encoded data."
     }
 
+    fn prompt_hint(&self) -> Option<&str> {
+        Some("Read image file metadata (format, dimensions, size) and optionally base64-encode it. Use when: inspecting images, preparing visual data for analysis.")
+    }
+
+    fn prompt_hint_compact(&self) -> &str {
+        "Read image metadata."
+    }
+
     fn parameters_schema(&self) -> serde_json::Value {
         json!({
             "type": "object",

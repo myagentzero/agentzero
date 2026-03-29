@@ -248,6 +248,10 @@ impl Tool for DelegateTool {
          `agent` may be omitted or set to `auto` when team auto-activation is enabled."
     }
 
+    fn prompt_hint(&self) -> Option<&str> {
+        Some("Delegate a sub-task to a specialized agent. Use when: task needs different model/capability, or to parallelize work.")
+    }
+
     fn parameters_schema(&self) -> serde_json::Value {
         let agent_names: Vec<&str> = self.agents.keys().map(|s: &String| s.as_str()).collect();
         json!({

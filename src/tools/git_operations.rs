@@ -624,6 +624,14 @@ impl Tool for GitOperationsTool {
         "Perform Git operations (status, diff, log, branch, commit, add, checkout, stash, push, pull). Prefer over shelling out to git. Works with github."
     }
 
+    fn prompt_hint(&self) -> Option<&str> {
+        Some("Perform Git operations (status, diff, log, branch, commit, etc.). Use when: version control tasks. Prefer over shelling out to git.")
+    }
+
+    fn prompt_hint_compact(&self) -> &str {
+        "Perform Git operations. Prefer over shelling out to git."
+    }
+
     fn parameters_schema(&self) -> serde_json::Value {
         json!({
             "type": "object",

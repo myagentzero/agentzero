@@ -33,6 +33,10 @@ impl Tool for ScheduleTool {
          and a delivery config like {\"mode\":\"announce\",\"channel\":\"discord\",\"to\":\"<channel_id>\"}."
     }
 
+    fn prompt_hint(&self) -> Option<&str> {
+        Some("Manage scheduled tasks (create/list/get/cancel/pause/resume). Supports recurring cron and one-shot delays.")
+    }
+
     fn parameters_schema(&self) -> serde_json::Value {
         json!({
             "type": "object",

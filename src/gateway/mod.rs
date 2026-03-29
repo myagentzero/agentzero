@@ -711,6 +711,7 @@ pub async fn run_gateway(
         )
         .route("/api/cost", get(api::handle_api_cost))
         .route("/api/cli-tools", get(api::handle_api_cli_tools))
+        .route("/api/skills", get(api::handle_api_skills))
         .route("/api/health", get(api::handle_api_health))
         .route("/api/node-control", post(handle_node_control))
         // ── SSE event stream ──

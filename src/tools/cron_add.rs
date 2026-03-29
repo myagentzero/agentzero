@@ -65,6 +65,14 @@ impl Tool for CronAddTool {
          This is the preferred tool for sending scheduled/delayed messages to users via channels."
     }
 
+    fn prompt_hint(&self) -> Option<&str> {
+        Some("Create a cron job. Supports schedule kinds: cron, at, every; and job types: shell or agent.")
+    }
+
+    fn prompt_hint_compact(&self) -> &str {
+        "Create a cron job."
+    }
+
     fn parameters_schema(&self) -> serde_json::Value {
         json!({
             "type": "object",

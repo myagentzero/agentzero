@@ -31,6 +31,7 @@ pub struct SlackChannel {
     workspace_dir: Option<PathBuf>,
     /// Maps channel_id -> thread_ts for active assistant threads (used for status indicators).
     active_assistant_thread: Mutex<HashMap<String, String>>,
+    ack_reaction: Option<crate::config::AckReactionConfig>,
 }
 
 const SLACK_HISTORY_MAX_RETRIES: u32 = 3;
@@ -108,6 +109,7 @@ fn unicode_emoji_to_slack_name(emoji: &str) -> &str {
 const SLACK_ATTACHMENT_RENDER_CONCURRENCY: usize = 3;
 const SLACK_POLL_ACTIVE_THREAD_MAX: usize = 50;
 const SLACK_POLL_THREAD_EXPIRE_SECS: u64 = 24 * 60 * 60;
+const SLACK_ACK_REACTIONS: &[&str] = &["⚡", "👀", "🔥", "👍", "🎉"];
 const SLACK_MEDIA_REDIRECT_MAX_HOPS: usize = 5;
 const SLACK_ALLOWED_MEDIA_HOST_SUFFIXES: &[&str] =
     &["slack.com", "slack-edge.com", "slack-files.com"];
@@ -138,6 +140,7 @@ impl SlackChannel {
             user_display_name_cache: Mutex::new(HashMap::new()),
             workspace_dir: None,
             active_assistant_thread: Mutex::new(HashMap::new()),
+            ack_reaction: None,
         }
     }
 
@@ -151,6 +154,58 @@ impl SlackChannel {
         self.group_reply_allowed_sender_ids =
             Self::normalize_group_reply_allowed_sender_ids(allowed_sender_ids);
         self
+    }
+
+    /// Configure ACK reaction policy for incoming messages.
+    pub fn with_ack_reaction(mut self, ack_reaction: Option<crate::config::AckReactionConfig>) -> Self {
+        self.ack_reaction = ack_reaction;
+        self
+    }
+
+    /// Fire-and-forget ACK reaction in a background task.
+    fn spawn_ack_reaction(&self, channel_id: &str, ts: &str, emoji: &str) {
+        let client = self.http_client();
+        let token = self.bot_token.clone();
+        let name = unicode_emoji_to_slack_name(emoji).to_string();
+        let ch = channel_id.to_string();
+        let timestamp = ts.to_string();
+        tokio::spawn(async move {
+            let body = serde_json::json!({
+                "channel": ch,
+                "timestamp": timestamp,
+                "name": name,
+            });
+            match client
+                .post("https://slack.com/api/reactions.add")
+                .bearer_auth(&token)
+                .json(&body)
+                .send()
+                .await
+            {
+                Ok(resp) => {
+                    if let Ok(text) = resp.text().await {
+                        let parsed: serde_json::Value =
+                            serde_json::from_str(&text).unwrap_or_default();
+                        if parsed.get("ok") == Some(&serde_json::Value::Bool(false)) {
+                            let err = parsed
+                                .get("error")
+                                .and_then(|e| e.as_str())
+                                .unwrap_or("unknown");
+                            if err != "already_reacted" {
+                                tracing::debug!(
+                                    "Slack: ACK reaction failed for {ch}/{timestamp}: {err}"
+                                );
+                            }
+                        }
+                    }
+                }
+                Err(err) => {
+                    tracing::debug!(
+                        "Slack: failed to add ACK reaction for {ch}/{timestamp}: {err}"
+                    );
+                }
+            }
+        });
     }
 
     /// Configure workspace directory used for persisting inbound Slack attachments.
@@ -2207,6 +2262,32 @@ impl SlackChannel {
                 };
 
                 last_ts_by_channel.insert(channel_id.clone(), ts.to_string());
+
+                // ACK reaction
+                {
+                    use crate::channels::ack_reaction::{
+                        AckReactionContext, AckReactionContextChatType, select_ack_reaction,
+                    };
+                    let ack_ctx = AckReactionContext {
+                        text: &normalized_text,
+                        sender_id: Some(user),
+                        chat_id: Some(&channel_id),
+                        chat_type: if is_group_message {
+                            AckReactionContextChatType::Group
+                        } else {
+                            AckReactionContextChatType::Direct
+                        },
+                        locale_hint: None,
+                    };
+                    if let Some(emoji) = select_ack_reaction(
+                        self.ack_reaction.as_ref(),
+                        SLACK_ACK_REACTIONS,
+                        &ack_ctx,
+                    ) {
+                        self.spawn_ack_reaction(&channel_id, ts, &emoji);
+                    }
+                }
+
                 let sender = self.resolve_sender_identity(user).await;
 
                 let channel_msg = ChannelMessage {
@@ -2907,6 +2988,32 @@ impl Channel for SlackChannel {
                         };
 
                         last_ts_by_channel.insert(channel_id.clone(), ts.to_string());
+
+                        // ACK reaction
+                        {
+                            use crate::channels::ack_reaction::{
+                                AckReactionContext, AckReactionContextChatType, select_ack_reaction,
+                            };
+                            let ack_ctx = AckReactionContext {
+                                text: &normalized_text,
+                                sender_id: Some(user),
+                                chat_id: Some(&channel_id),
+                                chat_type: if is_group_message {
+                                    AckReactionContextChatType::Group
+                                } else {
+                                    AckReactionContextChatType::Direct
+                                },
+                                locale_hint: None,
+                            };
+                            if let Some(emoji) = select_ack_reaction(
+                                self.ack_reaction.as_ref(),
+                                SLACK_ACK_REACTIONS,
+                                &ack_ctx,
+                            ) {
+                                self.spawn_ack_reaction(&channel_id, ts, &emoji);
+                            }
+                        }
+
                         let sender = self.resolve_sender_identity(user).await;
 
                         let channel_msg = ChannelMessage {

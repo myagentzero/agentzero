@@ -60,6 +60,14 @@ impl Tool for HardwareMemoryMapTool {
         "Return the memory map (flash and RAM address ranges) for connected hardware. Use when: user asks for 'upper and lower memory addresses', 'memory map', 'address space', or 'readable addresses'. Returns flash/RAM ranges from datasheets."
     }
 
+    fn prompt_hint(&self) -> Option<&str> {
+        Some("Return flash and RAM address ranges for connected hardware. Use when: user asks for 'upper and lower memory addresses', 'memory map', or 'readable addresses'.")
+    }
+
+    fn prompt_hint_compact(&self) -> &str {
+        "Return flash and RAM address ranges. Use when user asks for memory addresses or memory map."
+    }
+
     fn parameters_schema(&self) -> serde_json::Value {
         json!({
             "type": "object",

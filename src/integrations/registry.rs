@@ -446,6 +446,18 @@ pub fn all_integrations() -> Vec<IntegrationEntry> {
                 }
             },
         },
+        IntegrationEntry {
+            name: "Notion",
+            description: "Workspace & databases",
+            category: IntegrationCategory::Productivity,
+            status_fn: |c| {
+                if c.notion.enabled && !c.notion.api_key.is_empty() {
+                    IntegrationStatus::Active
+                } else {
+                    IntegrationStatus::Available
+                }
+            },
+        },
         // ── Tools & Automation ──────────────────────────────────
         IntegrationEntry {
             name: "Browser",

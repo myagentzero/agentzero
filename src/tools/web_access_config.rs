@@ -292,6 +292,14 @@ impl Tool for WebAccessConfigTool {
         "Inspect and update shared network URL access policy ([security.url_access]) including first-visit approval, global allowlist/blocklist, and approved domains."
     }
 
+    fn prompt_hint(&self) -> Option<&str> {
+        Some("Configure shared URL access policy (first-visit approval, allowlist/blocklist, approved domains).")
+    }
+
+    fn prompt_hint_compact(&self) -> &str {
+        "Configure shared URL access policy for network tools."
+    }
+
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",
