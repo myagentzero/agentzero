@@ -1,8 +1,8 @@
-use crate::config::schema::{IrcConfig, ProgressMode, SignalConfig, StreamMode, WhatsAppConfig};
+use crate::config::schema::IrcConfig;
 use crate::config::{
     AutonomyConfig, BrowserConfig, ChannelsConfig, ComposioConfig, Config, DiscordConfig,
     HeartbeatConfig, HttpRequestConfig, HttpRequestCredentialProfile, IdentityConfig, MemoryConfig,
-    ObservabilityConfig, RuntimeConfig, SecretsConfig, SlackConfig, StorageConfig, TelegramConfig,
+    ObservabilityConfig, RuntimeConfig, SecretsConfig, SlackConfig, StorageConfig,
     WebFetchConfig, WebSearchConfig, WebhookConfig,
 };
 use crate::hardware::{self, HardwareConfig};
@@ -4141,22 +4141,16 @@ fn setup_identity_backend() -> Result<IdentityConfig> {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ChannelMenuChoice {
-    Telegram,
     Discord,
     Slack,
-    Signal,
-    WhatsApp,
     Irc,
     Webhook,
     Done,
 }
 
 const CHANNEL_MENU_CHOICES: &[ChannelMenuChoice] = &[
-    ChannelMenuChoice::Telegram,
     ChannelMenuChoice::Discord,
     ChannelMenuChoice::Slack,
-    ChannelMenuChoice::Signal,
-    ChannelMenuChoice::WhatsApp,
     ChannelMenuChoice::Irc,
     ChannelMenuChoice::Webhook,
     ChannelMenuChoice::Done,
@@ -4179,14 +4173,6 @@ fn setup_channels() -> Result<ChannelsConfig> {
         let options: Vec<String> = menu_choices
             .iter()
             .map(|choice| match choice {
-                ChannelMenuChoice::Telegram => format!(
-                    "Telegram   {}",
-                    if config.telegram.is_some() {
-                        "✅ connected"
-                    } else {
-                        "— connect your bot"
-                    }
-                ),
                 ChannelMenuChoice::Discord => format!(
                     "Discord    {}",
                     if config.discord.is_some() {
@@ -4201,22 +4187,6 @@ fn setup_channels() -> Result<ChannelsConfig> {
                         "✅ connected"
                     } else {
                         "— connect your bot"
-                    }
-                ),
-                ChannelMenuChoice::Signal => format!(
-                    "Signal     {}",
-                    if config.signal.is_some() {
-                        "✅ connected"
-                    } else {
-                        "— signal-cli daemon bridge"
-                    }
-                ),
-                ChannelMenuChoice::WhatsApp => format!(
-                    "WhatsApp   {}",
-                    if config.whatsapp.is_some() {
-                        "✅ connected"
-                    } else {
-                        "— Business Cloud API"
                     }
                 ),
                 ChannelMenuChoice::Irc => format!(
@@ -4251,108 +4221,6 @@ fn setup_channels() -> Result<ChannelsConfig> {
             .unwrap_or(ChannelMenuChoice::Done);
 
         match choice {
-            ChannelMenuChoice::Telegram => {
-                // ── Telegram ──
-                println!();
-                println!(
-                    "  {} {}",
-                    style("Telegram Setup").white().bold(),
-                    style("— talk to ZeroClaw from Telegram").dim()
-                );
-                print_bullet("1. Open Telegram and message @BotFather");
-                print_bullet("2. Send /newbot and follow the prompts");
-                print_bullet("3. Copy the bot token and paste it below");
-                println!();
-
-                let token: String = Input::with_theme(wizard_theme())
-                    .with_prompt("  Bot token (from @BotFather)")
-                    .interact_text()?;
-
-                if token.trim().is_empty() {
-                    println!("  {} Skipped", style("→").dim());
-                    continue;
-                }
-
-                // Test connection (run entirely in separate thread — reqwest::blocking Response
-                // must be used and dropped there to avoid "Cannot drop a runtime" panic)
-                print!("  {} Testing connection... ", style("⏳").dim());
-                let token_clone = token.clone();
-                let thread_result = std::thread::spawn(move || {
-                    let client = reqwest::blocking::Client::new();
-                    let url = format!("https://api.telegram.org/bot{token_clone}/getMe");
-                    let resp = client.get(&url).send()?;
-                    let ok = resp.status().is_success();
-                    let data: serde_json::Value = resp.json().unwrap_or_default();
-                    let bot_name = data
-                        .get("result")
-                        .and_then(|r| r.get("username"))
-                        .and_then(serde_json::Value::as_str)
-                        .unwrap_or("unknown")
-                        .to_string();
-                    Ok::<_, reqwest::Error>((ok, bot_name))
-                })
-                .join();
-                match thread_result {
-                    Ok(Ok((true, bot_name))) => {
-                        println!(
-                            "\r  {} Connected as @{bot_name}        ",
-                            style("✅").green().bold()
-                        );
-                    }
-                    _ => {
-                        println!(
-                            "\r  {} Connection failed — check your token and try again",
-                            style("❌").red().bold()
-                        );
-                        continue;
-                    }
-                }
-
-                print_bullet(
-                    "Allowlist your own Telegram identity first (recommended for secure + fast setup).",
-                );
-                print_bullet(
-                    "Use your @username without '@' (example: argenis), or your numeric Telegram user ID.",
-                );
-                print_bullet("Use '*' only for temporary open testing.");
-
-                let users_str: String = Input::with_theme(wizard_theme())
-                    .with_prompt(
-                        "  Allowed Telegram identities (comma-separated: username without '@' and/or numeric user ID, '*' for all)",
-                    )
-                    .allow_empty(true)
-                    .interact_text()?;
-
-                let allowed_users = if users_str.trim() == "*" {
-                    vec!["*".into()]
-                } else {
-                    users_str
-                        .split(',')
-                        .map(|s| s.trim().to_string())
-                        .filter(|s| !s.is_empty())
-                        .collect()
-                };
-
-                if allowed_users.is_empty() {
-                    println!(
-                        "  {} No users allowlisted — Telegram inbound messages will be denied until you add your username/user ID or '*'.",
-                        style("⚠").yellow().bold()
-                    );
-                }
-
-                config.telegram = Some(TelegramConfig {
-                    bot_token: token,
-                    allowed_users,
-                    stream_mode: StreamMode::default(),
-                    draft_update_interval_ms: 1000,
-                    interrupt_on_new_message: false,
-                    mention_only: false,
-                    progress_mode: ProgressMode::default(),
-                    group_reply: None,
-                    base_url: None,
-                    ack_enabled: true,
-                });
-            }
             ChannelMenuChoice::Discord => {
                 // ── Discord ──
                 println!();
@@ -4582,282 +4450,6 @@ fn setup_channels() -> Result<ChannelsConfig> {
                     channel_ids: vec![],
                     allowed_users,
                     group_reply: None,
-                });
-            }
-            ChannelMenuChoice::Signal => {
-                // ── Signal ──
-                println!();
-                println!(
-                    "  {} {}",
-                    style("Signal Setup").white().bold(),
-                    style("— signal-cli daemon bridge").dim()
-                );
-                print_bullet("1. Run signal-cli daemon with HTTP enabled (default port 8686).");
-                print_bullet("2. Ensure your Signal account is registered in signal-cli.");
-                print_bullet("3. Optionally scope to DMs only or to a specific group.");
-                println!();
-
-                let http_url: String = Input::with_theme(wizard_theme())
-                    .with_prompt("  signal-cli HTTP URL")
-                    .default("http://127.0.0.1:8686".into())
-                    .interact_text()?;
-
-                if http_url.trim().is_empty() {
-                    println!("  {} Skipped — HTTP URL required", style("→").dim());
-                    continue;
-                }
-
-                let account: String = Input::with_theme(wizard_theme())
-                    .with_prompt("  Account number (E.164, e.g. +1234567890)")
-                    .interact_text()?;
-
-                if account.trim().is_empty() {
-                    println!("  {} Skipped — account number required", style("→").dim());
-                    continue;
-                }
-
-                let scope_options = [
-                    "All messages (DMs + groups)",
-                    "DM only",
-                    "Specific group ID",
-                ];
-                let scope_choice = Select::with_theme(wizard_theme())
-                    .with_prompt("  Message scope")
-                    .items(scope_options)
-                    .default(0)
-                    .interact()?;
-
-                let group_id = match scope_choice {
-                    1 => Some("dm".to_string()),
-                    2 => {
-                        let group_input: String = Input::with_theme(wizard_theme())
-                            .with_prompt("  Group ID")
-                            .interact_text()?;
-                        let group_input = group_input.trim().to_string();
-                        if group_input.is_empty() {
-                            println!("  {} Skipped — group ID required", style("→").dim());
-                            continue;
-                        }
-                        Some(group_input)
-                    }
-                    _ => None,
-                };
-
-                let allowed_from_raw: String = Input::with_theme(wizard_theme())
-                    .with_prompt(
-                        "  Allowed sender numbers (comma-separated +1234567890, or * for all)",
-                    )
-                    .default("*".into())
-                    .interact_text()?;
-
-                let allowed_from = if allowed_from_raw.trim() == "*" {
-                    vec!["*".into()]
-                } else {
-                    allowed_from_raw
-                        .split(',')
-                        .map(|s| s.trim().to_string())
-                        .filter(|s| !s.is_empty())
-                        .collect()
-                };
-
-                let ignore_attachments = Confirm::with_theme(wizard_theme())
-                    .with_prompt("  Ignore attachment-only messages?")
-                    .default(false)
-                    .interact()?;
-
-                let ignore_stories = Confirm::with_theme(wizard_theme())
-                    .with_prompt("  Ignore incoming stories?")
-                    .default(true)
-                    .interact()?;
-
-                config.signal = Some(SignalConfig {
-                    http_url: http_url.trim_end_matches('/').to_string(),
-                    account: account.trim().to_string(),
-                    group_id,
-                    allowed_from,
-                    ignore_attachments,
-                    ignore_stories,
-                });
-
-                println!("  {} Signal configured", style("✅").green().bold());
-            }
-            ChannelMenuChoice::WhatsApp => {
-                // ── WhatsApp ──
-                println!();
-                println!("  {}", style("WhatsApp Setup").white().bold());
-
-                let mode_options = vec![
-                    "WhatsApp Web (QR / pair-code, no Meta Business API)",
-                    "WhatsApp Business Cloud API (webhook)",
-                ];
-                let mode_idx = Select::with_theme(wizard_theme())
-                    .with_prompt("  Choose WhatsApp mode")
-                    .items(&mode_options)
-                    .default(0)
-                    .interact()?;
-
-                if mode_idx == 0 {
-                    println!("  {}", style("Mode: WhatsApp Web").dim());
-                    print_bullet("1. Build with --features whatsapp-web");
-                    print_bullet(
-                        "2. Start channel/daemon and scan QR in WhatsApp > Linked Devices",
-                    );
-                    print_bullet("3. Keep session_path persistent so relogin is not required");
-                    println!();
-
-                    let session_path: String = Input::with_theme(wizard_theme())
-                        .with_prompt("  Session database path")
-                        .default("~/.zeroclaw/state/whatsapp-web/session.db".into())
-                        .interact_text()?;
-
-                    if session_path.trim().is_empty() {
-                        println!("  {} Skipped — session path required", style("→").dim());
-                        continue;
-                    }
-
-                    let pair_phone: String = Input::with_theme(wizard_theme())
-                        .with_prompt(
-                            "  Pair phone (optional, digits only; leave empty to use QR flow)",
-                        )
-                        .allow_empty(true)
-                        .interact_text()?;
-
-                    let pair_code: String = if pair_phone.trim().is_empty() {
-                        String::new()
-                    } else {
-                        Input::with_theme(wizard_theme())
-                            .with_prompt(
-                                "  Custom pair code (optional, leave empty for auto-generated)",
-                            )
-                            .allow_empty(true)
-                            .interact_text()?
-                    };
-
-                    let users_str: String = Input::with_theme(wizard_theme())
-                        .with_prompt(
-                            "  Allowed phone numbers (comma-separated +1234567890, or * for all)",
-                        )
-                        .default("*".into())
-                        .interact_text()?;
-
-                    let allowed_numbers = if users_str.trim() == "*" {
-                        vec!["*".into()]
-                    } else {
-                        users_str.split(',').map(|s| s.trim().to_string()).collect()
-                    };
-
-                    config.whatsapp = Some(WhatsAppConfig {
-                        access_token: None,
-                        phone_number_id: None,
-                        verify_token: None,
-                        app_secret: None,
-                        session_path: Some(session_path.trim().to_string()),
-                        pair_phone: (!pair_phone.trim().is_empty())
-                            .then(|| pair_phone.trim().to_string()),
-                        pair_code: (!pair_code.trim().is_empty())
-                            .then(|| pair_code.trim().to_string()),
-                        allowed_numbers,
-                    });
-
-                    println!(
-                        "  {} WhatsApp Web configuration saved.",
-                        style("✅").green().bold()
-                    );
-                    continue;
-                }
-
-                println!(
-                    "  {} {}",
-                    style("Mode:").dim(),
-                    style("Business Cloud API").dim()
-                );
-                print_bullet("1. Go to developers.facebook.com and create a WhatsApp app");
-                print_bullet("2. Add the WhatsApp product and get your phone number ID");
-                print_bullet("3. Generate a temporary access token (System User)");
-                print_bullet("4. Configure webhook URL to: https://your-domain/whatsapp");
-                println!();
-
-                let access_token: String = Input::with_theme(wizard_theme())
-                    .with_prompt("  Access token (from Meta Developers)")
-                    .interact_text()?;
-
-                if access_token.trim().is_empty() {
-                    println!("  {} Skipped", style("→").dim());
-                    continue;
-                }
-
-                let phone_number_id: String = Input::with_theme(wizard_theme())
-                    .with_prompt("  Phone number ID (from WhatsApp app settings)")
-                    .interact_text()?;
-
-                if phone_number_id.trim().is_empty() {
-                    println!("  {} Skipped — phone number ID required", style("→").dim());
-                    continue;
-                }
-
-                let verify_token: String = Input::with_theme(wizard_theme())
-                    .with_prompt("  Webhook verify token (create your own)")
-                    .default("zeroclaw-whatsapp-verify".into())
-                    .interact_text()?;
-
-                // Test connection (run entirely in separate thread — Response must be used/dropped there)
-                print!("  {} Testing connection... ", style("⏳").dim());
-                let phone_number_id_clone = phone_number_id.clone();
-                let access_token_clone = access_token.clone();
-                let thread_result = std::thread::spawn(move || {
-                    let client = reqwest::blocking::Client::new();
-                    let url = format!(
-                        "https://graph.facebook.com/v18.0/{}",
-                        phone_number_id_clone.trim()
-                    );
-                    let resp = client
-                        .get(&url)
-                        .header(
-                            "Authorization",
-                            format!("Bearer {}", access_token_clone.trim()),
-                        )
-                        .send()?;
-                    Ok::<_, reqwest::Error>(resp.status().is_success())
-                })
-                .join();
-                match thread_result {
-                    Ok(Ok(true)) => {
-                        println!(
-                            "\r  {} Connected to WhatsApp API        ",
-                            style("✅").green().bold()
-                        );
-                    }
-                    _ => {
-                        println!(
-                            "\r  {} Connection failed — check access token and phone number ID",
-                            style("❌").red().bold()
-                        );
-                        continue;
-                    }
-                }
-
-                let users_str: String = Input::with_theme(wizard_theme())
-                    .with_prompt(
-                        "  Allowed phone numbers (comma-separated +1234567890, or * for all)",
-                    )
-                    .default("*".into())
-                    .interact_text()?;
-
-                let allowed_numbers = if users_str.trim() == "*" {
-                    vec!["*".into()]
-                } else {
-                    users_str.split(',').map(|s| s.trim().to_string()).collect()
-                };
-
-                config.whatsapp = Some(WhatsAppConfig {
-                    access_token: Some(access_token.trim().to_string()),
-                    phone_number_id: Some(phone_number_id.trim().to_string()),
-                    verify_token: Some(verify_token.trim().to_string()),
-                    app_secret: None, // Can be set via ZEROCLAW_WHATSAPP_APP_SECRET env var
-                    session_path: None,
-                    pair_phone: None,
-                    pair_code: None,
-                    allowed_numbers,
                 });
             }
             ChannelMenuChoice::Irc => {

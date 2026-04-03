@@ -178,6 +178,11 @@ impl HttpRequestTool {
             .collect()
     }
 
+    // Resolves a configured credential profile into request headers and the
+    // sensitive values that must be redacted from logs and tool output.
+    // Profiles are defined under [http_request.credential_profiles.<name>]
+    // with header_name, env_var, and an optional value_prefix such as
+    // "Bearer ".
     fn resolve_credential_profile(
         &self,
         profile_name: &str,
@@ -292,6 +297,10 @@ impl HttpRequestTool {
     }
 
     fn truncate_response(&self, text: &str) -> String {
+        // 0 means unlimited — no truncation.
+        if self.max_response_size == 0 {
+            return text.to_string();
+        }
         if text.len() > self.max_response_size {
             let mut truncated = text
                 .chars()
@@ -313,7 +322,15 @@ impl Tool for HttpRequestTool {
 
     fn description(&self) -> &str {
         "Make HTTP requests to external APIs. Supports GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS methods. \
-        Security constraints: allowlist-only domains, no local/private hosts, configurable timeout/response size limits, and optional env-backed credential profiles."
+        Security constraints: allowlist-only domains, no local/private hosts, configurable timeout and response size limits."
+    }
+
+    fn prompt_hint(&self) -> Option<&str> {
+        Some("Make HTTP requests to external APIs. Use when: fetching data from or interacting with REST APIs, webhooks, or web services. Don't use when: target domain is not on the allowlist, or a dedicated integration tool already covers the service.")
+    }
+
+    fn prompt_hint_compact(&self) -> &str {
+        "Make HTTP requests to external APIs."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {

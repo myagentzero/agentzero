@@ -1616,6 +1616,7 @@ data: [DONE]
             custom_provider_auth_header: None,
             max_tokens_override: None,
             model_support_vision: None,
+            litellm_cache: None,
         };
         let provider =
             OpenAiCodexProvider::new(&options, None).expect("provider should initialize");

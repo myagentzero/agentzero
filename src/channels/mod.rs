@@ -15,38 +15,25 @@
 //! [`start_channels`]. See `AGENTS.md` §7.2 for the full change playbook.
 
 pub(crate) mod ack_reaction;
-pub mod acp;
+pub mod acp_server;
 pub mod cli;
 pub mod discord;
 pub mod email_channel;
 pub mod github;
 pub mod irc;
 pub mod notion;
-pub mod signal;
 pub mod slack;
-pub mod telegram;
 pub mod traits;
 pub mod transcription;
-pub mod whatsapp;
-#[cfg(feature = "whatsapp-web")]
-pub mod whatsapp_storage;
-#[cfg(feature = "whatsapp-web")]
-pub mod whatsapp_web;
 
-pub use acp::AcpChannel;
 pub use cli::CliChannel;
 pub use discord::DiscordChannel;
 pub use email_channel::EmailChannel;
 pub use github::GitHubChannel;
 pub use irc::IrcChannel;
 pub use notion::NotionChannel;
-pub use signal::SignalChannel;
 pub use slack::SlackChannel;
-pub use telegram::TelegramChannel;
 pub use traits::{Channel, SendMessage};
-pub use whatsapp::WhatsAppChannel;
-#[cfg(feature = "whatsapp-web")]
-pub use whatsapp_web::WhatsAppWebChannel;
 
 use crate::agent::loop_::{
     NonCliApprovalContext, NonCliApprovalPrompt, SafetyHeartbeatConfig,
@@ -140,22 +127,6 @@ fn clear_live_channels() {
         .clear();
 }
 
-fn runtime_telegram_progress_mode_store() -> &'static Mutex<ProgressMode> {
-    static STORE: OnceLock<Mutex<ProgressMode>> = OnceLock::new();
-    STORE.get_or_init(|| Mutex::new(ProgressMode::default()))
-}
-
-fn set_runtime_telegram_progress_mode(mode: ProgressMode) {
-    *runtime_telegram_progress_mode_store()
-        .lock()
-        .unwrap_or_else(|e| e.into_inner()) = mode;
-}
-
-fn runtime_telegram_progress_mode() -> ProgressMode {
-    *runtime_telegram_progress_mode_store()
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-}
 
 pub(crate) fn get_live_channel(name: &str) -> Option<Arc<dyn Channel>> {
     live_channels_registry()
@@ -395,18 +366,8 @@ fn interruption_scope_key(msg: &traits::ChannelMessage) -> String {
     format!("{}_{}_{}", msg.channel, msg.reply_target, msg.sender)
 }
 
-fn should_prefix_sender_identity(msg: &traits::ChannelMessage) -> bool {
-    if msg.channel != "telegram" {
-        return false;
-    }
-
-    let chat_id = msg
-        .reply_target
-        .split_once(':')
-        .map_or(msg.reply_target.as_str(), |(chat_id, _)| chat_id);
-
-    // Telegram supergroups/groups use negative chat IDs.
-    chat_id.starts_with('-')
+fn should_prefix_sender_identity(_msg: &traits::ChannelMessage) -> bool {
+    false
 }
 
 fn llm_user_content_with_sender_identity(msg: &traits::ChannelMessage, content: &str) -> String {
@@ -543,35 +504,8 @@ fn strip_tool_call_tags(message: &str) -> String {
     result.trim().to_string()
 }
 
-fn channel_delivery_instructions(channel_name: &str) -> Option<&'static str> {
-    match channel_name {
-        "telegram" => Some(
-            "When responding on Telegram:\n\
-             - Include media markers for files or URLs that should be sent as attachments\n\
-             - Use **bold** for key terms, section titles, and important info (renders as <b>)\n\
-             - Use *italic* for emphasis (renders as <i>)\n\
-             - Use `backticks` for inline code, commands, or technical terms\n\
-             - Use triple backticks for code blocks\n\
-             - Use emoji naturally to add personality — but don't overdo it\n\
-             - Be concise and direct. Skip filler phrases like 'Great question!' or 'Certainly!'\n\
-             - Structure longer answers with bold headers, not raw markdown ## headers\n\
-             - For media attachments use markers: [IMAGE:<path-or-url>], [DOCUMENT:<path-or-url>], [VIDEO:<path-or-url>], [AUDIO:<path-or-url>], or [VOICE:<path-or-url>]\n\
-             - Keep normal text outside markers and never wrap markers in code fences.\n\
-             - Use tool results silently: answer the latest user message directly, and do not narrate delayed/internal tool execution bookkeeping.",
-        ),
-        "whatsapp" => Some(
-            "When responding on WhatsApp:\n\
-             - Use *bold* for emphasis (WhatsApp uses single asterisks).\n\
-             - Be concise. No markdown headers (## etc.) — they don't render.\n\
-             - No markdown tables — use bullet lists instead.\n\
-             - For sending images, documents, videos, or audio files use markers: [IMAGE:<absolute-path>], [DOCUMENT:<absolute-path>], [VIDEO:<absolute-path>], [AUDIO:<absolute-path>]\n\
-             - The path MUST be an absolute filesystem path to a local file (e.g. [IMAGE:/home/nicolas/.zeroclaw/workspace/images/chart.png]).\n\
-             - Keep normal text outside markers and never wrap markers in code fences.\n\
-             - You can combine text and media in one response — text is sent first, then each attachment.\n\
-             - Use tool results silently: answer the latest user message directly, and do not narrate delayed/internal tool execution bookkeeping.",
-        ),
-        _ => None,
-    }
+fn channel_delivery_instructions(_channel_name: &str) -> Option<&'static str> {
+    None
 }
 
 fn should_expose_internal_tool_details(user_message: &str) -> bool {
@@ -586,12 +520,7 @@ fn should_expose_internal_tool_details(user_message: &str) -> bool {
         || lower.contains("function call")
         || lower.contains("execution trace")
         || lower.contains("internal step");
-    let mentions_internal_details_cjk = trimmed.contains("命令")
-        || trimmed.contains("工具调用")
-        || trimmed.contains("函数调用")
-        || trimmed.contains("执行过程");
-
-    // Fail closed for negated phrasing ("don't show commands", "不要显示命令").
+    // Fail closed for negated phrasing ("don't show commands").
     const ENGLISH_NEGATIVE_HINTS: [&str; 18] = [
         "don't show command",
         "don't show commands",
@@ -616,35 +545,6 @@ fn should_expose_internal_tool_details(user_message: &str) -> bool {
         && ENGLISH_NEGATIVE_HINTS
             .iter()
             .any(|hint| lower.contains(hint))
-    {
-        return false;
-    }
-
-    const CJK_NEGATIVE_HINTS: [&str; 22] = [
-        "不要输出命令",
-        "不要显示命令",
-        "不要展示命令",
-        "不要带上命令",
-        "不要附上命令",
-        "别输出命令",
-        "别显示命令",
-        "别展示命令",
-        "不要输出工具调用",
-        "不要显示工具调用",
-        "不要展示工具调用",
-        "别输出工具调用",
-        "别显示工具调用",
-        "不要输出函数调用",
-        "不要显示函数调用",
-        "不要展示函数调用",
-        "别输出函数调用",
-        "别显示函数调用",
-        "不要执行过程",
-        "不要过程",
-        "不要内部步骤",
-        "别把命令",
-    ];
-    if mentions_internal_details_cjk && CJK_NEGATIVE_HINTS.iter().any(|hint| trimmed.contains(hint))
     {
         return false;
     }
@@ -682,30 +582,7 @@ fn should_expose_internal_tool_details(user_message: &str) -> bool {
         return true;
     }
 
-    const CJK_HINTS: [&str; 14] = [
-        "输出命令",
-        "显示命令",
-        "展示命令",
-        "命令发给我",
-        "带上命令",
-        "输出工具调用",
-        "显示工具调用",
-        "展示工具调用",
-        "输出函数调用",
-        "显示函数调用",
-        "展示函数调用",
-        "函数指令",
-        "工具指令",
-        "执行过程",
-    ];
-    if CJK_HINTS.iter().any(|hint| trimmed.contains(hint)) {
-        return true;
-    }
-
-    const CJK_VERBS: [&str; 9] = [
-        "输出", "显示", "展示", "发我", "给我", "带上", "附上", "贴出", "列出",
-    ];
-    mentions_internal_details_cjk && CJK_VERBS.iter().any(|verb| trimmed.contains(verb))
+    false
 }
 
 fn split_internal_progress_delta(delta: &str) -> (bool, &str) {
@@ -722,8 +599,6 @@ fn effective_progress_mode_for_message(
 ) -> ProgressMode {
     if channel_name.eq_ignore_ascii_case("cli") || expose_internal_tool_details {
         ProgressMode::Verbose
-    } else if channel_name.eq_ignore_ascii_case("telegram") {
-        runtime_telegram_progress_mode()
     } else {
         ProgressMode::Off
     }
@@ -844,7 +719,7 @@ fn normalize_cached_channel_turns(turns: Vec<ChatMessage>) -> Vec<ChatMessage> {
 }
 
 fn supports_runtime_model_switch(channel_name: &str) -> bool {
-    matches!(channel_name, "telegram" | "discord")
+    !channel_name.eq_ignore_ascii_case("cli")
 }
 
 fn parse_runtime_command(channel_name: &str, content: &str) -> Option<ChannelRuntimeCommand> {
@@ -936,12 +811,9 @@ fn is_natural_language_all_tools_once_intent(content: &str) -> bool {
     }
 
     let lower = trimmed.to_ascii_lowercase();
-    let has_allow_verb = contains_any_fragment(&lower, &["approve", "allow"])
-        || contains_any_fragment(trimmed, &["授权", "放开", "允许"]);
-    let has_all_tools_scope = contains_any_fragment(&lower, &["all tools", "all commands"])
-        || contains_any_fragment(trimmed, &["所有工具", "全部工具", "所有命令", "全部命令"]);
-    let has_one_time_scope = contains_any_fragment(&lower, &["once", "one-time", "one time"])
-        || contains_any_fragment(trimmed, &["一次", "这次"]);
+    let has_allow_verb = contains_any_fragment(&lower, &["approve", "allow"]);
+    let has_all_tools_scope = contains_any_fragment(&lower, &["all tools", "all commands"]);
+    let has_one_time_scope = contains_any_fragment(&lower, &["once", "one-time", "one time"]);
 
     has_allow_verb && has_all_tools_scope && has_one_time_scope
 }
@@ -967,8 +839,7 @@ fn parse_natural_language_runtime_command(content: &str) -> Option<ChannelRuntim
     ) {
         return Some(ChannelRuntimeCommand::ListPendingApprovals);
     }
-    if trimmed == "查看授权"
-        || matches!(
+    if matches!(
             lower.as_str(),
             "show approvals" | "list approvals" | "approvals"
         )
@@ -987,27 +858,14 @@ fn parse_natural_language_runtime_command(content: &str) -> Option<ChannelRuntim
     if let Some(request_id) = extract_runtime_tail_token(&lower, &["confirm "]) {
         return Some(ChannelRuntimeCommand::ConfirmToolApproval(request_id));
     }
-    if let Some(request_id) = extract_runtime_tail_token(trimmed, &["确认授权 "]) {
-        return Some(ChannelRuntimeCommand::ConfirmToolApproval(request_id));
-    }
-
     if let Some(tool) =
         extract_runtime_tail_token(&lower, &["revoke tool ", "unapprove ", "revoke "])
     {
         return Some(ChannelRuntimeCommand::UnapproveTool(tool));
     }
-    if let Some(tool) = extract_runtime_tail_token(trimmed, &["撤销工具 ", "取消授权 "]) {
-        return Some(ChannelRuntimeCommand::UnapproveTool(tool));
-    }
-
     if let Some(tool) = extract_runtime_tail_token(&lower, &["approve tool ", "approve "]) {
         return Some(ChannelRuntimeCommand::RequestToolApproval(tool));
     }
-    if let Some(tool) = extract_runtime_tail_token(trimmed, &["授权工具 ", "请放开 ", "放开 "])
-    {
-        return Some(ChannelRuntimeCommand::RequestToolApproval(tool));
-    }
-
     None
 }
 
@@ -1072,11 +930,7 @@ fn resolved_default_model(config: &Config) -> String {
 fn runtime_defaults_from_config(config: &Config) -> ChannelRuntimeDefaults {
     let message_timeout_secs =
         effective_channel_message_timeout_secs(config.channels_config.message_timeout_secs);
-    let interrupt_on_new_message = config
-        .channels_config
-        .telegram
-        .as_ref()
-        .is_some_and(|tg| tg.interrupt_on_new_message);
+    let interrupt_on_new_message = false;
 
     ChannelRuntimeDefaults {
         default_provider: resolved_default_provider(config),
@@ -2187,8 +2041,8 @@ fn build_models_help_response(current: &ChannelRouteSelection, workspace_dir: &P
     response.push_str("List approval state with `/approvals`.\n");
     response.push_str(
         "Natural language also works (policy controlled).\n\
-         - `direct` mode (default): `授权工具 shell` grants immediately.\n\
-         - `request_confirm` mode: `授权工具 shell` then `确认授权 apr-xxxxxx`.\n",
+         - `direct` mode (default): `approve tool shell` grants immediately.\n\
+         - `request_confirm` mode: `approve tool shell` then `confirm apr-xxxxxx`.\n",
     );
 
     let cached_models = load_cached_model_preview(workspace_dir, &current.provider);
@@ -2231,8 +2085,8 @@ fn build_providers_help_response(current: &ChannelRouteSelection) -> String {
     response.push_str("List approval state with `/approvals`.\n");
     response.push_str(
         "Natural language also works (policy controlled).\n\
-         - `direct` mode (default): `授权工具 shell` grants immediately.\n\
-         - `request_confirm` mode: `授权工具 shell` then `确认授权 apr-xxxxxx`.\n\n",
+         - `direct` mode (default): `approve tool shell` grants immediately.\n\
+         - `request_confirm` mode: `approve tool shell` then `confirm apr-xxxxxx`.\n\n",
     );
     response.push_str("Available providers:\n");
     for provider in providers::list_providers() {
@@ -4257,7 +4111,7 @@ If this input is legitimate, rephrase the request and avoid instruction-override
             // added during run_tool_call_loop, so the LLM retains awareness
             // of what it did on subsequent turns.
             let tool_summary = extract_tool_context_summary(&history, history_len_before_tools);
-            let history_response = if tool_summary.is_empty() || msg.channel == "telegram" {
+            let history_response = if tool_summary.is_empty() {
                 delivered_response.clone()
             } else {
                 format!("{tool_summary}\n{delivered_response}")
@@ -4619,8 +4473,7 @@ async fn run_message_dispatch_loop(
         workers.spawn(async move {
             let _permit = permit;
             let runtime_defaults = runtime_defaults_snapshot(worker_ctx.as_ref());
-            let interrupt_enabled =
-                runtime_defaults.interrupt_on_new_message && msg.channel == "telegram";
+            let interrupt_enabled = runtime_defaults.interrupt_on_new_message;
             let sender_scope_key = interruption_scope_key(&msg);
             let cancellation_token = CancellationToken::new();
             let completion = Arc::new(InFlightTaskCompletion::new());
@@ -5058,62 +4911,6 @@ fn inject_workspace_file(
     }
 }
 
-fn normalize_telegram_identity(value: &str) -> String {
-    value.trim().trim_start_matches('@').to_string()
-}
-
-async fn bind_telegram_identity(config: &Config, identity: &str) -> Result<()> {
-    let normalized = normalize_telegram_identity(identity);
-    if normalized.is_empty() {
-        anyhow::bail!("Telegram identity cannot be empty");
-    }
-
-    let mut updated = config.clone();
-    let Some(telegram) = updated.channels_config.telegram.as_mut() else {
-        anyhow::bail!(
-            "Telegram channel is not configured. Run `zeroclaw onboard --channels-only` first"
-        );
-    };
-
-    if telegram.allowed_users.iter().any(|u| u == "*") {
-        println!(
-            "⚠️ Telegram allowlist is currently wildcard (`*`) — binding is unnecessary until you remove '*'."
-        );
-    }
-
-    if telegram
-        .allowed_users
-        .iter()
-        .map(|entry| normalize_telegram_identity(entry))
-        .any(|entry| entry == normalized)
-    {
-        println!("✅ Telegram identity already bound: {normalized}");
-        return Ok(());
-    }
-
-    telegram.allowed_users.push(normalized.clone());
-    updated.save().await?;
-    println!("✅ Bound Telegram identity: {normalized}");
-    println!("   Saved to {}", updated.config_path.display());
-    match maybe_restart_managed_daemon_service() {
-        Ok(true) => {
-            println!("🔄 Detected running managed daemon service; reloaded automatically.");
-        }
-        Ok(false) => {
-            println!(
-                "ℹ️ No managed daemon service detected. If `zeroclaw daemon`/`channel start` is already running, restart it to load the updated allowlist."
-            );
-        }
-        Err(e) => {
-            eprintln!(
-                "⚠️ Allowlist saved, but failed to reload daemon service automatically: {e}\n\
-                 Restart service manually with `zeroclaw service stop && zeroclaw service start`."
-            );
-        }
-    }
-    Ok(())
-}
-
 fn maybe_restart_managed_daemon_service() -> Result<bool> {
     if cfg!(target_os = "macos") {
         let home = directories::UserDirs::new()
@@ -5249,9 +5046,6 @@ pub(crate) async fn handle_command(command: crate::ChannelCommands, config: &Con
         crate::ChannelCommands::Remove { name } => {
             anyhow::bail!("Remove channel '{name}' — edit ~/.zeroclaw/config.toml directly");
         }
-        crate::ChannelCommands::BindTelegram { identity } => {
-            bind_telegram_identity(config, &identity).await
-        }
     }
 }
 
@@ -5285,29 +5079,6 @@ fn collect_configured_channels(
     // `#[cfg(not(feature = "channel-matrix"))]` blocks are removed.
     let _ = matrix_skip_context;
     let mut channels = Vec::new();
-
-    if let Some(ref tg) = config.channels_config.telegram {
-        let mut telegram = TelegramChannel::new(
-            tg.bot_token.clone(),
-            tg.allowed_users.clone(),
-            tg.effective_group_reply_mode().requires_mention(),
-            tg.ack_enabled,
-        )
-        .with_group_reply_allowed_senders(tg.group_reply_allowed_sender_ids())
-        .with_ack_reaction(config.channels_config.ack_reaction.telegram.clone())
-        .with_streaming(tg.stream_mode, tg.draft_update_interval_ms)
-        .with_transcription(config.transcription.clone())
-        .with_workspace_dir(config.workspace_dir.clone());
-
-        if let Some(ref base_url) = tg.base_url {
-            telegram = telegram.with_api_base(base_url.clone());
-        }
-
-        channels.push(ConfiguredChannel {
-            display_name: "Telegram",
-            channel: Arc::new(telegram),
-        });
-    }
 
     if let Some(ref dc) = config.channels_config.discord {
         channels.push(ConfiguredChannel {
@@ -5349,80 +5120,6 @@ fn collect_configured_channels(
         });
     }
 
-    if let Some(ref sig) = config.channels_config.signal {
-        channels.push(ConfiguredChannel {
-            display_name: "Signal",
-            channel: Arc::new(SignalChannel::new(
-                sig.http_url.clone(),
-                sig.account.clone(),
-                sig.group_id.clone(),
-                sig.allowed_from.clone(),
-                sig.ignore_attachments,
-                sig.ignore_stories,
-            )),
-        });
-    }
-
-    if let Some(ref wa) = config.channels_config.whatsapp {
-        if wa.is_ambiguous_config() {
-            tracing::warn!(
-                "WhatsApp config has both phone_number_id and session_path set; preferring Cloud API mode. Remove one selector to avoid ambiguity."
-            );
-        }
-        // Runtime negotiation: detect backend type from config
-        match wa.backend_type() {
-            "cloud" => {
-                // Cloud API mode: requires phone_number_id, access_token, verify_token
-                if wa.is_cloud_config() {
-                    channels.push(ConfiguredChannel {
-                        display_name: "WhatsApp",
-                        channel: Arc::new(WhatsAppChannel::new(
-                            wa.access_token.clone().unwrap_or_default(),
-                            wa.phone_number_id.clone().unwrap_or_default(),
-                            wa.verify_token.clone().unwrap_or_default(),
-                            wa.allowed_numbers.clone(),
-                        )),
-                    });
-                } else {
-                    tracing::warn!(
-                        "WhatsApp Cloud API configured but missing required fields (phone_number_id, access_token, verify_token)"
-                    );
-                }
-            }
-            "web" => {
-                // Web mode: requires session_path
-                #[cfg(feature = "whatsapp-web")]
-                if wa.is_web_config() {
-                    channels.push(ConfiguredChannel {
-                        display_name: "WhatsApp",
-                        channel: Arc::new(
-                            WhatsAppWebChannel::new(
-                                wa.session_path.clone().unwrap_or_default(),
-                                wa.pair_phone.clone(),
-                                wa.pair_code.clone(),
-                                wa.allowed_numbers.clone(),
-                            )
-                            .with_transcription(config.transcription.clone()),
-                        ),
-                    });
-                } else {
-                    tracing::warn!("WhatsApp Web configured but session_path not set");
-                }
-                #[cfg(not(feature = "whatsapp-web"))]
-                {
-                    tracing::warn!(
-                        "WhatsApp Web backend requires 'whatsapp-web' feature. Enable with: cargo build --features whatsapp-web"
-                    );
-                }
-            }
-            _ => {
-                tracing::warn!(
-                    "WhatsApp config invalid: neither phone_number_id (Cloud API) nor session_path (Web) is set"
-                );
-            }
-        }
-    }
-
     if let Some(ref gh) = config.channels_config.github {
         channels.push(ConfiguredChannel {
             display_name: "GitHub",
@@ -5456,13 +5153,6 @@ fn collect_configured_channels(
                 sasl_password: irc.sasl_password.clone(),
                 verify_tls: irc.verify_tls.unwrap_or(true),
             })),
-        });
-    }
-
-    if let Some(ref acp) = config.channels_config.acp {
-        channels.push(ConfiguredChannel {
-            display_name: "ACP",
-            channel: Arc::new(AcpChannel::new(acp.clone())),
         });
     }
 
@@ -5569,6 +5259,7 @@ pub async fn start_channels(
         custom_provider_auth_header: config.effective_custom_provider_auth_header(),
         max_tokens_override: None,
         model_support_vision: config.model_support_vision,
+        litellm_cache: config.effective_litellm_cache(),
     };
     let provider: Arc<dyn Provider> = Arc::from(
         create_routed_provider_nonblocking(
@@ -5897,18 +5588,7 @@ pub async fn start_channels(
     provider_cache_seed.insert(provider_name.clone(), Arc::clone(&provider));
     let message_timeout_secs =
         effective_channel_message_timeout_secs(config.channels_config.message_timeout_secs);
-    let interrupt_on_new_message = config
-        .channels_config
-        .telegram
-        .as_ref()
-        .is_some_and(|tg| tg.interrupt_on_new_message);
-    let telegram_progress_mode = config
-        .channels_config
-        .telegram
-        .as_ref()
-        .map(|tg| tg.progress_mode)
-        .unwrap_or_default();
-    set_runtime_telegram_progress_mode(telegram_progress_mode);
+    let interrupt_on_new_message = false;
 
     let session_manager = shared_session_manager(&config.agent.session, &config.workspace_dir)?
         .map(|mgr| mgr as Arc<dyn SessionManager + Send + Sync>);
@@ -6124,7 +5804,10 @@ mod tests {
             parse_runtime_command("slack", "/approvals"),
             Some(ChannelRuntimeCommand::ListApprovals)
         );
-        assert_eq!(parse_runtime_command("slack", "/models"), None);
+        assert_eq!(
+            parse_runtime_command("slack", "/models"),
+            Some(ChannelRuntimeCommand::ShowProviders)
+        );
     }
 
     #[test]
@@ -6147,31 +5830,9 @@ mod tests {
     #[test]
     fn parse_runtime_command_supports_natural_language_approval_intents() {
         assert_eq!(
-            parse_runtime_command("telegram", "授权工具 shell"),
-            Some(ChannelRuntimeCommand::RequestToolApproval(
-                "shell".to_string()
-            ))
-        );
-        assert_eq!(
-            parse_runtime_command("telegram", "请放开 shell"),
-            Some(ChannelRuntimeCommand::RequestToolApproval(
-                "shell".to_string()
-            ))
-        );
-        assert_eq!(
             parse_runtime_command("telegram", "approve tool shell"),
             Some(ChannelRuntimeCommand::RequestToolApproval(
                 "shell".to_string()
-            ))
-        );
-        assert_eq!(
-            parse_runtime_command("telegram", "请一次性允许所有工具和命令"),
-            Some(ChannelRuntimeCommand::RequestAllToolsOnce)
-        );
-        assert_eq!(
-            parse_runtime_command("telegram", "确认授权 apr-deadbeef"),
-            Some(ChannelRuntimeCommand::ConfirmToolApproval(
-                "apr-deadbeef".to_string()
             ))
         );
         assert_eq!(
@@ -6181,16 +5842,8 @@ mod tests {
             ))
         );
         assert_eq!(
-            parse_runtime_command("telegram", "撤销工具 shell"),
-            Some(ChannelRuntimeCommand::UnapproveTool("shell".to_string()))
-        );
-        assert_eq!(
             parse_runtime_command("telegram", "revoke tool shell"),
             Some(ChannelRuntimeCommand::UnapproveTool("shell".to_string()))
-        );
-        assert_eq!(
-            parse_runtime_command("telegram", "查看授权"),
-            Some(ChannelRuntimeCommand::ListApprovals)
         );
         assert_eq!(
             parse_runtime_command("telegram", "show approvals"),
@@ -6200,7 +5853,6 @@ mod tests {
             parse_runtime_command("telegram", "show pending approvals"),
             Some(ChannelRuntimeCommand::ListPendingApprovals)
         );
-        assert_eq!(parse_runtime_command("telegram", "请帮我执行shell"), None);
     }
 
     #[test]
@@ -7194,7 +6846,7 @@ BTC is currently around $65,000 based on latest tool output."#
     }
 
     #[tokio::test]
-    async fn process_channel_message_telegram_does_not_persist_tool_summary_prefix() {
+    async fn process_channel_message_persists_tool_summary_prefix() {
         let channel_impl = Arc::new(TelegramRecordingChannel::default());
         let channel: Arc<dyn Channel> = channel_impl.clone();
 
@@ -7279,8 +6931,8 @@ BTC is currently around $65,000 based on latest tool output."#
             .find(|turn| turn.role == "assistant")
             .expect("assistant turn should be present");
         assert!(
-            !assistant_turn.content.contains("[Used tools:"),
-            "telegram history should not persist tool-summary prefix"
+            assistant_turn.content.contains("[Used tools:"),
+            "history should persist tool-summary prefix"
         );
     }
 
@@ -8805,7 +8457,7 @@ BTC is currently around $65,000 based on latest tool output."#
                 id: "msg-req-1".to_string(),
                 sender: "alice".to_string(),
                 reply_target: "chat-1".to_string(),
-                content: "授权工具 mock_price".to_string(),
+                content: "approve tool mock_price".to_string(),
                 channel: "telegram".to_string(),
                 timestamp: 1,
                 thread_ts: None,
@@ -8839,7 +8491,7 @@ BTC is currently around $65,000 based on latest tool output."#
                 id: "msg-req-2".to_string(),
                 sender: "alice".to_string(),
                 reply_target: "chat-1".to_string(),
-                content: format!("确认授权 {request_id}"),
+                content: format!("confirm {request_id}"),
                 channel: "telegram".to_string(),
                 timestamp: 2,
                 thread_ts: None,
@@ -9069,7 +8721,7 @@ BTC is currently around $65,000 based on latest tool output."#
                 id: "msg-all-once-1".to_string(),
                 sender: "alice".to_string(),
                 reply_target: "chat-1".to_string(),
-                content: "请一次性允许所有工具和命令".to_string(),
+                content: "approve all tools once".to_string(),
                 channel: "telegram".to_string(),
                 timestamp: 1,
                 thread_ts: None,
@@ -9222,7 +8874,7 @@ BTC is currently around $65,000 based on latest tool output."#
                 id: "msg-direct-1".to_string(),
                 sender: "alice".to_string(),
                 reply_target: "chat-1".to_string(),
-                content: "授权工具 mock_price".to_string(),
+                content: "approve tool mock_price".to_string(),
                 channel: "telegram".to_string(),
                 timestamp: 1,
                 thread_ts: None,
@@ -9351,7 +9003,7 @@ BTC is currently around $65,000 based on latest tool output."#
                 id: "msg-direct-override-1".to_string(),
                 sender: "alice".to_string(),
                 reply_target: "chat-1".to_string(),
-                content: "授权工具 mock_price".to_string(),
+                content: "approve tool mock_price".to_string(),
                 channel: "telegram".to_string(),
                 timestamp: 1,
                 thread_ts: None,
@@ -9456,7 +9108,7 @@ BTC is currently around $65,000 based on latest tool output."#
                 id: "msg-nl-disabled-1".to_string(),
                 sender: "alice".to_string(),
                 reply_target: "chat-1".to_string(),
-                content: "授权工具 mock_price".to_string(),
+                content: "approve tool mock_price".to_string(),
                 channel: "telegram".to_string(),
                 timestamp: 1,
                 thread_ts: None,
@@ -9584,7 +9236,7 @@ BTC is currently around $65,000 based on latest tool output."#
                 id: "msg-mismatch-1".to_string(),
                 sender: "alice".to_string(),
                 reply_target: "chat-1".to_string(),
-                content: "授权工具 mock_price".to_string(),
+                content: "approve tool mock_price".to_string(),
                 channel: "telegram".to_string(),
                 timestamp: 1,
                 thread_ts: None,
@@ -11361,54 +11013,6 @@ BTC is currently around $65,000 based on latest tool output."#
         assert_ne!(assistant_key, user_key);
     }
 
-    #[test]
-    fn telegram_group_messages_prefix_sender_identity_for_llm() {
-        let msg = traits::ChannelMessage {
-            id: "msg_1".into(),
-            sender: "Kozimum".into(),
-            reply_target: "-100200300".into(),
-            content: "who am i?".into(),
-            channel: "telegram".into(),
-            timestamp: 1,
-            thread_ts: None,
-        };
-
-        let enriched = llm_user_content_with_sender_identity(&msg, &msg.content);
-        assert_eq!(enriched, "[sender: Kozimum] who am i?");
-    }
-
-    #[test]
-    fn telegram_dm_messages_do_not_prefix_sender_identity() {
-        let msg = traits::ChannelMessage {
-            id: "msg_1".into(),
-            sender: "Kozimum".into(),
-            reply_target: "12345".into(),
-            content: "who am i?".into(),
-            channel: "telegram".into(),
-            timestamp: 1,
-            thread_ts: None,
-        };
-
-        let enriched = llm_user_content_with_sender_identity(&msg, &msg.content);
-        assert_eq!(enriched, "who am i?");
-    }
-
-    #[test]
-    fn telegram_group_thread_messages_prefix_sender_identity_for_llm() {
-        let msg = traits::ChannelMessage {
-            id: "msg_1".into(),
-            sender: "Kozimum".into(),
-            reply_target: "-100200300:789".into(),
-            content: "who am i?".into(),
-            channel: "telegram".into(),
-            timestamp: 1,
-            thread_ts: Some("789".into()),
-        };
-
-        let enriched = llm_user_content_with_sender_identity(&msg, &msg.content);
-        assert_eq!(enriched, "[sender: Kozimum] who am i?");
-    }
-
     #[tokio::test]
     async fn autosave_keys_preserve_multiple_conversation_facts() {
         let tmp = TempDir::new().unwrap();
@@ -11773,13 +11377,11 @@ BTC is currently around $65,000 based on latest tool output."#
             .map(|(role, _)| role.as_str())
             .collect::<Vec<_>>();
         assert_eq!(roles, vec!["system", "user", "assistant", "user"]);
+        // Channel delivery instructions were removed with telegram/whatsapp/signal channels.
+        // The system prompt should still exist but without channel-specific guidance.
         assert!(
-            calls[0][0].1.contains("When responding on Telegram:"),
-            "telegram channel instructions should be embedded into the system prompt"
-        );
-        assert!(
-            calls[0][0].1.contains("For media attachments use markers:"),
-            "telegram media marker guidance should live in the system prompt"
+            !calls[0][0].1.is_empty(),
+            "system prompt should still be present"
         );
         assert!(!calls[0].iter().skip(1).any(|(role, _)| role == "system"));
     }
@@ -11871,10 +11473,7 @@ Done reminder set for 1:38 AM."#;
             "Please show commands and tool calls you used."
         ));
         assert!(should_expose_internal_tool_details(
-            "请输出命令和工具调用过程"
-        ));
-        assert!(!should_expose_internal_tool_details(
-            "帮我直接给最终结论，不要过程。"
+            "Please output commands and tool call traces"
         ));
     }
 
@@ -11884,7 +11483,7 @@ Done reminder set for 1:38 AM."#;
             "Please do not show commands or tool calls, only final answer."
         ));
         assert!(!should_expose_internal_tool_details(
-            "不要显示命令和工具调用，直接给最终结论。"
+            "Don't show commands or tool calls, just give me the final answer."
         ));
     }
 
@@ -11912,20 +11511,6 @@ Done reminder set for 1:38 AM."#;
         assert_eq!(
             effective_progress_mode_for_message("draft-streaming-channel", true),
             ProgressMode::Verbose
-        );
-    }
-
-    #[test]
-    fn effective_progress_mode_uses_telegram_runtime_setting() {
-        set_runtime_telegram_progress_mode(ProgressMode::Compact);
-        assert_eq!(
-            effective_progress_mode_for_message("telegram", false),
-            ProgressMode::Compact
-        );
-        set_runtime_telegram_progress_mode(ProgressMode::Off);
-        assert_eq!(
-            effective_progress_mode_for_message("telegram", false),
-            ProgressMode::Off
         );
     }
 

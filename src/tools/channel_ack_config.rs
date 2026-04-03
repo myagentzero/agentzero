@@ -16,7 +16,6 @@ use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum AckChannel {
-    Telegram,
     Discord,
     Slack,
 }
@@ -24,7 +23,6 @@ enum AckChannel {
 impl AckChannel {
     fn as_str(self) -> &'static str {
         match self {
-            Self::Telegram => "telegram",
             Self::Discord => "discord",
             Self::Slack => "slack",
         }
@@ -32,11 +30,10 @@ impl AckChannel {
 
     fn parse(raw: &str) -> anyhow::Result<Self> {
         match raw.trim().to_ascii_lowercase().as_str() {
-            "telegram" => Ok(Self::Telegram),
             "discord" => Ok(Self::Discord),
             "slack" => Ok(Self::Slack),
             other => {
-                anyhow::bail!("Unsupported channel '{other}'. Use telegram|discord|slack")
+                anyhow::bail!("Unsupported channel '{other}'. Use discord|slack")
             }
         }
     }
@@ -148,7 +145,6 @@ impl ChannelAckConfigTool {
 
     fn fallback_defaults(channel: AckChannel) -> Vec<String> {
         match channel {
-            AckChannel::Telegram => vec!["⚡️", "👌", "👀", "🔥", "👍"],
             AckChannel::Discord => vec!["⚡️", "🦀", "🙌", "💪", "👌", "👀", "👣"],
             AckChannel::Slack => vec!["⚡", "👀", "🔥", "👍", "🎉"],
         }
@@ -215,7 +211,6 @@ impl ChannelAckConfigTool {
         channel: AckChannel,
     ) -> Option<&'a AckReactionConfig> {
         match channel {
-            AckChannel::Telegram => channels.telegram.as_ref(),
             AckChannel::Discord => channels.discord.as_ref(),
             AckChannel::Slack => channels.slack.as_ref(),
         }
@@ -226,7 +221,6 @@ impl ChannelAckConfigTool {
         channel: AckChannel,
     ) -> &'a mut Option<AckReactionConfig> {
         match channel {
-            AckChannel::Telegram => &mut channels.telegram,
             AckChannel::Discord => &mut channels.discord,
             AckChannel::Slack => &mut channels.slack,
         }
@@ -249,7 +243,6 @@ impl ChannelAckConfigTool {
 
     fn snapshot_all(channels: &AckReactionChannelsConfig) -> Value {
         json!({
-            "telegram": Self::snapshot_one(channels.telegram.as_ref()),
             "discord": Self::snapshot_one(channels.discord.as_ref()),
             "slack": Self::snapshot_one(channels.slack.as_ref()),
         })
@@ -582,7 +575,7 @@ impl Tool for ChannelAckConfigTool {
     }
 
     fn description(&self) -> &str {
-        "Inspect and update configurable ACK emoji reaction policies for Telegram/Discord/Slack under [channels_config.ack_reaction]. Supports enabling/disabling reactions, setting emoji pools, and rule-based conditions."
+        "Inspect and update configurable ACK emoji reaction policies for Discord/Slack under [channels_config.ack_reaction]. Supports enabling/disabling reactions, setting emoji pools, and rule-based conditions."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -596,7 +589,7 @@ impl Tool for ChannelAckConfigTool {
                 },
                 "channel": {
                     "type": "string",
-                    "enum": ["telegram", "discord", "slack"]
+                    "enum": ["discord", "slack"]
                 },
                 "enabled": {"type": "boolean"},
                 "strategy": {"type": ["string", "null"], "enum": ["random", "first", null]},
@@ -715,7 +708,7 @@ mod tests {
         let set_result = tool
             .execute(json!({
                 "action": "set",
-                "channel": "telegram",
+                "channel": "discord",
                 "enabled": true,
                 "strategy": "first",
                 "sample_rate": 0.75,
@@ -728,7 +721,7 @@ mod tests {
         let get_result = tool
             .execute(json!({
                 "action": "get",
-                "channel": "telegram"
+                "channel": "discord"
             }))
             .await
             .unwrap();
@@ -782,7 +775,7 @@ mod tests {
         let result = tool
             .execute(json!({
                 "action": "set",
-                "channel": "telegram",
+                "channel": "discord",
                 "enabled": false
             }))
             .await
@@ -806,7 +799,7 @@ mod tests {
         let set_result = tool
             .execute(json!({
                 "action": "set",
-                "channel": "telegram",
+                "channel": "discord",
                 "enabled": true,
                 "strategy": "first",
                 "emojis": ["✅"],
@@ -825,7 +818,7 @@ mod tests {
         let result = tool
             .execute(json!({
                 "action": "simulate",
-                "channel": "telegram",
+                "channel": "discord",
                 "text": "deploy finished",
                 "chat_type": "group",
                 "sender_id": "u1",

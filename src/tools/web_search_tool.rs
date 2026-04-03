@@ -1,5 +1,6 @@
 use super::traits::{Tool, ToolResult};
 use super::web_search_provider_routing::{WebSearchProviderRoute, resolve_web_search_provider};
+use crate::config::schema::DEFAULT_USER_AGENT;
 use async_trait::async_trait;
 use regex::Regex;
 use serde_json::json;
@@ -129,7 +130,7 @@ impl WebSearchTool {
 
         let builder = reqwest::Client::builder()
             .timeout(Duration::from_secs(self.timeout_secs))
-            .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
+            .user_agent(DEFAULT_USER_AGENT);
         let builder = crate::config::apply_runtime_proxy_to_builder(builder, "tool.web_search");
         let client = builder.build()?;
 
@@ -203,7 +204,9 @@ impl WebSearchTool {
             encoded_query, self.max_results
         );
 
-        let builder = reqwest::Client::builder().timeout(Duration::from_secs(self.timeout_secs));
+        let builder = reqwest::Client::builder()
+            .timeout(Duration::from_secs(self.timeout_secs))
+            .user_agent(DEFAULT_USER_AGENT);
         let builder = crate::config::apply_runtime_proxy_to_builder(builder, "tool.web_search");
         let client = builder.build()?;
 
@@ -304,7 +307,7 @@ impl WebSearchTool {
 
         let builder = reqwest::Client::builder()
             .timeout(Duration::from_secs(self.timeout_secs))
-            .user_agent("ZeroClaw/1.0");
+            .user_agent(DEFAULT_USER_AGENT);
         let builder = crate::config::apply_runtime_proxy_to_builder(builder, "tool.web_search");
         let client = builder.build()?;
 

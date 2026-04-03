@@ -117,10 +117,7 @@ const SUPPORTED_PROXY_SERVICE_KEYS: &[&str] = &[
     "provider.openrouter",
     "channel.discord",
     "channel.github",
-    "channel.signal",
     "channel.slack",
-    "channel.telegram",
-    "channel.whatsapp",
     "tool.browser",
     "tool.composio",
     "tool.http_request",
@@ -446,6 +443,10 @@ pub struct ProviderConfig {
     /// Existing configs that omit `provider.transport` remain valid and fall back to defaults.
     #[serde(default)]
     pub transport: Option<String>,
+    /// LiteLLM dynamic cache controls applied to all outgoing requests.
+    /// Only relevant when the provider targets a LiteLLM proxy with caching enabled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub litellm_cache: Option<crate::providers::compatible::LiteLlmCacheConfig>,
 }
 // ── Delegate Agents ──────────────────────────────────────────────
 
@@ -525,16 +526,12 @@ impl std::fmt::Debug for Config {
             self.model_providers.keys().map(String::as_str).collect();
         let delegate_agent_ids: Vec<&str> = self.agents.keys().map(String::as_str).collect();
         let enabled_channel_count = [
-            self.channels_config.telegram.is_some(),
             self.channels_config.discord.is_some(),
             self.channels_config.slack.is_some(),
             self.channels_config.webhook.is_some(),
-            self.channels_config.signal.is_some(),
-            self.channels_config.whatsapp.is_some(),
             self.channels_config.github.is_some(),
             self.channels_config.email.is_some(),
             self.channels_config.irc.is_some(),
-            self.channels_config.acp.is_some(),
         ]
         .into_iter()
         .filter(|enabled| *enabled)
@@ -4437,19 +4434,12 @@ impl<T: ChannelConfig> crate::config::traits::ConfigHandle for ConfigWrapper<T> 
 pub struct ChannelsConfig {
     /// Enable the CLI interactive channel. Default: `true`.
     pub cli: bool,
-    /// ACP (Agent Client Protocol) channel configuration.
-    pub acp: Option<AcpConfig>,
-    /// Telegram bot channel configuration.
-    pub telegram: Option<TelegramConfig>,
     /// Discord bot channel configuration.
     pub discord: Option<DiscordConfig>,
     /// Slack bot channel configuration.
     pub slack: Option<SlackConfig>,
     /// Webhook channel configuration.
     pub webhook: Option<WebhookConfig>,
-    pub signal: Option<SignalConfig>,
-    /// WhatsApp channel configuration (Cloud API or Web mode).
-    pub whatsapp: Option<WhatsAppConfig>,
     /// GitHub channel configuration.
     pub github: Option<GitHubConfig>,
     /// Email channel configuration.
@@ -4477,24 +4467,12 @@ impl ChannelsConfig {
     pub fn channels_except_webhook(&self) -> Vec<(Box<dyn super::traits::ConfigHandle>, bool)> {
         vec![
             (
-                Box::new(ConfigWrapper::new(self.telegram.as_ref())),
-                self.telegram.is_some(),
-            ),
-            (
                 Box::new(ConfigWrapper::new(self.discord.as_ref())),
                 self.discord.is_some(),
             ),
             (
                 Box::new(ConfigWrapper::new(self.slack.as_ref())),
                 self.slack.is_some(),
-            ),
-            (
-                Box::new(ConfigWrapper::new(self.signal.as_ref())),
-                self.signal.is_some(),
-            ),
-            (
-                Box::new(ConfigWrapper::new(self.whatsapp.as_ref())),
-                self.whatsapp.is_some(),
             ),
             (
                 Box::new(ConfigWrapper::new(self.github.as_ref())),
@@ -4507,10 +4485,6 @@ impl ChannelsConfig {
             (
                 Box::new(ConfigWrapper::new(self.irc.as_ref())),
                 self.irc.is_some()
-            ),
-            (
-                Box::new(ConfigWrapper::new(self.acp.as_ref())),
-                self.acp.is_some(),
             ),
         ]
     }
@@ -4533,13 +4507,9 @@ impl Default for ChannelsConfig {
     fn default() -> Self {
         Self {
             cli: true,
-            acp: None,
-            telegram: None,
             discord: None,
             slack: None,
             webhook: None,
-            signal: None,
-            whatsapp: None,
             github: None,
             email: None,
             irc: None,
@@ -4761,9 +4731,6 @@ fn default_ack_reaction_sample_rate() -> f64 {
 /// ACK reaction policy table under `[channels_config.ack_reaction]`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
 pub struct AckReactionChannelsConfig {
-    /// Telegram ACK reaction policy.
-    #[serde(default)]
-    pub telegram: Option<AckReactionConfig>,
     /// Discord ACK reaction policy.
     #[serde(default)]
     pub discord: Option<AckReactionConfig>,
@@ -4794,69 +4761,6 @@ fn clone_group_reply_allowed_sender_ids(group_reply: Option<&GroupReplyConfig>) 
     group_reply
         .map(|cfg| cfg.allowed_sender_ids.clone())
         .unwrap_or_default()
-}
-
-/// Telegram bot channel configuration.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct TelegramConfig {
-    /// Telegram Bot API token (from @BotFather).
-    pub bot_token: String,
-    /// Allowed Telegram user IDs or usernames. Empty = deny all.
-    pub allowed_users: Vec<String>,
-    /// Streaming mode for progressive response delivery via message edits.
-    #[serde(default)]
-    pub stream_mode: StreamMode,
-    /// Minimum interval (ms) between draft message edits to avoid rate limits.
-    #[serde(default = "default_draft_update_interval_ms")]
-    pub draft_update_interval_ms: u64,
-    /// When true, a newer Telegram message from the same sender in the same chat
-    /// cancels the in-flight request and starts a fresh response with preserved history.
-    #[serde(default)]
-    pub interrupt_on_new_message: bool,
-    /// When true, only respond to messages that @-mention the bot in groups.
-    /// Direct messages are always processed.
-    #[serde(default)]
-    pub mention_only: bool,
-    /// Draft progress verbosity for streaming updates.
-    #[serde(default)]
-    pub progress_mode: ProgressMode,
-    /// Group-chat trigger controls.
-    #[serde(default)]
-    pub group_reply: Option<GroupReplyConfig>,
-    /// Optional custom base URL for Telegram-compatible APIs.
-    /// Defaults to "https://api.telegram.org" when omitted.
-    /// Example for Bale messenger: "https://tapi.bale.ai"
-    #[serde(default)]
-    pub base_url: Option<String>,
-    /// When true, send emoji reaction acknowledgments (⚡️, 👌, 👀, 🔥, 👍) to incoming messages.
-    /// When false, no reaction is sent. Default is true.
-    #[serde(default = "default_ack_enabled")]
-    pub ack_enabled: bool,
-}
-
-impl ChannelConfig for TelegramConfig {
-    fn name() -> &'static str {
-        "Telegram"
-    }
-    fn desc() -> &'static str {
-        "connect your bot"
-    }
-}
-
-impl TelegramConfig {
-    #[must_use]
-    pub fn effective_group_reply_mode(&self) -> GroupReplyMode {
-        resolve_group_reply_mode(
-            self.group_reply.as_ref(),
-            Some(self.mention_only),
-            GroupReplyMode::AllMessages,
-        )
-    }
-
-    #[must_use]
-    pub fn group_reply_allowed_sender_ids(&self) -> Vec<String> {
-        clone_group_reply_allowed_sender_ids(self.group_reply.as_ref())
-    }
 }
 
 /// Discord bot channel configuration.
@@ -4969,85 +4873,6 @@ impl ChannelConfig for WebhookConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct SignalConfig {
-    /// Base URL for the signal-cli HTTP daemon (e.g. "http://127.0.0.1:8686").
-    pub http_url: String,
-    /// E.164 phone number of the signal-cli account (e.g. "+1234567890").
-    pub account: String,
-    /// Optional group ID to filter messages.
-    /// - `None` or omitted: accept all messages (DMs and groups)
-    /// - `"dm"`: only accept direct messages
-    /// - Specific group ID: only accept messages from that group
-    #[serde(default)]
-    pub group_id: Option<String>,
-    /// Allowed sender phone numbers (E.164) or "*" for all.
-    #[serde(default)]
-    pub allowed_from: Vec<String>,
-    /// Skip messages that are attachment-only (no text body).
-    #[serde(default)]
-    pub ignore_attachments: bool,
-    /// Skip incoming story messages.
-    #[serde(default)]
-    pub ignore_stories: bool,
-}
-
-impl ChannelConfig for SignalConfig {
-    fn name() -> &'static str {
-        "Signal"
-    }
-    fn desc() -> &'static str {
-        "An open-source, encrypted messaging service"
-    }
-}
-
-/// WhatsApp channel configuration (Cloud API or Web mode).
-///
-/// Set `phone_number_id` for Cloud API mode, or `session_path` for Web mode.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct WhatsAppConfig {
-    /// Access token from Meta Business Suite (Cloud API mode)
-    #[serde(default)]
-    pub access_token: Option<String>,
-    /// Phone number ID from Meta Business API (Cloud API mode)
-    #[serde(default)]
-    pub phone_number_id: Option<String>,
-    /// Webhook verify token (you define this, Meta sends it back for verification)
-    /// Only used in Cloud API mode
-    #[serde(default)]
-    pub verify_token: Option<String>,
-    /// App secret from Meta Business Suite (for webhook signature verification)
-    /// Can also be set via `ZEROCLAW_WHATSAPP_APP_SECRET` environment variable
-    /// Only used in Cloud API mode
-    #[serde(default)]
-    pub app_secret: Option<String>,
-    /// Session database path for WhatsApp Web client (Web mode)
-    /// When set, enables native WhatsApp Web mode with wa-rs
-    #[serde(default)]
-    pub session_path: Option<String>,
-    /// Phone number for pair code linking (Web mode, optional)
-    /// Format: country code + number (e.g., "15551234567")
-    /// If not set, QR code pairing will be used
-    #[serde(default)]
-    pub pair_phone: Option<String>,
-    /// Custom pair code for linking (Web mode, optional)
-    /// Leave empty to let WhatsApp generate one
-    #[serde(default)]
-    pub pair_code: Option<String>,
-    /// Allowed phone numbers (E.164 format: +1234567890) or "*" for all
-    #[serde(default)]
-    pub allowed_numbers: Vec<String>,
-}
-
-impl ChannelConfig for WhatsAppConfig {
-    fn name() -> &'static str {
-        "WhatsApp"
-    }
-    fn desc() -> &'static str {
-        "Business Cloud API"
-    }
-}
-
 /// GitHub channel configuration (webhook receive + issue/PR comment send).
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct GitHubConfig {
@@ -5111,38 +4936,6 @@ fn redact_url_userinfo_for_debug(raw: &str) -> String {
     sanitized.push_str(host);
     sanitized.push_str(&rest[auth_end_rel..]);
     sanitized
-}
-
-impl WhatsAppConfig {
-    /// Detect which backend to use based on config fields.
-    /// Returns "cloud" if phone_number_id is set, "web" if session_path is set.
-    pub fn backend_type(&self) -> &'static str {
-        if self.phone_number_id.is_some() {
-            "cloud"
-        } else if self.session_path.is_some() {
-            "web"
-        } else {
-            // Default to Cloud API for backward compatibility
-            "cloud"
-        }
-    }
-
-    /// Check if this is a valid Cloud API config
-    pub fn is_cloud_config(&self) -> bool {
-        self.phone_number_id.is_some() && self.access_token.is_some() && self.verify_token.is_some()
-    }
-
-    /// Check if this is a valid Web config
-    pub fn is_web_config(&self) -> bool {
-        self.session_path.is_some()
-    }
-
-    /// Returns true when both Cloud and Web selectors are present.
-    ///
-    /// Runtime currently prefers Cloud mode in this case for backward compatibility.
-    pub fn is_ambiguous_config(&self) -> bool {
-        self.phone_number_id.is_some() && self.session_path.is_some()
-    }
 }
 
 /// IRC channel configuration.
@@ -6485,90 +6278,10 @@ fn encrypt_map_secrets(
     Ok(())
 }
 
-/// Returns `true` if any known secret field in the config contains a non-empty,
-/// non-encrypted plaintext value.  Called **before** the decrypt pass so we can
-/// detect secrets that were hand-edited into the TOML file and auto-encrypt them.
-fn has_plaintext_secrets(config: &Config) -> bool {
-    use crate::security::SecretStore;
-
-    let is_plain = |s: &str| !s.is_empty() && !SecretStore::is_encrypted(s);
-    let is_plain_opt = |s: &Option<String>| s.as_deref().is_some_and(is_plain);
-
-    is_plain_opt(&config.api_key)
-        || config
-            .model_providers
-            .values()
-            .any(|p| is_plain_opt(&p.api_key))
-        || is_plain_opt(&config.transcription.api_key)
-        || is_plain_opt(&config.composio.api_key)
-        || is_plain_opt(&config.proxy.http_proxy)
-        || is_plain_opt(&config.proxy.https_proxy)
-        || is_plain_opt(&config.proxy.all_proxy)
-        || is_plain_opt(&config.browser.computer_use.api_key)
-        || is_plain_opt(&config.web_search.brave_api_key)
-        || is_plain_opt(&config.storage.provider.config.db_url)
-        || config.reliability.api_keys.iter().any(|s| is_plain(s))
-        || config
-            .reliability
-            .fallback_api_keys
-            .values()
-            .any(|s| is_plain(s))
-        || config.gateway.paired_tokens.iter().any(|s| is_plain(s))
-        || config
-            .agents
-            .values()
-            .any(|a| is_plain_opt(&a.api_key))
-        || has_plaintext_channel_secrets(&config.channels_config)
-        || is_plain(&config.notion.api_key)
-}
-
-fn has_plaintext_channel_secrets(channels: &ChannelsConfig) -> bool {
-    use crate::security::SecretStore;
-
-    let is_plain = |s: &str| !s.is_empty() && !SecretStore::is_encrypted(s);
-    let is_plain_opt = |s: &Option<String>| s.as_deref().is_some_and(is_plain);
-
-    channels
-        .telegram
-        .as_ref()
-        .is_some_and(|t| is_plain(&t.bot_token))
-        || channels
-            .discord
-            .as_ref()
-            .is_some_and(|d| is_plain(&d.bot_token))
-        || channels.slack.as_ref().is_some_and(|s| {
-            is_plain(&s.bot_token) || is_plain_opt(&s.app_token)
-        })
-        || channels
-            .webhook
-            .as_ref()
-            .is_some_and(|w| is_plain_opt(&w.secret))
-        || channels.whatsapp.as_ref().is_some_and(|w| {
-            is_plain_opt(&w.access_token)
-                || is_plain_opt(&w.app_secret)
-                || is_plain_opt(&w.verify_token)
-        })
-        || channels.github.as_ref().is_some_and(|g| {
-            is_plain(&g.access_token) || is_plain_opt(&g.webhook_secret)
-        })
-        || channels.irc.as_ref().is_some_and(|i| {
-            is_plain_opt(&i.server_password)
-                || is_plain_opt(&i.nickserv_password)
-                || is_plain_opt(&i.sasl_password)
-        })
-}
-
 fn decrypt_channel_secrets(
     store: &crate::security::SecretStore,
     channels: &mut ChannelsConfig,
 ) -> Result<()> {
-    if let Some(ref mut telegram) = channels.telegram {
-        decrypt_secret(
-            store,
-            &mut telegram.bot_token,
-            "config.channels_config.telegram.bot_token",
-        )?;
-    }
     if let Some(ref mut discord) = channels.discord {
         decrypt_secret(
             store,
@@ -6593,23 +6306,6 @@ fn decrypt_channel_secrets(
             store,
             &mut webhook.secret,
             "config.channels_config.webhook.secret",
-        )?;
-    }
-    if let Some(ref mut whatsapp) = channels.whatsapp {
-        decrypt_optional_secret(
-            store,
-            &mut whatsapp.access_token,
-            "config.channels_config.whatsapp.access_token",
-        )?;
-        decrypt_optional_secret(
-            store,
-            &mut whatsapp.app_secret,
-            "config.channels_config.whatsapp.app_secret",
-        )?;
-        decrypt_optional_secret(
-            store,
-            &mut whatsapp.verify_token,
-            "config.channels_config.whatsapp.verify_token",
         )?;
     }
     if let Some(ref mut github) = channels.github {
@@ -6648,13 +6344,6 @@ fn encrypt_channel_secrets(
     store: &crate::security::SecretStore,
     channels: &mut ChannelsConfig,
 ) -> Result<()> {
-    if let Some(ref mut telegram) = channels.telegram {
-        encrypt_secret(
-            store,
-            &mut telegram.bot_token,
-            "config.channels_config.telegram.bot_token",
-        )?;
-    }
     if let Some(ref mut discord) = channels.discord {
         encrypt_secret(
             store,
@@ -6679,23 +6368,6 @@ fn encrypt_channel_secrets(
             store,
             &mut webhook.secret,
             "config.channels_config.webhook.secret",
-        )?;
-    }
-    if let Some(ref mut whatsapp) = channels.whatsapp {
-        encrypt_optional_secret(
-            store,
-            &mut whatsapp.access_token,
-            "config.channels_config.whatsapp.access_token",
-        )?;
-        encrypt_optional_secret(
-            store,
-            &mut whatsapp.app_secret,
-            "config.channels_config.whatsapp.app_secret",
-        )?;
-        encrypt_optional_secret(
-            store,
-            &mut whatsapp.verify_token,
-            "config.channels_config.whatsapp.verify_token",
         )?;
     }
     if let Some(ref mut github) = channels.github {
@@ -6906,8 +6578,6 @@ impl Config {
             config.config_path = config_path.clone();
             config.workspace_dir = workspace_dir;
             let store = crate::security::SecretStore::new(&zeroclaw_dir, config.secrets.encrypt);
-            let needs_encrypt =
-                config.secrets.encrypt && has_plaintext_secrets(&config);
             decrypt_optional_secret(&store, &mut config.api_key, "config.api_key")?;
             for (profile_name, profile) in config.model_providers.iter_mut() {
                 let secret_path = format!("config.model_providers.{profile_name}.api_key");
@@ -6980,13 +6650,6 @@ impl Config {
             // Notion API key (top-level, not in ChannelsConfig)
             if !config.notion.api_key.is_empty() {
                 decrypt_secret(&store, &mut config.notion.api_key, "config.notion.api_key")?;
-            }
-
-            // If any secrets were stored as plaintext, re-save the config to
-            // encrypt them so they don't remain in the clear on disk.
-            if needs_encrypt {
-                tracing::info!("Encrypting plaintext secrets found in config file");
-                config.save().await?;
             }
 
             config.apply_env_overrides();
@@ -7185,6 +6848,13 @@ impl Config {
         None
     }
 
+    /// Resolve LiteLLM cache config from the `[provider]` section.
+    pub fn effective_litellm_cache(
+        &self,
+    ) -> Option<crate::providers::compatible::LiteLlmCacheConfig> {
+        self.provider.litellm_cache.clone()
+    }
+
     fn lookup_model_provider_profile(
         &self,
         provider_name: &str,
@@ -7310,10 +6980,6 @@ impl Config {
     /// Called after TOML deserialization and env-override application to catch
     /// obviously invalid values early instead of failing at arbitrary runtime points.
     pub fn validate(&self) -> Result<()> {
-        if let Some(acp) = &self.channels_config.acp {
-            acp.validate()?;
-        }
-
         // Gateway
         if self.gateway.host.trim().is_empty() {
             anyhow::bail!("gateway.host must not be empty");
@@ -8796,60 +8462,6 @@ fn sync_directory(path: &Path) -> Result<()> {
     Ok(())
 }
 
-/// ACP (Agent Client Protocol) channel configuration.
-///
-/// Enables ZeroClaw to act as an ACP client, connecting to an OpenCode ACP server
-/// via `opencode acp` command for JSON-RPC 2.0 communication over stdio.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct AcpConfig {
-    /// OpenCode binary path (default: "opencode").
-    #[serde(default = "default_acp_opencode_path")]
-    pub opencode_path: Option<String>,
-    /// Working directory for OpenCode process.
-    pub workdir: Option<String>,
-    /// Additional arguments to pass to `opencode acp`.
-    #[serde(default)]
-    pub extra_args: Vec<String>,
-    /// Allowed user identifiers (empty = deny all, "*" = allow all).
-    #[serde(default)]
-    pub allowed_users: Vec<String>,
-}
-
-fn default_acp_opencode_path() -> Option<String> {
-    Some("opencode".to_string())
-}
-
-impl AcpConfig {
-    fn validate(&self) -> Result<()> {
-        if self
-            .opencode_path
-            .as_deref()
-            .is_some_and(|path| path.trim().is_empty())
-        {
-            anyhow::bail!("channels_config.acp.opencode_path must not be empty when set");
-        }
-
-        if self
-            .workdir
-            .as_deref()
-            .is_some_and(|dir| dir.trim().is_empty())
-        {
-            anyhow::bail!("channels_config.acp.workdir must not be empty when set");
-        }
-
-        Ok(())
-    }
-}
-
-impl ChannelConfig for AcpConfig {
-    fn name() -> &'static str {
-        "ACP"
-    }
-
-    fn desc() -> &'static str {
-        "Agent Client Protocol channel for OpenCode integration"
-    }
-}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -8952,18 +8564,6 @@ mod tests {
         config.storage.provider.config.db_url = Some("postgres://user:pw@host/db".into());
         config.browser.computer_use.api_key = Some("browser-credential".into());
         config.gateway.paired_tokens = vec!["zc_0123456789abcdef".into()];
-        config.channels_config.telegram = Some(TelegramConfig {
-            bot_token: "telegram-credential".into(),
-            allowed_users: Vec::new(),
-            stream_mode: StreamMode::Off,
-            draft_update_interval_ms: 1000,
-            interrupt_on_new_message: false,
-            mention_only: false,
-            progress_mode: ProgressMode::default(),
-            ack_enabled: true,
-            group_reply: None,
-            base_url: None,
-        });
         config.agents.insert(
             "worker".into(),
             DelegateAgentConfig {
@@ -8990,7 +8590,6 @@ mod tests {
             "postgres://user:pw@host/db",
             "browser-credential",
             "zc_0123456789abcdef",
-            "telegram-credential",
             "agent-credential",
         ]
         .into_iter()
@@ -9003,7 +8602,6 @@ mod tests {
         }
 
         assert!(!debug_output.contains("paired_tokens"));
-        assert!(!debug_output.contains("bot_token"));
         assert!(!debug_output.contains("db_url"));
     }
 
@@ -9262,7 +8860,7 @@ interval_minutes = 10
 max_tasks_per_tick = 5
 dedupe_window_minutes = 30
 message = "Ping"
-channel = "telegram"
+channel = "discord"
 recipient = "42"
 "#;
         let parsed: HeartbeatConfig = toml::from_str(raw).unwrap();
@@ -9271,7 +8869,7 @@ recipient = "42"
         assert_eq!(parsed.max_tasks_per_tick, 5);
         assert_eq!(parsed.dedupe_window_minutes, 30);
         assert_eq!(parsed.message.as_deref(), Some("Ping"));
-        assert_eq!(parsed.target.as_deref(), Some("telegram"));
+        assert_eq!(parsed.target.as_deref(), Some("discord"));
         assert_eq!(parsed.to.as_deref(), Some("42"));
     }
 
@@ -9333,7 +8931,6 @@ default_temperature = 0.7
     async fn channels_config_default() {
         let c = ChannelsConfig::default();
         assert!(c.cli);
-        assert!(c.telegram.is_none());
         assert!(c.discord.is_none());
     }
 
@@ -9399,7 +8996,7 @@ default_temperature = 0.7
                 max_tasks_per_tick: 4,
                 dedupe_window_minutes: 10,
                 message: Some("Check London time".into()),
-                target: Some("telegram".into()),
+                target: Some("discord".into()),
                 to: Some("123456".into()),
                 load_session_context: false,
             },
@@ -9407,25 +9004,16 @@ default_temperature = 0.7
             goal_loop: GoalLoopConfig::default(),
             channels_config: ChannelsConfig {
                 cli: true,
-                acp: None,
-                telegram: Some(TelegramConfig {
-                    bot_token: "123:ABC".into(),
+                discord: Some(DiscordConfig {
+                    bot_token: "discord-tok".into(),
+                    guild_id: Some("guild1".into()),
                     allowed_users: vec!["user1".into()],
-                    stream_mode: StreamMode::default(),
-                    draft_update_interval_ms: default_draft_update_interval_ms(),
-                    interrupt_on_new_message: false,
+                    listen_to_bots: false,
                     mention_only: false,
-                    progress_mode: ProgressMode::default(),
-                    ack_enabled: true,
                     group_reply: None,
-                    base_url: None,
                 }),
-                discord: None,
                 slack: None,
                 webhook: None,
-
-                signal: None,
-                whatsapp: None,
                 github: None,
 
                 email: None,
@@ -9483,12 +9071,12 @@ default_temperature = 0.7
             parsed.heartbeat.message.as_deref(),
             Some("Check London time")
         );
-        assert_eq!(parsed.heartbeat.target.as_deref(), Some("telegram"));
+        assert_eq!(parsed.heartbeat.target.as_deref(), Some("discord"));
         assert_eq!(parsed.heartbeat.to.as_deref(), Some("123456"));
-        assert!(parsed.channels_config.telegram.is_some());
+        assert!(parsed.channels_config.discord.is_some());
         assert_eq!(
-            parsed.channels_config.telegram.unwrap().bot_token,
-            "123:ABC"
+            parsed.channels_config.discord.unwrap().bot_token,
+            "discord-tok"
         );
     }
 
@@ -9860,18 +9448,6 @@ denied_tools = ["shell"]
             "fallback-a-credential".into(),
         );
         config.gateway.paired_tokens = vec!["zc_0123456789abcdef".into()];
-        config.channels_config.telegram = Some(TelegramConfig {
-            bot_token: "telegram-credential".into(),
-            allowed_users: Vec::new(),
-            stream_mode: StreamMode::Off,
-            draft_update_interval_ms: 1000,
-            interrupt_on_new_message: false,
-            mention_only: false,
-            progress_mode: ProgressMode::default(),
-            ack_enabled: true,
-            group_reply: None,
-            base_url: None,
-        });
 
         config.agents.insert(
             "worker".into(),
@@ -9993,19 +9569,6 @@ denied_tools = ["shell"]
         assert!(crate::security::SecretStore::is_encrypted(paired_token));
         assert_eq!(store.decrypt(paired_token).unwrap(), "zc_0123456789abcdef");
 
-        let telegram_token = stored
-            .channels_config
-            .telegram
-            .as_ref()
-            .unwrap()
-            .bot_token
-            .clone();
-        assert!(crate::security::SecretStore::is_encrypted(&telegram_token));
-        assert_eq!(
-            store.decrypt(&telegram_token).unwrap(),
-            "telegram-credential"
-        );
-
         let _ = fs::remove_dir_all(&dir).await;
     }
 
@@ -10039,60 +9602,7 @@ denied_tools = ["shell"]
         let _ = fs::remove_dir_all(&dir).await;
     }
 
-    // ── Telegram / Discord config ────────────────────────────
-
-    #[test]
-    async fn telegram_config_serde() {
-        let tc = TelegramConfig {
-            bot_token: "123:XYZ".into(),
-            allowed_users: vec!["alice".into(), "bob".into()],
-            stream_mode: StreamMode::Partial,
-            draft_update_interval_ms: 500,
-            interrupt_on_new_message: true,
-            mention_only: false,
-            progress_mode: ProgressMode::default(),
-            ack_enabled: true,
-            group_reply: None,
-            base_url: None,
-        };
-        let json = serde_json::to_string(&tc).unwrap();
-        let parsed: TelegramConfig = serde_json::from_str(&json).unwrap();
-        assert_eq!(parsed.bot_token, "123:XYZ");
-        assert_eq!(parsed.allowed_users.len(), 2);
-        assert_eq!(parsed.stream_mode, StreamMode::Partial);
-        assert_eq!(parsed.draft_update_interval_ms, 500);
-        assert!(parsed.interrupt_on_new_message);
-    }
-
-    #[test]
-    async fn telegram_config_defaults_stream_off() {
-        let json = r#"{"bot_token":"tok","allowed_users":[]}"#;
-        let parsed: TelegramConfig = serde_json::from_str(json).unwrap();
-        assert_eq!(parsed.stream_mode, StreamMode::Off);
-        assert_eq!(parsed.progress_mode, ProgressMode::Compact);
-        assert_eq!(parsed.draft_update_interval_ms, 1000);
-        assert!(!parsed.interrupt_on_new_message);
-        assert!(parsed.base_url.is_none());
-        assert_eq!(
-            parsed.effective_group_reply_mode(),
-            GroupReplyMode::AllMessages
-        );
-        assert!(parsed.group_reply_allowed_sender_ids().is_empty());
-    }
-
-    #[test]
-    async fn telegram_config_deserializes_stream_mode_on() {
-        let json = r#"{"bot_token":"tok","allowed_users":[],"stream_mode":"on"}"#;
-        let parsed: TelegramConfig = serde_json::from_str(json).unwrap();
-        assert_eq!(parsed.stream_mode, StreamMode::On);
-    }
-
-    #[test]
-    async fn telegram_config_custom_base_url() {
-        let json = r#"{"bot_token":"tok","allowed_users":[],"base_url":"https://tapi.bale.ai"}"#;
-        let parsed: TelegramConfig = serde_json::from_str(json).unwrap();
-        assert_eq!(parsed.base_url, Some("https://tapi.bale.ai".to_string()));
-    }
+    // ── Discord config ────────────────────────────────────────
 
     #[test]
     async fn progress_mode_deserializes_variants() {
@@ -10103,43 +9613,6 @@ denied_tools = ["shell"]
         assert_eq!(verbose, ProgressMode::Verbose);
         assert_eq!(compact, ProgressMode::Compact);
         assert_eq!(off, ProgressMode::Off);
-    }
-
-    #[test]
-    async fn telegram_config_deserializes_progress_mode_verbose() {
-        let json = r#"{"bot_token":"tok","allowed_users":[],"progress_mode":"verbose"}"#;
-        let parsed: TelegramConfig = serde_json::from_str(json).unwrap();
-        assert_eq!(parsed.progress_mode, ProgressMode::Verbose);
-    }
-
-    #[test]
-    async fn telegram_config_deserializes_progress_mode_off() {
-        let json = r#"{"bot_token":"tok","allowed_users":[],"progress_mode":"off"}"#;
-        let parsed: TelegramConfig = serde_json::from_str(json).unwrap();
-        assert_eq!(parsed.progress_mode, ProgressMode::Off);
-    }
-
-    #[test]
-    async fn telegram_group_reply_config_overrides_legacy_mention_only() {
-        let json = r#"{
-            "bot_token":"tok",
-            "allowed_users":["*"],
-            "mention_only":false,
-            "group_reply":{
-                "mode":"mention_only",
-                "allowed_sender_ids":["1001","1002"]
-            }
-        }"#;
-
-        let parsed: TelegramConfig = serde_json::from_str(json).unwrap();
-        assert_eq!(
-            parsed.effective_group_reply_mode(),
-            GroupReplyMode::MentionOnly
-        );
-        assert_eq!(
-            parsed.group_reply_allowed_sender_ids(),
-            vec!["1001".to_string(), "1002".to_string()]
-        );
     }
 
     #[test]
@@ -10209,58 +9682,10 @@ denied_tools = ["shell"]
     }
 
     #[test]
-    async fn signal_config_serde() {
-        let sc = SignalConfig {
-            http_url: "http://127.0.0.1:8686".into(),
-            account: "+1234567890".into(),
-            group_id: Some("group123".into()),
-            allowed_from: vec!["+1111111111".into()],
-            ignore_attachments: true,
-            ignore_stories: false,
-        };
-        let json = serde_json::to_string(&sc).unwrap();
-        let parsed: SignalConfig = serde_json::from_str(&json).unwrap();
-        assert_eq!(parsed.http_url, "http://127.0.0.1:8686");
-        assert_eq!(parsed.account, "+1234567890");
-        assert_eq!(parsed.group_id.as_deref(), Some("group123"));
-        assert_eq!(parsed.allowed_from.len(), 1);
-        assert!(parsed.ignore_attachments);
-        assert!(!parsed.ignore_stories);
-    }
-
-    #[test]
-    async fn signal_confi_toml_roundtrip() {
-        let sc = SignalConfig {
-            http_url: "http://localhost:8080".into(),
-            account: "+9876543210".into(),
-            group_id: None,
-            allowed_from: vec!["*".into()],
-            ignore_attachments: false,
-            ignore_stories: true,
-        };
-        let toml_str = toml::to_string(&sc).unwrap();
-        let parsed: SignalConfig = toml::from_str(&toml_str).unwrap();
-        assert_eq!(parsed.http_url, "http://localhost:8080");
-        assert_eq!(parsed.account, "+9876543210");
-        assert!(parsed.group_id.is_none());
-        assert!(parsed.ignore_stories);
-    }
-
-    #[test]
-    async fn signal_config_defaults() {
-        let json = r#"{"http_url":"http://127.0.0.1:8686","account":"+1234567890"}"#;
-        let parsed: SignalConfig = serde_json::from_str(json).unwrap();
-        assert!(parsed.group_id.is_none());
-        assert!(parsed.allowed_from.is_empty());
-        assert!(!parsed.ignore_attachments);
-        assert!(!parsed.ignore_stories);
-    }
-
-    #[test]
     async fn channels_ack_reaction_config_roundtrip() {
         let c = ChannelsConfig {
             ack_reaction: AckReactionChannelsConfig {
-                telegram: Some(AckReactionConfig {
+                discord: Some(AckReactionConfig {
                     enabled: true,
                     strategy: AckReactionStrategy::First,
                     sample_rate: 0.8,
@@ -10283,7 +9708,6 @@ denied_tools = ["shell"]
                         emojis: vec!["🚀".into()],
                     }],
                 }),
-                discord: None,
                 slack: None,
             },
             ..ChannelsConfig::default()
@@ -10291,13 +9715,13 @@ denied_tools = ["shell"]
 
         let toml_str = toml::to_string_pretty(&c).unwrap();
         let parsed: ChannelsConfig = toml::from_str(&toml_str).unwrap();
-        let telegram = parsed.ack_reaction.telegram.expect("telegram ack config");
-        assert!(telegram.enabled);
-        assert_eq!(telegram.strategy, AckReactionStrategy::First);
-        assert_eq!(telegram.sample_rate, 0.8);
-        assert_eq!(telegram.emojis, vec!["✅", "👍"]);
-        assert_eq!(telegram.rules.len(), 1);
-        let first_rule = &telegram.rules[0];
+        let discord = parsed.ack_reaction.discord.expect("discord ack config");
+        assert!(discord.enabled);
+        assert_eq!(discord.strategy, AckReactionStrategy::First);
+        assert_eq!(discord.sample_rate, 0.8);
+        assert_eq!(discord.emojis, vec!["✅", "👍"]);
+        assert_eq!(discord.rules.len(), 1);
+        let first_rule = &discord.rules[0];
         assert_eq!(first_rule.contains_any, vec!["deploy"]);
         assert_eq!(first_rule.contains_none, vec!["dry-run"]);
         assert_eq!(first_rule.regex_any, vec![r"deploy\s+ok"]);
@@ -10310,8 +9734,8 @@ denied_tools = ["shell"]
     #[test]
     async fn channels_ack_reaction_defaults_empty() {
         let parsed: ChannelsConfig = toml::from_str("cli = true").unwrap();
-        assert!(parsed.ack_reaction.telegram.is_none());
         assert!(parsed.ack_reaction.discord.is_none());
+        assert!(parsed.ack_reaction.slack.is_none());
     }
 
     // ── Edge cases: serde(default) for allowed_users ─────────
@@ -10438,142 +9862,6 @@ allowed_sender_ids = ["U111", "U222"]
         let parsed: WebhookConfig = serde_json::from_str(json).unwrap();
         assert!(parsed.secret.is_none());
         assert_eq!(parsed.port, 8080);
-    }
-
-    // ── WhatsApp config ──────────────────────────────────────
-
-    #[test]
-    async fn whatsapp_config_serde() {
-        let wc = WhatsAppConfig {
-            access_token: Some("EAABx...".into()),
-            phone_number_id: Some("123456789".into()),
-            verify_token: Some("my-verify-token".into()),
-            app_secret: None,
-            session_path: None,
-            pair_phone: None,
-            pair_code: None,
-            allowed_numbers: vec!["+1234567890".into(), "+9876543210".into()],
-        };
-        let json = serde_json::to_string(&wc).unwrap();
-        let parsed: WhatsAppConfig = serde_json::from_str(&json).unwrap();
-        assert_eq!(parsed.access_token, Some("EAABx...".into()));
-        assert_eq!(parsed.phone_number_id, Some("123456789".into()));
-        assert_eq!(parsed.verify_token, Some("my-verify-token".into()));
-        assert_eq!(parsed.allowed_numbers.len(), 2);
-    }
-
-    #[test]
-    async fn whatsapp_config_toml_roundtrip() {
-        let wc = WhatsAppConfig {
-            access_token: Some("tok".into()),
-            phone_number_id: Some("12345".into()),
-            verify_token: Some("verify".into()),
-            app_secret: Some("secret123".into()),
-            session_path: None,
-            pair_phone: None,
-            pair_code: None,
-            allowed_numbers: vec!["+1".into()],
-        };
-        let toml_str = toml::to_string(&wc).unwrap();
-        let parsed: WhatsAppConfig = toml::from_str(&toml_str).unwrap();
-        assert_eq!(parsed.phone_number_id, Some("12345".into()));
-        assert_eq!(parsed.allowed_numbers, vec!["+1"]);
-    }
-
-    #[test]
-    async fn whatsapp_config_deserializes_without_allowed_numbers() {
-        let json = r#"{"access_token":"tok","phone_number_id":"123","verify_token":"ver"}"#;
-        let parsed: WhatsAppConfig = serde_json::from_str(json).unwrap();
-        assert!(parsed.allowed_numbers.is_empty());
-    }
-
-    #[test]
-    async fn whatsapp_config_wildcard_allowed() {
-        let wc = WhatsAppConfig {
-            access_token: Some("tok".into()),
-            phone_number_id: Some("123".into()),
-            verify_token: Some("ver".into()),
-            app_secret: None,
-            session_path: None,
-            pair_phone: None,
-            pair_code: None,
-            allowed_numbers: vec!["*".into()],
-        };
-        let toml_str = toml::to_string(&wc).unwrap();
-        let parsed: WhatsAppConfig = toml::from_str(&toml_str).unwrap();
-        assert_eq!(parsed.allowed_numbers, vec!["*"]);
-    }
-
-    #[test]
-    async fn whatsapp_config_backend_type_cloud_precedence_when_ambiguous() {
-        let wc = WhatsAppConfig {
-            access_token: Some("tok".into()),
-            phone_number_id: Some("123".into()),
-            verify_token: Some("ver".into()),
-            app_secret: None,
-            session_path: Some("~/.zeroclaw/state/whatsapp-web/session.db".into()),
-            pair_phone: None,
-            pair_code: None,
-            allowed_numbers: vec!["+1".into()],
-        };
-        assert!(wc.is_ambiguous_config());
-        assert_eq!(wc.backend_type(), "cloud");
-    }
-
-    #[test]
-    async fn whatsapp_config_backend_type_web() {
-        let wc = WhatsAppConfig {
-            access_token: None,
-            phone_number_id: None,
-            verify_token: None,
-            app_secret: None,
-            session_path: Some("~/.zeroclaw/state/whatsapp-web/session.db".into()),
-            pair_phone: None,
-            pair_code: None,
-            allowed_numbers: vec![],
-        };
-        assert!(!wc.is_ambiguous_config());
-        assert_eq!(wc.backend_type(), "web");
-    }
-
-    #[test]
-    async fn channels_config_with_whatsapp() {
-        let c = ChannelsConfig {
-            cli: true,
-            acp: None,
-            telegram: None,
-            discord: None,
-            slack: None,
-            webhook: None,
-            signal: None,
-            whatsapp: Some(WhatsAppConfig {
-                access_token: Some("tok".into()),
-                phone_number_id: Some("123".into()),
-                verify_token: Some("ver".into()),
-                app_secret: None,
-                session_path: None,
-                pair_phone: None,
-                pair_code: None,
-                allowed_numbers: vec!["+1".into()],
-            }),
-            github: None,
-            email: None,
-            irc: None,
-            ack_reaction: AckReactionChannelsConfig::default(),
-            message_timeout_secs: 300,
-        };
-        let toml_str = toml::to_string_pretty(&c).unwrap();
-        let parsed: ChannelsConfig = toml::from_str(&toml_str).unwrap();
-        assert!(parsed.whatsapp.is_some());
-        let wa = parsed.whatsapp.unwrap();
-        assert_eq!(wa.phone_number_id, Some("123".into()));
-        assert_eq!(wa.allowed_numbers, vec!["+1"]);
-    }
-
-    #[test]
-    async fn channels_config_default_has_no_whatsapp() {
-        let c = ChannelsConfig::default();
-        assert!(c.whatsapp.is_none());
     }
 
     // ══════════════════════════════════════════════════════════

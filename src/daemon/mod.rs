@@ -590,13 +590,6 @@ fn heartbeat_delivery_target(config: &Config) -> Result<Option<(String, String)>
 fn validate_heartbeat_channel_config(config: &Config, channel: &str) -> Result<()> {
     let normalized = channel.to_ascii_lowercase();
     match normalized.as_str() {
-        "telegram" => {
-            if config.channels_config.telegram.is_none() {
-                anyhow::bail!(
-                    "heartbeat.target is set to telegram but channels_config.telegram is not configured"
-                );
-            }
-        }
         "discord" => {
             if config.channels_config.discord.is_none() {
                 anyhow::bail!(
@@ -608,19 +601,6 @@ fn validate_heartbeat_channel_config(config: &Config, channel: &str) -> Result<(
             if config.channels_config.slack.is_none() {
                 anyhow::bail!(
                     "heartbeat.target is set to slack but channels_config.slack is not configured"
-                );
-            }
-        }
-        "whatsapp" | "whatsapp_web" => {
-            let wa = config.channels_config.whatsapp.as_ref().ok_or_else(|| {
-                anyhow::anyhow!(
-                    "heartbeat.target is set to {channel} but channels_config.whatsapp is not configured"
-                )
-            })?;
-
-            if normalized == "whatsapp_web" && wa.is_cloud_config() && !wa.is_web_config() {
-                anyhow::bail!(
-                    "heartbeat.target is set to whatsapp_web but channels_config.whatsapp is configured for cloud mode (set session_path for web mode)"
                 );
             }
         }
@@ -804,17 +784,13 @@ mod tests {
     #[test]
     fn detects_supervised_channels_present() {
         let mut config = Config::default();
-        config.channels_config.telegram = Some(crate::config::TelegramConfig {
+        config.channels_config.discord = Some(crate::config::DiscordConfig {
             bot_token: "token".into(),
+            guild_id: None,
             allowed_users: vec![],
-            stream_mode: crate::config::StreamMode::default(),
-            draft_update_interval_ms: 1000,
-            interrupt_on_new_message: false,
+            listen_to_bots: false,
             mention_only: false,
-            progress_mode: crate::config::ProgressMode::default(),
-            ack_enabled: true,
             group_reply: None,
-            base_url: None,
         });
         assert!(has_supervised_channels(&config));
     }
@@ -976,77 +952,30 @@ mod tests {
     #[test]
     fn heartbeat_delivery_target_requires_channel_configuration() {
         let mut config = Config::default();
-        config.heartbeat.target = Some("telegram".into());
+        config.heartbeat.target = Some("discord".into());
         config.heartbeat.to = Some("123456".into());
         let err = heartbeat_delivery_target(&config).unwrap_err();
         assert!(
             err.to_string()
-                .contains("channels_config.telegram is not configured")
+                .contains("channels_config.discord is not configured")
         );
     }
 
     #[test]
-    fn heartbeat_delivery_target_accepts_telegram_configuration() {
+    fn heartbeat_delivery_target_accepts_discord_configuration() {
         let mut config = Config::default();
-        config.heartbeat.target = Some("telegram".into());
+        config.heartbeat.target = Some("discord".into());
         config.heartbeat.to = Some("123456".into());
-        config.channels_config.telegram = Some(crate::config::TelegramConfig {
+        config.channels_config.discord = Some(crate::config::DiscordConfig {
             bot_token: "bot-token".into(),
+            guild_id: None,
             allowed_users: vec![],
-            stream_mode: crate::config::StreamMode::default(),
-            draft_update_interval_ms: 1000,
-            interrupt_on_new_message: false,
+            listen_to_bots: false,
             mention_only: false,
-            progress_mode: crate::config::ProgressMode::default(),
-            ack_enabled: true,
             group_reply: None,
-            base_url: None,
         });
 
         let target = heartbeat_delivery_target(&config).unwrap();
-        assert_eq!(target, Some(("telegram".to_string(), "123456".to_string())));
-    }
-
-    #[test]
-    fn heartbeat_delivery_target_accepts_whatsapp_web_target_in_web_mode() {
-        let mut config = Config::default();
-        config.heartbeat.target = Some("whatsapp_web".into());
-        config.heartbeat.to = Some("+15551234567".into());
-        config.channels_config.whatsapp = Some(crate::config::schema::WhatsAppConfig {
-            access_token: None,
-            phone_number_id: None,
-            verify_token: None,
-            app_secret: None,
-            session_path: Some("~/.zeroclaw/state/whatsapp-web/session.db".into()),
-            pair_phone: None,
-            pair_code: None,
-            allowed_numbers: vec!["*".into()],
-        });
-
-        let target = heartbeat_delivery_target(&config).unwrap();
-        assert_eq!(
-            target,
-            Some(("whatsapp_web".to_string(), "+15551234567".to_string()))
-        );
-    }
-
-    #[test]
-    fn heartbeat_delivery_target_rejects_whatsapp_web_target_in_cloud_mode() {
-        let mut config = Config::default();
-        config.heartbeat.target = Some("whatsapp_web".into());
-        config.heartbeat.to = Some("+15551234567".into());
-        config.channels_config.whatsapp = Some(crate::config::schema::WhatsAppConfig {
-            access_token: Some("token".into()),
-            phone_number_id: Some("123456".into()),
-            verify_token: Some("verify".into()),
-            app_secret: None,
-            session_path: None,
-            pair_phone: None,
-            pair_code: None,
-            allowed_numbers: vec!["*".into()],
-        });
-
-        let err = heartbeat_delivery_target(&config).unwrap_err();
-        assert!(err.to_string().contains("configured for cloud mode"));
+        assert_eq!(target, Some(("discord".to_string(), "123456".to_string())));
     }
 }

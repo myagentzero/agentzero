@@ -21,6 +21,22 @@ use std::time::Instant;
 
 const AUTOSAVE_MIN_MESSAGE_CHARS: usize = 20;
 
+/// Events emitted during a streamed agent turn.
+#[derive(Debug, Clone)]
+pub enum TurnEvent {
+    /// A text chunk from the LLM response.
+    Chunk { delta: String },
+    /// A reasoning/thinking chunk from a thinking model.
+    Thinking { delta: String },
+    /// The agent is invoking a tool.
+    ToolCall {
+        name: String,
+        args: serde_json::Value,
+    },
+    /// A tool has returned a result.
+    ToolResult { name: String, output: String },
+}
+
 pub struct Agent {
     provider: Box<dyn Provider>,
     tools: Vec<Box<dyn Tool>>,
@@ -756,6 +772,23 @@ impl Agent {
             "Agent exceeded maximum tool iterations ({})",
             self.config.max_tool_iterations
         )
+    }
+
+    /// Streamed variant of `turn` — runs the standard turn and forwards
+    /// the final result as a single `TurnEvent::Chunk`. Tool call events
+    /// are not individually streamed in this simplified implementation.
+    pub async fn turn_streamed(
+        &mut self,
+        user_message: &str,
+        event_tx: tokio::sync::mpsc::Sender<TurnEvent>,
+    ) -> Result<String> {
+        let result = self.turn(user_message).await?;
+        let _ = event_tx
+            .send(TurnEvent::Chunk {
+                delta: result.clone(),
+            })
+            .await;
+        Ok(result)
     }
 
     /// Flush any remaining buffered turns for fact extraction.

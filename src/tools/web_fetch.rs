@@ -1,5 +1,5 @@
 use super::traits::{Tool, ToolResult};
-use crate::config::schema::FirecrawlConfig;
+use crate::config::schema::{DEFAULT_USER_AGENT, FirecrawlConfig};
 use crate::security::SecurityPolicy;
 use async_trait::async_trait;
 use futures_util::StreamExt;
@@ -274,6 +274,17 @@ impl Tool for WebFetchTool {
          Security: allowlist-only domains, no local/private hosts."
     }
 
+    fn prompt_hint(&self) -> Option<&str> {
+        Some(
+            "Fetch a web page as plain text. Use when: reading documentation, APIs, or public web content. \
+             Don't use when: making POST/PUT requests (use http_request) or browsing interactive pages (use browser).",
+        )
+    }
+
+    fn prompt_hint_compact(&self) -> &str {
+        "Fetch a web page as plain text."
+    }
+
     fn parameters_schema(&self) -> serde_json::Value {
         json!({
             "type": "object",
@@ -356,7 +367,7 @@ impl Tool for WebFetchTool {
             .timeout(Duration::from_secs(timeout_secs))
             .connect_timeout(Duration::from_secs(10))
             .redirect(redirect_policy)
-            .user_agent("ZeroClaw/0.1 (web_fetch)");
+            .user_agent(DEFAULT_USER_AGENT);
         let builder = crate::config::apply_runtime_proxy_to_builder(builder, "tool.web_fetch");
         let client = match builder.build() {
             Ok(c) => c,

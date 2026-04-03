@@ -10,18 +10,6 @@ pub fn all_integrations() -> Vec<IntegrationEntry> {
     vec![
         // ── Chat Providers ──────────────────────────────────────
         IntegrationEntry {
-            name: "Telegram",
-            description: "Bot API — long-polling",
-            category: IntegrationCategory::Chat,
-            status_fn: |c| {
-                if c.channels_config.telegram.is_some() {
-                    IntegrationStatus::Active
-                } else {
-                    IntegrationStatus::Available
-                }
-            },
-        },
-        IntegrationEntry {
             name: "Discord",
             description: "Servers, channels & DMs",
             category: IntegrationCategory::Chat,
@@ -58,30 +46,6 @@ pub fn all_integrations() -> Vec<IntegrationEntry> {
             },
         },
         IntegrationEntry {
-            name: "WhatsApp",
-            description: "Meta Cloud API via webhook",
-            category: IntegrationCategory::Chat,
-            status_fn: |c| {
-                if c.channels_config.whatsapp.is_some() {
-                    IntegrationStatus::Active
-                } else {
-                    IntegrationStatus::Available
-                }
-            },
-        },
-        IntegrationEntry {
-            name: "Signal",
-            description: "Privacy-focused via signal-cli",
-            category: IntegrationCategory::Chat,
-            status_fn: |c| {
-                if c.channels_config.signal.is_some() {
-                    IntegrationStatus::Active
-                } else {
-                    IntegrationStatus::Available
-                }
-            },
-        },
-        IntegrationEntry {
             name: "Email",
             description: "IMAP/SMTP email channel",
             category: IntegrationCategory::Chat,
@@ -104,6 +68,12 @@ pub fn all_integrations() -> Vec<IntegrationEntry> {
                     IntegrationStatus::Available
                 }
             },
+        },
+        IntegrationEntry {
+            name: "ACP Server",
+            description: "JSON-RPC 2.0 over stdio for IDEs",
+            category: IntegrationCategory::Chat,
+            status_fn: |_| IntegrationStatus::Available,
         },
         // ── AI Models ───────────────────────────────────────────
         IntegrationEntry {
@@ -463,7 +433,13 @@ pub fn all_integrations() -> Vec<IntegrationEntry> {
             name: "Browser",
             description: "Chrome/Chromium control",
             category: IntegrationCategory::ToolsAutomation,
-            status_fn: |_| IntegrationStatus::Available,
+            status_fn: |c| {
+                if c.browser.enabled {
+                    IntegrationStatus::Active
+                } else {
+                    IntegrationStatus::Available
+                }
+            },
         },
         IntegrationEntry {
             name: "Shell",
@@ -481,7 +457,13 @@ pub fn all_integrations() -> Vec<IntegrationEntry> {
             name: "Cron",
             description: "Scheduled tasks",
             category: IntegrationCategory::ToolsAutomation,
-            status_fn: |_| IntegrationStatus::Available,
+            status_fn: |c| {
+                if c.cron.enabled {
+                    IntegrationStatus::Active
+                } else {
+                    IntegrationStatus::Available
+                }
+            },
         },
         IntegrationEntry {
             name: "Weather",
@@ -539,14 +521,12 @@ pub fn all_integrations() -> Vec<IntegrationEntry> {
 mod tests {
     use super::*;
     use crate::config::Config;
-    use crate::config::schema::{ProgressMode, StreamMode, TelegramConfig};
-
     #[test]
     fn registry_has_entries() {
         let entries = all_integrations();
         assert!(
-            entries.len() >= 45,
-            "Expected 45+ integrations, got {}",
+            entries.len() >= 42,
+            "Expected 42+ integrations, got {}",
             entries.len()
         );
     }
@@ -604,32 +584,28 @@ mod tests {
     }
 
     #[test]
-    fn telegram_active_when_configured() {
+    fn discord_active_when_configured() {
         let mut config = Config::default();
-        config.channels_config.telegram = Some(TelegramConfig {
-            bot_token: "123:ABC".into(),
+        config.channels_config.discord = Some(crate::config::DiscordConfig {
+            bot_token: "discord-tok".into(),
+            guild_id: None,
             allowed_users: vec!["user".into()],
-            stream_mode: StreamMode::default(),
-            draft_update_interval_ms: 1000,
-            interrupt_on_new_message: false,
+            listen_to_bots: false,
             mention_only: false,
-            progress_mode: ProgressMode::default(),
-            ack_enabled: true,
             group_reply: None,
-            base_url: None,
         });
         let entries = all_integrations();
-        let tg = entries.iter().find(|e| e.name == "Telegram").unwrap();
-        assert!(matches!((tg.status_fn)(&config), IntegrationStatus::Active));
+        let dc = entries.iter().find(|e| e.name == "Discord").unwrap();
+        assert!(matches!((dc.status_fn)(&config), IntegrationStatus::Active));
     }
 
     #[test]
-    fn telegram_available_when_not_configured() {
+    fn discord_available_when_not_configured() {
         let config = Config::default();
         let entries = all_integrations();
-        let tg = entries.iter().find(|e| e.name == "Telegram").unwrap();
+        let dc = entries.iter().find(|e| e.name == "Discord").unwrap();
         assert!(matches!(
-            (tg.status_fn)(&config),
+            (dc.status_fn)(&config),
             IntegrationStatus::Available
         ));
     }
@@ -663,17 +639,6 @@ mod tests {
         assert!(matches!(
             (lm_studio.status_fn)(&config),
             IntegrationStatus::Active
-        ));
-    }
-
-    #[test]
-    fn whatsapp_available_when_not_configured() {
-        let config = Config::default();
-        let entries = all_integrations();
-        let wa = entries.iter().find(|e| e.name == "WhatsApp").unwrap();
-        assert!(matches!(
-            (wa.status_fn)(&config),
-            IntegrationStatus::Available
         ));
     }
 

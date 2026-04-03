@@ -264,24 +264,22 @@ default_temperature = 0.7
 [channels_config]
 cli = true
 
-[channels_config.telegram]
-bot_token = "test_token"
-allowed_users = ["zeroclaw_user"]
-
 [channels_config.discord]
 bot_token = "test_token"
+
+[channels_config.slack]
+bot_token = "xoxb-test"
 "#;
     let parsed: Config = toml::from_str(toml_str).expect("multi-channel config should parse");
-    assert!(parsed.channels_config.telegram.is_some());
     assert!(parsed.channels_config.discord.is_some());
-    assert!(parsed.channels_config.slack.is_none());
+    assert!(parsed.channels_config.slack.is_some());
+    assert!(parsed.channels_config.webhook.is_none());
 }
 
 #[test]
 fn config_nested_optional_sections_default_when_absent() {
     let toml_str = "default_temperature = 0.7\n";
     let parsed: Config = toml::from_str(toml_str).expect("minimal TOML should parse");
-    assert!(parsed.channels_config.telegram.is_none());
     assert!(!parsed.composio.enabled);
     assert!(parsed.composio.api_key.is_none());
     assert!(
@@ -299,7 +297,6 @@ fn config_channels_default_cli_enabled() {
 #[test]
 fn config_channels_all_optional_channels_none_by_default() {
     let channels = ChannelsConfig::default();
-    assert!(channels.telegram.is_none());
     assert!(channels.discord.is_none());
     assert!(channels.slack.is_none());
     assert!(channels.webhook.is_none());
@@ -327,12 +324,11 @@ default_temperature = 0.7
 [channels_config]
 cli = true
 
-[channels_config.telegram]
+[channels_config.discord]
 bot_token = "TEST_TOKEN"
-allowed_users = ["*"]
 "#;
     let parsed: Config =
-        toml::from_str(toml_str).expect("channels_config with Telegram section should parse");
+        toml::from_str(toml_str).expect("channels_config with Discord section should parse");
     assert!(parsed.channels_config.cli, "cli should be true when set");
-    assert!(parsed.channels_config.telegram.is_some());
+    assert!(parsed.channels_config.discord.is_some());
 }

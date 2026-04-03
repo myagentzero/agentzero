@@ -14,6 +14,7 @@ use reqwest::{
     Client,
     header::{HeaderMap, HeaderValue, USER_AGENT},
 };
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashSet;
@@ -26,6 +27,45 @@ use tokio_tungstenite::{
         http::header::{AUTHORIZATION, HeaderName},
     },
 };
+
+/// LiteLLM dynamic cache controls injected into the request body.
+///
+/// When the provider targets a LiteLLM proxy with caching enabled, these
+/// per-request parameters control cache TTL, bypass, and partitioning.
+/// See <https://docs.litellm.ai/docs/proxy/caching#dynamic-cache-controls>.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
+pub struct LiteLlmCacheConfig {
+    /// Cache duration in seconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ttl: Option<u64>,
+    /// Max acceptable age for cached responses (seconds).
+    #[serde(
+        default,
+        rename = "s-maxage",
+        alias = "s_maxage",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub s_maxage: Option<u64>,
+    /// Bypass cache lookup (response may still be stored).
+    #[serde(
+        default,
+        rename = "no-cache",
+        alias = "no_cache",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub no_cache: Option<bool>,
+    /// Do not cache the response.
+    #[serde(
+        default,
+        rename = "no-store",
+        alias = "no_store",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub no_store: Option<bool>,
+    /// Logical cache partition key.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub namespace: Option<String>,
+}
 
 /// A provider that speaks the OpenAI-compatible chat completions API.
 /// Used by: Venice, Vercel AI Gateway, Cloudflare AI Gateway, Moonshot,
@@ -53,6 +93,8 @@ pub struct OpenAiCompatibleProvider {
     api_mode: CompatibleApiMode,
     /// Optional max token cap propagated to outbound requests.
     max_tokens_override: Option<u32>,
+    /// LiteLLM dynamic cache controls injected into request bodies.
+    pub(crate) litellm_cache: Option<LiteLlmCacheConfig>,
 }
 
 /// How the provider expects the API key to be sent.
@@ -256,6 +298,7 @@ impl OpenAiCompatibleProvider {
             native_tool_calling: !merge_system_into_user,
             api_mode,
             max_tokens_override: max_tokens_override.filter(|value| *value > 0),
+            litellm_cache: None,
         }
     }
 
@@ -453,6 +496,8 @@ struct ApiChatRequest {
     tools: Option<Vec<serde_json::Value>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tool_choice: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cache: Option<LiteLlmCacheConfig>,
 }
 
 #[derive(Debug, Serialize)]
@@ -649,6 +694,8 @@ struct NativeChatRequest {
     tools: Option<Vec<serde_json::Value>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tool_choice: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cache: Option<LiteLlmCacheConfig>,
 }
 
 #[derive(Debug, Serialize)]
@@ -680,6 +727,8 @@ struct ResponsesRequest {
     tools: Option<Vec<Value>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tool_choice: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cache: Option<LiteLlmCacheConfig>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1458,6 +1507,7 @@ impl OpenAiCompatibleProvider {
             stream: Some(false),
             tool_choice: tools.as_ref().map(|_| "auto".to_string()),
             tools,
+            cache: self.litellm_cache.clone(),
         };
 
         let url = self.responses_url();
@@ -1993,6 +2043,7 @@ impl Provider for OpenAiCompatibleProvider {
             stream: Some(false),
             tools: None,
             tool_choice: None,
+            cache: self.litellm_cache.clone(),
         };
 
         let url = self.chat_completions_url();
@@ -2122,6 +2173,7 @@ impl Provider for OpenAiCompatibleProvider {
             stream: Some(false),
             tools: None,
             tool_choice: None,
+            cache: self.litellm_cache.clone(),
         };
 
         if self.should_use_responses_mode() {
@@ -2247,6 +2299,7 @@ impl Provider for OpenAiCompatibleProvider {
             } else {
                 Some("auto".to_string())
             },
+            cache: self.litellm_cache.clone(),
         };
 
         if self.should_use_responses_mode() {
@@ -2397,6 +2450,7 @@ impl Provider for OpenAiCompatibleProvider {
             stream: Some(false),
             tool_choice: tools.as_ref().map(|_| "auto".to_string()),
             tools,
+            cache: self.litellm_cache.clone(),
         };
 
         if self.should_use_responses_mode() {
@@ -2549,6 +2603,7 @@ impl Provider for OpenAiCompatibleProvider {
             stream: Some(options.enabled),
             tools: None,
             tool_choice: None,
+            cache: self.litellm_cache.clone(),
         };
 
         let url = self.chat_completions_url();
@@ -2707,6 +2762,7 @@ mod tests {
             stream: Some(false),
             tools: None,
             tool_choice: None,
+            cache: None,
         };
         let json = serde_json::to_string(&req).unwrap();
         assert!(json.contains("llama-3.3-70b"));
@@ -3986,6 +4042,7 @@ mod tests {
             stream: Some(false),
             tools: Some(tools),
             tool_choice: Some("auto".to_string()),
+            cache: None,
         };
         let json = serde_json::to_string(&req).unwrap();
         assert!(json.contains("\"tools\""));

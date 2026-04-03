@@ -14,7 +14,7 @@ pub mod sse;
 pub mod static_files;
 pub mod ws;
 
-use crate::channels::{Channel, GitHubChannel, SendMessage, WhatsAppChannel};
+use crate::channels::{Channel, GitHubChannel, SendMessage};
 use crate::config::Config;
 use crate::cost::CostTracker;
 use crate::memory::{self, Memory, MemoryCategory};
@@ -29,7 +29,7 @@ use anyhow::{Context, Result};
 use axum::{
     Router,
     body::{Body, Bytes},
-    extract::{ConnectInfo, Query, State},
+    extract::{ConnectInfo, State},
     http::{HeaderMap, HeaderValue, StatusCode, header},
     middleware::{self, Next},
     response::{IntoResponse, Json, Response},
@@ -79,10 +79,6 @@ async fn security_headers_middleware(req: axum::extract::Request, next: Next) ->
 
 fn webhook_memory_key() -> String {
     format!("webhook_msg_{}", Uuid::new_v4())
-}
-
-fn whatsapp_memory_key(msg: &crate::channels::traits::ChannelMessage) -> String {
-    format!("whatsapp_{}_{}", msg.sender, msg.id)
 }
 
 fn github_memory_key(msg: &crate::channels::traits::ChannelMessage) -> String {
@@ -337,9 +333,6 @@ pub struct AppState {
     pub trust_forwarded_headers: bool,
     pub rate_limiter: Arc<GatewayRateLimiter>,
     pub idempotency_store: Arc<IdempotencyStore>,
-    pub whatsapp: Option<Arc<WhatsAppChannel>>,
-    /// `WhatsApp` app secret for webhook signature verification (`X-Hub-Signature-256`)
-    pub whatsapp_app_secret: Option<Arc<str>>,
     /// Observability backend for metrics scraping
     pub observer: Arc<dyn crate::observability::Observer>,
     /// Registered tool specs (for web dashboard tools page)
@@ -408,6 +401,7 @@ pub async fn run_gateway(
             custom_provider_auth_header: config.effective_custom_provider_auth_header(),
             max_tokens_override: None,
             model_support_vision: config.model_support_vision,
+            litellm_cache: config.effective_litellm_cache(),
         },
     )?);
     let model = config
@@ -489,40 +483,6 @@ pub async fn run_gateway(
                     .then(|| Arc::<str>::from(hash_webhook_secret(trimmed_secret)))
             })
         });
-
-    // WhatsApp channel (if configured)
-    let whatsapp_channel: Option<Arc<WhatsAppChannel>> = config
-        .channels_config
-        .whatsapp
-        .as_ref()
-        .filter(|wa| wa.is_cloud_config())
-        .map(|wa| {
-            Arc::new(WhatsAppChannel::new(
-                wa.access_token.clone().unwrap_or_default(),
-                wa.phone_number_id.clone().unwrap_or_default(),
-                wa.verify_token.clone().unwrap_or_default(),
-                wa.allowed_numbers.clone(),
-            ))
-        });
-
-    // WhatsApp app secret for webhook signature verification
-    // Priority: environment variable > config file
-    let whatsapp_app_secret: Option<Arc<str>> = std::env::var("ZEROCLAW_WHATSAPP_APP_SECRET")
-        .ok()
-        .and_then(|secret| {
-            let secret = secret.trim();
-            (!secret.is_empty()).then(|| secret.to_owned())
-        })
-        .or_else(|| {
-            config.channels_config.whatsapp.as_ref().and_then(|wa| {
-                wa.app_secret
-                    .as_deref()
-                    .map(str::trim)
-                    .filter(|secret| !secret.is_empty())
-                    .map(ToOwned::to_owned)
-            })
-        })
-        .map(Arc::from);
 
     // ── Pairing guard ──────────────────────────────────────
     let pairing = external_pairing.unwrap_or_else(|| {
@@ -632,8 +592,6 @@ pub async fn run_gateway(
         trust_forwarded_headers: config.gateway.trust_forwarded_headers,
         rate_limiter,
         idempotency_store,
-        whatsapp: whatsapp_channel,
-        whatsapp_app_secret,
         observer: broadcast_observer,
         tools_registry,
         tools_registry_exec,
@@ -673,8 +631,6 @@ pub async fn run_gateway(
         .route("/metrics", get(handle_metrics))
         .route("/pair", post(handle_pair))
         .route("/webhook", get(handle_webhook_usage).post(handle_webhook))
-        .route("/whatsapp", get(handle_whatsapp_verify))
-        .route("/whatsapp", post(handle_whatsapp_message))
         .route("/github", post(handle_github_webhook))
         // ── OpenClaw migration: tools-enabled chat endpoint ──
         .route("/api/chat", post(openclaw_compat::handle_api_chat))
@@ -945,7 +901,7 @@ async fn run_gateway_chat_simple(state: &AppState, message: &str) -> anyhow::Res
         .await
 }
 
-/// Full-featured chat with tools for channel handlers (WhatsApp).
+/// Full-featured chat with tools for channel handlers.
 pub(super) async fn run_gateway_chat_with_tools(
     state: &AppState,
     message: &str,
@@ -1710,170 +1666,6 @@ async fn handle_webhook(
     }
 }
 
-/// `WhatsApp` verification query params
-#[derive(serde::Deserialize)]
-pub struct WhatsAppVerifyQuery {
-    #[serde(rename = "hub.mode")]
-    pub mode: Option<String>,
-    #[serde(rename = "hub.verify_token")]
-    pub verify_token: Option<String>,
-    #[serde(rename = "hub.challenge")]
-    pub challenge: Option<String>,
-}
-
-/// GET /whatsapp — Meta webhook verification
-async fn handle_whatsapp_verify(
-    State(state): State<AppState>,
-    Query(params): Query<WhatsAppVerifyQuery>,
-) -> impl IntoResponse {
-    let Some(ref wa) = state.whatsapp else {
-        return (StatusCode::NOT_FOUND, "WhatsApp not configured".to_string());
-    };
-
-    // Verify the token matches (constant-time comparison to prevent timing attacks)
-    let token_matches = params
-        .verify_token
-        .as_deref()
-        .is_some_and(|t| constant_time_eq(t, wa.verify_token()));
-    if params.mode.as_deref() == Some("subscribe") && token_matches {
-        if let Some(ch) = params.challenge {
-            tracing::info!("WhatsApp webhook verified successfully");
-            return (StatusCode::OK, ch);
-        }
-        return (StatusCode::BAD_REQUEST, "Missing hub.challenge".to_string());
-    }
-
-    tracing::warn!("WhatsApp webhook verification failed — token mismatch");
-    (StatusCode::FORBIDDEN, "Forbidden".to_string())
-}
-
-/// Verify `WhatsApp` webhook signature (`X-Hub-Signature-256`).
-/// Returns true if the signature is valid, false otherwise.
-/// See: <https://developers.facebook.com/docs/graph-api/webhooks/getting-started#verification-requests>
-pub fn verify_whatsapp_signature(app_secret: &str, body: &[u8], signature_header: &str) -> bool {
-    use ring::hmac;
-
-    // Signature format: "sha256=<hex_signature>"
-    let Some(hex_sig) = signature_header.strip_prefix("sha256=") else {
-        return false;
-    };
-
-    // Decode hex signature
-    let Ok(expected) = hex::decode(hex_sig) else {
-        return false;
-    };
-
-    let key = hmac::Key::new(hmac::HMAC_SHA256, app_secret.as_bytes());
-    hmac::verify(&key, body, &expected).is_ok()
-}
-
-/// POST /whatsapp — incoming message webhook
-async fn handle_whatsapp_message(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    body: Bytes,
-) -> impl IntoResponse {
-    let Some(ref wa) = state.whatsapp else {
-        return (
-            StatusCode::NOT_FOUND,
-            Json(serde_json::json!({"error": "WhatsApp not configured"})),
-        );
-    };
-
-    // ── Security: Verify X-Hub-Signature-256 if app_secret is configured ──
-    if let Some(ref app_secret) = state.whatsapp_app_secret {
-        let signature = headers
-            .get("X-Hub-Signature-256")
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or("");
-
-        if !verify_whatsapp_signature(app_secret, &body, signature) {
-            tracing::warn!(
-                "WhatsApp webhook signature verification failed (signature: {})",
-                if signature.is_empty() {
-                    "missing"
-                } else {
-                    "invalid"
-                }
-            );
-            return (
-                StatusCode::UNAUTHORIZED,
-                Json(serde_json::json!({"error": "Invalid signature"})),
-            );
-        }
-    }
-
-    // Parse JSON body
-    let Ok(payload) = serde_json::from_slice::<serde_json::Value>(&body) else {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({"error": "Invalid JSON payload"})),
-        );
-    };
-
-    // Parse messages from the webhook payload
-    let messages = wa.parse_webhook_payload(&payload);
-
-    if messages.is_empty() {
-        // Acknowledge the webhook even if no messages (could be status updates)
-        return (StatusCode::OK, Json(serde_json::json!({"status": "ok"})));
-    }
-
-    // Process each message
-    for msg in &messages {
-        tracing::info!(
-            "WhatsApp message from {}: {}",
-            msg.sender,
-            truncate_with_ellipsis(&msg.content, 50)
-        );
-        let session_id = gateway_message_session_id(msg);
-
-        // Auto-save to memory
-        if state.auto_save {
-            let key = whatsapp_memory_key(msg);
-            let _ = state
-                .mem
-                .store(
-                    &key,
-                    &msg.content,
-                    MemoryCategory::Conversation,
-                    Some(&session_id),
-                )
-                .await;
-        }
-
-        match run_gateway_chat_with_tools(&state, &msg.content, Some(&session_id)).await {
-            Ok(response) => {
-                let leak_guard_cfg = gateway_outbound_leak_guard_snapshot(&state);
-                let safe_response = sanitize_gateway_response(
-                    &response,
-                    state.tools_registry_exec.as_ref(),
-                    &leak_guard_cfg,
-                );
-                // Send reply via WhatsApp
-                if let Err(e) = wa
-                    .send(&SendMessage::new(safe_response, &msg.reply_target))
-                    .await
-                {
-                    tracing::error!("Failed to send WhatsApp reply: {e}");
-                }
-            }
-            Err(e) => {
-                tracing::error!("LLM error for WhatsApp message: {e:#}");
-                let _ = wa
-                    .send(&SendMessage::new(
-                        "Sorry, I couldn't process your message right now.",
-                        &msg.reply_target,
-                    ))
-                    .await;
-            }
-        }
-    }
-
-    // Acknowledge the webhook
-    (StatusCode::OK, Json(serde_json::json!({"status": "ok"})))
-}
-
 /// POST /github — incoming GitHub webhook (issue/PR comments)
 #[allow(clippy::large_futures)]
 async fn handle_github_webhook(
@@ -2051,7 +1843,6 @@ async fn handle_github_webhook(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::channels::traits::ChannelMessage;
     use crate::memory::{Memory, MemoryCategory, MemoryEntry};
     use crate::providers::Provider;
     use async_trait::async_trait;
@@ -2065,17 +1856,6 @@ mod tests {
     fn generate_test_secret() -> String {
         let bytes: [u8; 32] = rand::random();
         hex::encode(bytes)
-    }
-
-    fn compute_whatsapp_signature_hex(secret: &str, body: &[u8]) -> String {
-        use ring::hmac;
-        let key = hmac::Key::new(hmac::HMAC_SHA256, secret.as_bytes());
-        let tag = hmac::sign(&key, body);
-        hex::encode(tag.as_ref())
-    }
-
-    fn compute_whatsapp_signature_header(secret: &str, body: &[u8]) -> String {
-        format!("sha256={}", compute_whatsapp_signature_hex(secret, body))
     }
 
     #[test]
@@ -2120,16 +1900,6 @@ mod tests {
     }
 
     #[test]
-    fn whatsapp_query_fields_are_optional() {
-        let q = WhatsAppVerifyQuery {
-            mode: None,
-            verify_token: None,
-            challenge: None,
-        };
-        assert!(q.mode.is_none());
-    }
-
-    #[test]
     fn node_id_allowed_with_empty_allowlist_accepts_any() {
         assert!(node_id_allowed("node-a", &[]));
     }
@@ -2161,8 +1931,6 @@ mod tests {
             trust_forwarded_headers: false,
             rate_limiter: Arc::new(GatewayRateLimiter::new(100, 100, 100)),
             idempotency_store: Arc::new(IdempotencyStore::new(Duration::from_secs(300), 1000)),
-            whatsapp: None,
-            whatsapp_app_secret: None,
             observer: Arc::new(crate::observability::NoopObserver),
             tools_registry: Arc::new(Vec::new()),
             tools_registry_exec: Arc::new(Vec::new()),
@@ -2214,8 +1982,6 @@ mod tests {
             trust_forwarded_headers: false,
             rate_limiter: Arc::new(GatewayRateLimiter::new(100, 100, 100)),
             idempotency_store: Arc::new(IdempotencyStore::new(Duration::from_secs(300), 1000)),
-            whatsapp: None,
-            whatsapp_app_secret: None,
             observer,
             tools_registry: Arc::new(Vec::new()),
             tools_registry_exec: Arc::new(Vec::new()),
@@ -2250,8 +2016,6 @@ mod tests {
             trust_forwarded_headers: false,
             rate_limiter: Arc::new(GatewayRateLimiter::new(100, 100, 100)),
             idempotency_store: Arc::new(IdempotencyStore::new(Duration::from_secs(300), 1000)),
-            whatsapp: None,
-            whatsapp_app_secret: None,
             observer: Arc::new(crate::observability::NoopObserver),
             tools_registry: Arc::new(Vec::new()),
             tools_registry_exec: Arc::new(Vec::new()),
@@ -2291,8 +2055,6 @@ mod tests {
             trust_forwarded_headers: false,
             rate_limiter: Arc::new(GatewayRateLimiter::new(100, 100, 100)),
             idempotency_store: Arc::new(IdempotencyStore::new(Duration::from_secs(300), 1000)),
-            whatsapp: None,
-            whatsapp_app_secret: None,
             observer: Arc::new(crate::observability::NoopObserver),
             tools_registry: Arc::new(Vec::new()),
             tools_registry_exec: Arc::new(Vec::new()),
@@ -2526,22 +2288,6 @@ mod tests {
         assert!(key1.starts_with("webhook_msg_"));
         assert!(key2.starts_with("webhook_msg_"));
         assert_ne!(key1, key2);
-    }
-
-    #[test]
-    fn whatsapp_memory_key_includes_sender_and_message_id() {
-        let msg = ChannelMessage {
-            id: "wamid-123".into(),
-            sender: "+1234567890".into(),
-            reply_target: "+1234567890".into(),
-            content: "hello".into(),
-            channel: "whatsapp".into(),
-            timestamp: 1,
-            thread_ts: None,
-        };
-
-        let key = whatsapp_memory_key(&msg);
-        assert_eq!(key, "whatsapp_+1234567890_wamid-123");
     }
 
     struct MockScheduleTool;
@@ -2781,8 +2527,6 @@ Reminder set successfully."#;
             trust_forwarded_headers: false,
             rate_limiter: Arc::new(GatewayRateLimiter::new(100, 100, 100)),
             idempotency_store: Arc::new(IdempotencyStore::new(Duration::from_secs(300), 1000)),
-            whatsapp: None,
-            whatsapp_app_secret: None,
             observer: Arc::new(crate::observability::NoopObserver),
             tools_registry: Arc::new(Vec::new()),
             tools_registry_exec: Arc::new(Vec::new()),
@@ -2846,8 +2590,6 @@ Reminder set successfully."#;
             trust_forwarded_headers: false,
             rate_limiter: Arc::new(GatewayRateLimiter::new(100, 100, 100)),
             idempotency_store: Arc::new(IdempotencyStore::new(Duration::from_secs(300), 1000)),
-            whatsapp: None,
-            whatsapp_app_secret: None,
             observer: Arc::new(crate::observability::NoopObserver),
             tools_registry: Arc::new(Vec::new()),
             tools_registry_exec: Arc::new(Vec::new()),
@@ -2892,8 +2634,6 @@ Reminder set successfully."#;
             trust_forwarded_headers: false,
             rate_limiter: Arc::new(GatewayRateLimiter::new(100, 100, 100)),
             idempotency_store: Arc::new(IdempotencyStore::new(Duration::from_secs(300), 1000)),
-            whatsapp: None,
-            whatsapp_app_secret: None,
             observer: Arc::new(crate::observability::NoopObserver),
             tools_registry: Arc::new(Vec::new()),
             tools_registry_exec: Arc::new(Vec::new()),
@@ -2939,8 +2679,6 @@ Reminder set successfully."#;
             trust_forwarded_headers: false,
             rate_limiter: Arc::new(GatewayRateLimiter::new(100, 100, 100)),
             idempotency_store: Arc::new(IdempotencyStore::new(Duration::from_secs(300), 1000)),
-            whatsapp: None,
-            whatsapp_app_secret: None,
             observer: Arc::new(crate::observability::NoopObserver),
             tools_registry: Arc::new(Vec::new()),
             tools_registry_exec: Arc::new(Vec::new()),
@@ -2995,8 +2733,6 @@ Reminder set successfully."#;
             trust_forwarded_headers: false,
             rate_limiter: Arc::new(GatewayRateLimiter::new(100, 100, 100)),
             idempotency_store: Arc::new(IdempotencyStore::new(Duration::from_secs(300), 1000)),
-            whatsapp: None,
-            whatsapp_app_secret: None,
             observer: Arc::new(crate::observability::NoopObserver),
             tools_registry: Arc::new(Vec::new()),
             tools_registry_exec: Arc::new(Vec::new()),
@@ -3044,8 +2780,6 @@ Reminder set successfully."#;
             trust_forwarded_headers: false,
             rate_limiter: Arc::new(GatewayRateLimiter::new(100, 100, 100)),
             idempotency_store: Arc::new(IdempotencyStore::new(Duration::from_secs(300), 1000)),
-            whatsapp: None,
-            whatsapp_app_secret: None,
             observer: Arc::new(crate::observability::NoopObserver),
             tools_registry: Arc::new(Vec::new()),
             tools_registry_exec: Arc::new(Vec::new()),
@@ -3099,8 +2833,6 @@ Reminder set successfully."#;
             trust_forwarded_headers: false,
             rate_limiter: Arc::new(GatewayRateLimiter::new(100, 100, 100)),
             idempotency_store: Arc::new(IdempotencyStore::new(Duration::from_secs(300), 1000)),
-            whatsapp: None,
-            whatsapp_app_secret: None,
             observer: Arc::new(crate::observability::NoopObserver),
             tools_registry: Arc::new(Vec::new()),
             tools_registry_exec: Arc::new(Vec::new()),
@@ -3148,8 +2880,6 @@ Reminder set successfully."#;
             trust_forwarded_headers: false,
             rate_limiter: Arc::new(GatewayRateLimiter::new(100, 100, 100)),
             idempotency_store: Arc::new(IdempotencyStore::new(Duration::from_secs(300), 1000)),
-            whatsapp: None,
-            whatsapp_app_secret: None,
             observer: Arc::new(crate::observability::NoopObserver),
             tools_registry: Arc::new(Vec::new()),
             tools_registry_exec: Arc::new(Vec::new()),
@@ -3227,8 +2957,6 @@ Reminder set successfully."#;
             trust_forwarded_headers: false,
             rate_limiter: Arc::new(GatewayRateLimiter::new(100, 100, 100)),
             idempotency_store: Arc::new(IdempotencyStore::new(Duration::from_secs(300), 1000)),
-            whatsapp: None,
-            whatsapp_app_secret: None,
             observer: Arc::new(crate::observability::NoopObserver),
             tools_registry: Arc::new(Vec::new()),
             tools_registry_exec: Arc::new(Vec::new()),
@@ -3276,8 +3004,6 @@ Reminder set successfully."#;
             trust_forwarded_headers: false,
             rate_limiter: Arc::new(GatewayRateLimiter::new(100, 100, 100)),
             idempotency_store: Arc::new(IdempotencyStore::new(Duration::from_secs(300), 1000)),
-            whatsapp: None,
-            whatsapp_app_secret: None,
             observer: Arc::new(crate::observability::NoopObserver),
             tools_registry: Arc::new(Vec::new()),
             tools_registry_exec: Arc::new(Vec::new()),
@@ -3330,8 +3056,6 @@ Reminder set successfully."#;
             trust_forwarded_headers: false,
             rate_limiter: Arc::new(GatewayRateLimiter::new(100, 100, 100)),
             idempotency_store: Arc::new(IdempotencyStore::new(Duration::from_secs(300), 1000)),
-            whatsapp: None,
-            whatsapp_app_secret: None,
             observer: Arc::new(crate::observability::NoopObserver),
             tools_registry: Arc::new(Vec::new()),
             tools_registry_exec: Arc::new(Vec::new()),
@@ -3398,8 +3122,6 @@ Reminder set successfully."#;
             trust_forwarded_headers: false,
             rate_limiter: Arc::new(GatewayRateLimiter::new(100, 100, 100)),
             idempotency_store: Arc::new(IdempotencyStore::new(Duration::from_secs(300), 1000)),
-            whatsapp: None,
-            whatsapp_app_secret: None,
             observer: Arc::new(crate::observability::NoopObserver),
             tools_registry: Arc::new(Vec::new()),
             tools_registry_exec: Arc::new(Vec::new()),
@@ -3445,8 +3167,6 @@ Reminder set successfully."#;
             trust_forwarded_headers: false,
             rate_limiter: Arc::new(GatewayRateLimiter::new(100, 100, 100)),
             idempotency_store: Arc::new(IdempotencyStore::new(Duration::from_secs(300), 1000)),
-            whatsapp: None,
-            whatsapp_app_secret: None,
             observer: Arc::new(crate::observability::NoopObserver),
             tools_registry: Arc::new(Vec::new()),
             tools_registry_exec: Arc::new(Vec::new()),
@@ -3503,8 +3223,6 @@ Reminder set successfully."#;
             trust_forwarded_headers: false,
             rate_limiter: Arc::new(GatewayRateLimiter::new(100, 100, 100)),
             idempotency_store: Arc::new(IdempotencyStore::new(Duration::from_secs(300), 1000)),
-            whatsapp: None,
-            whatsapp_app_secret: None,
             observer: Arc::new(crate::observability::NoopObserver),
             tools_registry: Arc::new(Vec::new()),
             tools_registry_exec: Arc::new(Vec::new()),
@@ -3547,183 +3265,6 @@ Reminder set successfully."#;
         let parsed: serde_json::Value = serde_json::from_slice(&payload).unwrap();
         assert_eq!(parsed["status"], "duplicate");
         assert_eq!(provider_impl.calls.load(Ordering::SeqCst), 0);
-    }
-
-    #[test]
-    fn whatsapp_signature_valid() {
-        let app_secret = generate_test_secret();
-        let body = b"test body content";
-
-        let signature_header = compute_whatsapp_signature_header(&app_secret, body);
-
-        assert!(verify_whatsapp_signature(
-            &app_secret,
-            body,
-            &signature_header
-        ));
-    }
-
-    #[test]
-    fn whatsapp_signature_invalid_wrong_secret() {
-        let app_secret = generate_test_secret();
-        let wrong_secret = generate_test_secret();
-        let body = b"test body content";
-
-        let signature_header = compute_whatsapp_signature_header(&wrong_secret, body);
-
-        assert!(!verify_whatsapp_signature(
-            &app_secret,
-            body,
-            &signature_header
-        ));
-    }
-
-    #[test]
-    fn whatsapp_signature_invalid_wrong_body() {
-        let app_secret = generate_test_secret();
-        let original_body = b"original body";
-        let tampered_body = b"tampered body";
-
-        let signature_header = compute_whatsapp_signature_header(&app_secret, original_body);
-
-        // Verify with tampered body should fail
-        assert!(!verify_whatsapp_signature(
-            &app_secret,
-            tampered_body,
-            &signature_header
-        ));
-    }
-
-    #[test]
-    fn whatsapp_signature_missing_prefix() {
-        let app_secret = generate_test_secret();
-        let body = b"test body";
-
-        // Signature without "sha256=" prefix
-        let signature_header = "abc123def456";
-
-        assert!(!verify_whatsapp_signature(
-            &app_secret,
-            body,
-            signature_header
-        ));
-    }
-
-    #[test]
-    fn whatsapp_signature_empty_header() {
-        let app_secret = generate_test_secret();
-        let body = b"test body";
-
-        assert!(!verify_whatsapp_signature(&app_secret, body, ""));
-    }
-
-    #[test]
-    fn whatsapp_signature_invalid_hex() {
-        let app_secret = generate_test_secret();
-        let body = b"test body";
-
-        // Invalid hex characters
-        let signature_header = "sha256=not_valid_hex_zzz";
-
-        assert!(!verify_whatsapp_signature(
-            &app_secret,
-            body,
-            signature_header
-        ));
-    }
-
-    #[test]
-    fn whatsapp_signature_empty_body() {
-        let app_secret = generate_test_secret();
-        let body = b"";
-
-        let signature_header = compute_whatsapp_signature_header(&app_secret, body);
-
-        assert!(verify_whatsapp_signature(
-            &app_secret,
-            body,
-            &signature_header
-        ));
-    }
-
-    #[test]
-    fn whatsapp_signature_unicode_body() {
-        let app_secret = generate_test_secret();
-        let body = "Hello 🦀 World".as_bytes();
-
-        let signature_header = compute_whatsapp_signature_header(&app_secret, body);
-
-        assert!(verify_whatsapp_signature(
-            &app_secret,
-            body,
-            &signature_header
-        ));
-    }
-
-    #[test]
-    fn whatsapp_signature_json_payload() {
-        let app_secret = generate_test_secret();
-        let body = br#"{"entry":[{"changes":[{"value":{"messages":[{"from":"1234567890","text":{"body":"Hello"}}]}}]}]}"#;
-
-        let signature_header = compute_whatsapp_signature_header(&app_secret, body);
-
-        assert!(verify_whatsapp_signature(
-            &app_secret,
-            body,
-            &signature_header
-        ));
-    }
-
-    #[test]
-    fn whatsapp_signature_case_sensitive_prefix() {
-        let app_secret = generate_test_secret();
-        let body = b"test body";
-
-        let hex_sig = compute_whatsapp_signature_hex(&app_secret, body);
-
-        // Wrong case prefix should fail
-        let wrong_prefix = format!("SHA256={hex_sig}");
-        assert!(!verify_whatsapp_signature(&app_secret, body, &wrong_prefix));
-
-        // Correct prefix should pass
-        let correct_prefix = format!("sha256={hex_sig}");
-        assert!(verify_whatsapp_signature(
-            &app_secret,
-            body,
-            &correct_prefix
-        ));
-    }
-
-    #[test]
-    fn whatsapp_signature_truncated_hex() {
-        let app_secret = generate_test_secret();
-        let body = b"test body";
-
-        let hex_sig = compute_whatsapp_signature_hex(&app_secret, body);
-        let truncated = &hex_sig[..32]; // Only half the signature
-        let signature_header = format!("sha256={truncated}");
-
-        assert!(!verify_whatsapp_signature(
-            &app_secret,
-            body,
-            &signature_header
-        ));
-    }
-
-    #[test]
-    fn whatsapp_signature_extra_bytes() {
-        let app_secret = generate_test_secret();
-        let body = b"test body";
-
-        let hex_sig = compute_whatsapp_signature_hex(&app_secret, body);
-        let extended = format!("{hex_sig}deadbeef");
-        let signature_header = format!("sha256={extended}");
-
-        assert!(!verify_whatsapp_signature(
-            &app_secret,
-            body,
-            &signature_header
-        ));
     }
 
     // ══════════════════════════════════════════════════════════

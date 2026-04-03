@@ -745,6 +745,7 @@ pub struct ProviderRuntimeOptions {
     pub custom_provider_auth_header: Option<String>,
     pub max_tokens_override: Option<u32>,
     pub model_support_vision: Option<bool>,
+    pub litellm_cache: Option<compatible::LiteLlmCacheConfig>,
 }
 
 impl Default for ProviderRuntimeOptions {
@@ -761,6 +762,7 @@ impl Default for ProviderRuntimeOptions {
             custom_provider_auth_header: None,
             max_tokens_override: None,
             model_support_vision: None,
+            litellm_cache: None,
         }
     }
 }
@@ -1559,7 +1561,7 @@ fn create_provider_with_url_and_options(
                 .custom_provider_api_mode
                 .unwrap_or(CompatibleApiMode::OpenAiChatCompletions);
             let auth_style = resolve_custom_provider_auth_style(options);
-            Ok(Box::new(OpenAiCompatibleProvider::new_custom_with_mode(
+            let mut provider = OpenAiCompatibleProvider::new_custom_with_mode(
                 "Custom",
                 &base_url,
                 key,
@@ -1567,7 +1569,9 @@ fn create_provider_with_url_and_options(
                 true,
                 api_mode,
                 options.max_tokens_override,
-            )))
+            );
+            provider.litellm_cache = options.litellm_cache.clone();
+            Ok(Box::new(provider))
         }
 
         // ── Anthropic-compatible custom endpoints ───────────

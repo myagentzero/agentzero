@@ -254,6 +254,17 @@ impl Tool for BgRunTool {
          Background tools have a 600-second maximum timeout."
     }
 
+    fn prompt_hint(&self) -> Option<&str> {
+        Some(
+            "Run a tool in the background. Use when: the operation is long-running and you can continue other work. \
+             Check results with bg_status.",
+        )
+    }
+
+    fn prompt_hint_compact(&self) -> &str {
+        "Run a tool in the background."
+    }
+
     fn parameters_schema(&self) -> serde_json::Value {
         serde_json::json!({
             "type": "object",

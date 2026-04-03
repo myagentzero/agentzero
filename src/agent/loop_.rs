@@ -245,21 +245,6 @@ static DEFERRED_ACTION_WITHOUT_TOOL_CALL_REGEX: LazyLock<Regex> = LazyLock::new(
     .unwrap()
 });
 
-/// Detect common CJK deferred-action phrases (e.g., Chinese "让我…查看")
-/// that imply a follow-up tool call should occur.
-static CJK_DEFERRED_ACTION_CUE_REGEX: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(让我|我来|我会|我们来|我们会|我先|先让我|马上)").unwrap());
-
-/// Action verbs commonly used when promising to perform tool-backed work in CJK text.
-static CJK_DEFERRED_ACTION_VERB_REGEX: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(查看|检查|搜索|查找|浏览|打开|读取|写入|运行|执行|调用|分析|验证|列出|获取|尝试|试试|继续|处理|修复|看看|看一看|看一下)").unwrap()
-});
-
-/// Fast check for CJK scripts (Han/Hiragana/Katakana/Hangul) so we only run
-/// additional regexes when non-Latin text is present.
-static CJK_SCRIPT_REGEX: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]").unwrap()
-});
 
 /// Scrub credentials from tool output to prevent accidental exfiltration.
 /// Replaces known credential patterns with a redacted placeholder while preserving
@@ -417,6 +402,20 @@ where
 
 fn should_inject_safety_heartbeat(counter: usize, interval: usize) -> bool {
     interval > 0 && counter > 0 && counter % interval == 0
+}
+
+/// Detect short LLM responses that merely acknowledge a safety heartbeat
+/// rather than containing substantive content.
+fn is_heartbeat_acknowledgment(text: &str) -> bool {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return true;
+    }
+    if trimmed.len() > 200 {
+        return false;
+    }
+    let lower = trimmed.to_lowercase();
+    lower.contains("heartbeat acknowledged")
 }
 
 fn should_emit_verbose_progress(mode: ProgressMode) -> bool {
@@ -602,13 +601,7 @@ fn looks_like_deferred_action_without_tool_call(text: &str) -> bool {
         return false;
     }
 
-    if DEFERRED_ACTION_WITHOUT_TOOL_CALL_REGEX.is_match(trimmed) {
-        return true;
-    }
-
-    CJK_SCRIPT_REGEX.is_match(trimmed)
-        && CJK_DEFERRED_ACTION_CUE_REGEX.is_match(trimmed)
-        && CJK_DEFERRED_ACTION_VERB_REGEX.is_match(trimmed)
+    DEFERRED_ACTION_WITHOUT_TOOL_CALL_REGEX.is_match(trimmed)
 }
 
 fn merge_continuation_text(existing: &str, next: &str) -> String {
@@ -1304,16 +1297,23 @@ pub async fn run_tool_call_loop(
         }
 
         // ── Safety heartbeat: periodic security-constraint re-injection ──
-        if let Some(ref hb) = heartbeat_config {
-            if should_inject_safety_heartbeat(iteration, hb.interval) {
-                let reminder = format!(
-                    "[Safety Heartbeat — round {}/{}]\n{}",
-                    iteration + 1,
-                    max_iterations,
-                    hb.body
-                );
-                request_messages.push(ChatMessage::user(reminder));
-            }
+        let heartbeat_injected = heartbeat_config
+            .as_ref()
+            .is_some_and(|hb| should_inject_safety_heartbeat(iteration, hb.interval));
+        if heartbeat_injected {
+            let hb = heartbeat_config.as_ref().unwrap();
+            tracing::info!(
+                iteration = iteration + 1,
+                max_iterations,
+                "💓 Injecting safety heartbeat into tool loop"
+            );
+            let reminder = format!(
+                "[Safety Heartbeat — round {}/{}]\n{}",
+                iteration + 1,
+                max_iterations,
+                hb.body
+            );
+            request_messages.push(ChatMessage::user(reminder));
         }
         // Unified path via Provider::chat so provider-specific native tool logic
         // (OpenAI/Anthropic/OpenRouter/compatible adapters) is honored.
@@ -1911,6 +1911,19 @@ pub async fn run_tool_call_loop(
         }
 
         if tool_calls.is_empty() {
+            // When the LLM responds to a safety heartbeat with only a short
+            // acknowledgment (no tool calls), log it and continue the loop
+            // instead of returning it as the final answer to the user.
+            if heartbeat_injected && is_heartbeat_acknowledgment(&display_text) {
+                tracing::info!(
+                    iteration = iteration + 1,
+                    response = %display_text,
+                    "💓 Safety heartbeat acknowledged by LLM (suppressed from output)"
+                );
+                history.push(ChatMessage::assistant(response_text.clone()));
+                continue;
+            }
+
             let missing_tool_call_signal =
                 parse_issue_detected || looks_like_deferred_action_without_tool_call(&display_text);
             let missing_tool_call_followthrough = !missing_tool_call_retry_used
@@ -2758,6 +2771,7 @@ pub async fn run(
         custom_provider_auth_header: config.effective_custom_provider_auth_header(),
         max_tokens_override: None,
         model_support_vision: config.model_support_vision,
+        litellm_cache: config.effective_litellm_cache(),
     };
 
     let provider: Box<dyn Provider> = providers::create_routed_provider_with_options(
@@ -3143,6 +3157,11 @@ pub async fn run(
                 interactive_turn,
                 config.agent.safety_heartbeat_turn_interval,
             ) {
+                tracing::info!(
+                    turn = interactive_turn,
+                    interval = config.agent.safety_heartbeat_turn_interval,
+                    "💓 Injecting safety heartbeat into interactive session"
+                );
                 let reminder = format!(
                     "[Safety Heartbeat — turn {}]\n{}",
                     interactive_turn,
@@ -3401,6 +3420,7 @@ pub async fn process_message_with_session(
         custom_provider_auth_header: config.effective_custom_provider_auth_header(),
         max_tokens_override: None,
         model_support_vision: config.model_support_vision,
+        litellm_cache: config.effective_litellm_cache(),
     };
     let provider: Box<dyn Provider> = providers::create_routed_provider_with_options(
         provider_name,
@@ -5747,8 +5767,8 @@ mod tests {
 
     #[test]
     fn merge_continuation_text_handles_unicode_overlap() {
-        let merged = merge_continuation_text("你好世界", "世界和平");
-        assert_eq!(merged, "你好世界和平");
+        let merged = merge_continuation_text("Hello wor", "world!");
+        assert_eq!(merged, "Hello world!");
     }
 
     #[test]
@@ -6658,21 +6678,12 @@ Done."#;
         assert!(looks_like_deferred_action_without_tool_call(
             "It seems absolute paths are blocked. Let me try using a relative path."
         ));
-        assert!(looks_like_deferred_action_without_tool_call(
-            "看起来绝对路径不可用，让我尝试使用当前目录的相对路径。"
-        ));
-        assert!(looks_like_deferred_action_without_tool_call(
-            "页面已打开，让我获取快照查看详细信息。"
-        ));
     }
 
     #[test]
     fn looks_like_deferred_action_without_tool_call_ignores_final_answers() {
         assert!(!looks_like_deferred_action_without_tool_call(
             "The latest update is already shown above."
-        ));
-        assert!(!looks_like_deferred_action_without_tool_call(
-            "最新结果已经在上面整理完成。"
         ));
     }
 

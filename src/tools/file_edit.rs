@@ -211,6 +211,17 @@ impl Tool for FileEditTool {
         "Edit a file by replacing an exact string match with new content"
     }
 
+    fn prompt_hint(&self) -> Option<&str> {
+        Some(
+            "Edit a file by exact string replacement. Use when: making targeted changes to existing files. \
+             Don't use when: creating new files (use file_write) or making large rewrites.",
+        )
+    }
+
+    fn prompt_hint_compact(&self) -> &str {
+        "Edit a file by exact string replacement."
+    }
+
     fn parameters_schema(&self) -> serde_json::Value {
         json!({
             "type": "object",

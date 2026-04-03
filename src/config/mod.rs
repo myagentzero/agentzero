@@ -23,7 +23,7 @@ pub use schema::{
     SchedulerConfig, SecretsConfig, SecurityConfig, SecurityRoleConfig, SkillCreationConfig,
     SkillImprovementConfig, SkillsConfig, SkillsPromptInjectionMode, SlackConfig, StorageConfig,
     StorageProviderConfig, StorageProviderSection, StreamMode, SubAgentsConfig,
-    SyscallAnomalyConfig, TelegramConfig, TranscriptionConfig, TunnelConfig, UrlAccessConfig,
+    SyscallAnomalyConfig, TranscriptionConfig, TunnelConfig, UrlAccessConfig,
     WasmCapabilityEscalationMode, WasmConfig, WasmModuleHashPolicy, WasmRuntimeConfig,
     WasmSecurityConfig, WebFetchConfig, WebSearchConfig, WebhookConfig,
     apply_runtime_proxy_to_builder, build_runtime_proxy_client,
@@ -50,19 +50,6 @@ mod tests {
 
     #[test]
     fn reexported_channel_configs_are_constructible() {
-        let telegram = TelegramConfig {
-            bot_token: "token".into(),
-            allowed_users: vec!["alice".into()],
-            stream_mode: StreamMode::default(),
-            draft_update_interval_ms: 1000,
-            interrupt_on_new_message: false,
-            mention_only: false,
-            progress_mode: ProgressMode::default(),
-            group_reply: None,
-            base_url: None,
-            ack_enabled: true,
-        };
-
         let discord = DiscordConfig {
             bot_token: "token".into(),
             guild_id: Some("123".into()),
@@ -72,7 +59,6 @@ mod tests {
             group_reply: None,
         };
 
-        assert_eq!(telegram.allowed_users.len(), 1);
         assert_eq!(discord.guild_id.as_deref(), Some("123"));
     }
 

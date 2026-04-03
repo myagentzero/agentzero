@@ -233,6 +233,17 @@ impl Tool for TaskPlanTool {
          Actions: create (batch), add (single), update (change status), list (view all), delete (clear all)."
     }
 
+    fn prompt_hint(&self) -> Option<&str> {
+        Some(
+            "Track progress with a task checklist. Use when: breaking complex work into steps. \
+             Don't use when: the task is simple enough to complete in one action.",
+        )
+    }
+
+    fn prompt_hint_compact(&self) -> &str {
+        "Track progress with a task checklist."
+    }
+
     fn parameters_schema(&self) -> serde_json::Value {
         json!({
             "type": "object",

@@ -81,7 +81,6 @@ pub mod url_validation;
 pub mod wasm_module;
 pub mod wasm_tool;
 pub mod weather_tool;
-pub mod web_access_config;
 pub mod web_fetch;
 mod web_search_provider_routing;
 pub mod web_search_tool;
@@ -89,10 +88,7 @@ pub mod xlsx_read;
 
 pub use agent_load_tracker::AgentLoadTracker;
 pub use ask_user::AskUserTool;
-#[allow(unused_imports)]
-pub use bg_run::{
-    BgJob, BgJobStatus, BgJobStore, BgRunTool, BgStatusTool, format_bg_result_for_injection,
-};
+pub use bg_run::{BgJobStore, BgRunTool, BgStatusTool};
 pub use browser::{BrowserTool, ComputerUseConfig};
 pub use calculator::CalculatorTool;
 pub use channel_ack_config::ChannelAckConfigTool;
@@ -149,7 +145,6 @@ pub use traits::Tool;
 pub use traits::{ToolResult, ToolSpec};
 pub use wasm_module::WasmModuleTool;
 pub use weather_tool::WeatherTool;
-pub use web_access_config::WebAccessConfigTool;
 pub use web_fetch::WebFetchTool;
 pub use web_search_tool::WebSearchTool;
 pub use xlsx_read::XlsxReadTool;
@@ -440,7 +435,6 @@ pub fn all_tools_with_runtime(
         )),
         Arc::new(ChannelAckConfigTool::new(config.clone(), security.clone())),
         Arc::new(ProxyConfigTool::new(config.clone(), security.clone())),
-        Arc::new(WebAccessConfigTool::new(config.clone(), security.clone())),
         Arc::new(ManageAuthProfileTool::new(config.clone())),
         Arc::new(CalculatorTool::new()),
         Arc::new(WeatherTool::new()),
@@ -630,6 +624,7 @@ pub fn all_tools_with_runtime(
             custom_provider_auth_header: root_config.effective_custom_provider_auth_header(),
             max_tokens_override: None,
             model_support_vision: root_config.model_support_vision,
+            litellm_cache: root_config.effective_litellm_cache(),
         };
         let runtime_config_path = Some(root_config.config_path.clone());
         let parent_tools = Arc::new(tool_arcs.clone());
@@ -921,7 +916,6 @@ mod tests {
         assert!(names.contains(&"schedule"));
         assert!(names.contains(&"model_routing_config"));
         assert!(names.contains(&"proxy_config"));
-        assert!(names.contains(&"web_access_config"));
     }
 
     #[test]
@@ -962,7 +956,6 @@ mod tests {
         assert!(names.contains(&"content_search"));
         assert!(names.contains(&"model_routing_config"));
         assert!(names.contains(&"proxy_config"));
-        assert!(names.contains(&"web_access_config"));
     }
 
     #[test]

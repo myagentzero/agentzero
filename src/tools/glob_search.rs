@@ -29,6 +29,17 @@ impl Tool for GlobSearchTool {
          Examples: '**/*.rs' (all Rust files), 'src/**/mod.rs' (all mod.rs in src)."
     }
 
+    fn prompt_hint(&self) -> Option<&str> {
+        Some(
+            "Find files by glob pattern. Use when: locating files by name or extension. \
+             Don't use when: searching file contents (use content_search).",
+        )
+    }
+
+    fn prompt_hint_compact(&self) -> &str {
+        "Find files by glob pattern."
+    }
+
     fn parameters_schema(&self) -> serde_json::Value {
         json!({
             "type": "object",
@@ -57,7 +68,10 @@ impl Tool for GlobSearchTool {
             });
         }
 
-        if pattern.starts_with('/') || pattern.starts_with('\\') {
+        // Security: reject absolute paths unless under an explicit allowed root.
+        if (pattern.starts_with('/') || pattern.starts_with('\\'))
+            && !self.security.is_path_allowed(pattern)
+        {
             return Ok(ToolResult {
                 success: false,
                 output: String::new(),

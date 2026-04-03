@@ -109,7 +109,7 @@ async-trait = "0.1"
 # HMAC-SHA256 (Zhipu/GLM JWT auth)
 ring = "0.17"
 
-# Protobuf encode/decode (WS frame codec, WhatsApp storage)
+# Protobuf encode/decode (WS frame codec)
 prost = { version = "0.14", default-features = false, features = ["derive"], optional = true }
 
 # Memory / persistence
@@ -191,18 +191,6 @@ tempfile = "3.14"
 # Uses WASI stdio protocol — tools read JSON from stdin, write JSON to stdout.
 wasmtime-wasi = { version = "36.0.6", optional = true, default-features = false, features = ["preview1"] }
 
-# Terminal QR rendering for WhatsApp Web pairing flow.
-qrcode = { version = "0.14", optional = true }
-
-# WhatsApp Web client (wa-rs) — optional, enable with --features whatsapp-web
-# Uses wa-rs for Bot and Client, wa-rs-core for storage traits, custom rusqlite backend avoids Diesel conflict.
-wa-rs = { version = "0.2", optional = true, default-features = false }
-wa-rs-core = { version = "0.2", optional = true, default-features = false }
-wa-rs-binary = { version = "0.2", optional = true, default-features = false }
-wa-rs-proto = { version = "0.2", optional = true, default-features = false }
-wa-rs-ureq-http = { version = "0.2", optional = true }
-wa-rs-tokio-transport = { version = "0.2", optional = true, default-features = false }
-
 # Raspberry Pi GPIO / Landlock (Linux only) — target-specific to avoid compile failure on macOS
 [target.'cfg(target_os = "linux")'.dependencies]
 rppal = { version = "0.22", optional = true }
@@ -238,8 +226,6 @@ skill-creation = []
 # wasm-tools = WASM plugin engine for dynamically-loaded tool packages (WASI stdio protocol)
 # Runtime implementation is active on Linux/macOS/Windows; unsupported targets use stubs.
 wasm-tools = ["dep:wasmtime-wasi"]
-# whatsapp-web = Native WhatsApp Web client with custom rusqlite storage backend
-whatsapp-web = ["dep:wa-rs", "dep:wa-rs-core", "dep:wa-rs-binary", "dep:wa-rs-proto", "dep:wa-rs-ureq-http", "dep:wa-rs-tokio-transport", "dep:serde-big-array", "dep:prost", "dep:qrcode"]
 # Optional provider feature flags used by cfg(feature = "...") guards.
 # Keep disabled by default to preserve current runtime behavior.
 firecrawl = []

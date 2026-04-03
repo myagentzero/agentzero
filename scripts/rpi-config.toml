@@ -97,7 +97,6 @@ non_cli_excluded_tools = [
     "memory_forget",
     "proxy_config",
     "web_search_config",
-    "web_access_config",
     "model_routing_config",
     "channel_ack_config",
     "pushover",

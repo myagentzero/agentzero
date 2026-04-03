@@ -149,13 +149,12 @@ Add a new channel configuration.
 Provide the channel type and a JSON object with the required \
 configuration keys for that channel type.
 
-Supported types: telegram, discord, slack, whatsapp, github, email.
+Supported types: discord, slack, github, email.
 
 Examples:
-  zeroclaw channel add telegram '{\"bot_token\":\"...\",\"name\":\"my-bot\"}'
   zeroclaw channel add discord '{\"bot_token\":\"...\",\"name\":\"my-discord\"}'")]
     Add {
-        /// Channel type (discord, slack, whatsapp, github, email)
+        /// Channel type (discord, slack, github, email)
         channel_type: String,
         /// Optional configuration as JSON
         config: String,
@@ -164,21 +163,6 @@ Examples:
     Remove {
         /// Channel name to remove
         name: String,
-    },
-    /// Bind a Telegram identity (username or numeric user ID) into allowlist
-    #[command(long_about = "\
-Bind a Telegram identity into the allowlist.
-
-Adds a Telegram username (without the '@' prefix) or numeric user \
-ID to the channel allowlist so the agent will respond to messages \
-from that identity.
-
-Examples:
-  zeroclaw channel bind-telegram zeroclaw_user
-  zeroclaw channel bind-telegram 123456789")]
-    BindTelegram {
-        /// Telegram identity to allow (username without '@' or numeric user ID)
-        identity: String,
     },
 }
 

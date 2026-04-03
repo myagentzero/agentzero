@@ -19,7 +19,6 @@ import {
   Timer,
   Target,
   MessageCircle,
-  Send,
   Hash,
   Database,
   Router,
@@ -80,6 +79,12 @@ export const CONFIG_SECTIONS: SectionDef[] = [
     defaultCollapsed: true,
     fields: [
       { key: 'reasoning_level', label: 'Reasoning Level', type: 'text', description: 'e.g. low, medium, high' },
+      // LiteLLM dynamic cache controls (for LiteLLM proxy providers)
+      { key: 'litellm_cache.ttl', label: 'Cache TTL (seconds)', type: 'number', min: 0, description: 'Cache duration in seconds (LiteLLM proxy)' },
+      { key: 'litellm_cache.s_maxage', label: 'Cache Max Age (seconds)', type: 'number', min: 0, description: 'Max acceptable age for cached responses (LiteLLM s-maxage)' },
+      { key: 'litellm_cache.no_cache', label: 'No Cache', type: 'toggle', description: 'Bypass cache lookup but still store response (LiteLLM)' },
+      { key: 'litellm_cache.no_store', label: 'No Store', type: 'toggle', description: 'Do not cache the response (LiteLLM)' },
+      { key: 'litellm_cache.namespace', label: 'Cache Namespace', type: 'text', description: 'Logical cache partition key (LiteLLM)' },
     ],
   },
 
@@ -139,8 +144,8 @@ export const CONFIG_SECTIONS: SectionDef[] = [
       { key: 'shell_env_passthrough', label: 'Shell Env Passthrough', type: 'tag-list', tagPlaceholder: 'e.g. PATH, HOME, EDITOR' },
       { key: 'allow_sensitive_file_reads', label: 'Allow Sensitive File Reads', type: 'toggle', defaultValue: false, description: 'Allow reading .env, keys, and credential files' },
       { key: 'allow_sensitive_file_writes', label: 'Allow Sensitive File Writes', type: 'toggle', defaultValue: false, description: 'Allow writing .env, keys, and credential files' },
-      { key: 'non_cli_excluded_tools', label: 'Non-CLI Excluded Tools', type: 'tag-list', tagPlaceholder: 'e.g. shell, file_write', description: 'Tools hidden from non-CLI channels (Telegram, Discord, etc.)' },
-      { key: 'non_cli_approval_approvers', label: 'Non-CLI Approval Approvers', type: 'tag-list', tagPlaceholder: 'e.g. alice, telegram:bob, *', description: 'Who can manage approval commands on non-CLI channels' },
+      { key: 'non_cli_excluded_tools', label: 'Non-CLI Excluded Tools', type: 'tag-list', tagPlaceholder: 'e.g. shell, file_write', description: 'Tools hidden from non-CLI channels (Discord, Slack, etc.)' },
+      { key: 'non_cli_approval_approvers', label: 'Non-CLI Approval Approvers', type: 'tag-list', tagPlaceholder: 'e.g. alice, discord:bob, *', description: 'Who can manage approval commands on non-CLI channels' },
       {
         key: 'non_cli_natural_language_approval_mode', label: 'Non-CLI NL Approval Mode', type: 'select', defaultValue: 'direct',
         options: [
@@ -492,7 +497,7 @@ export const CONFIG_SECTIONS: SectionDef[] = [
       { key: 'max_tasks_per_tick', label: 'Max Tasks per Tick', type: 'number', min: 1, defaultValue: 3, description: 'Default: 3' },
       { key: 'dedupe_window_minutes', label: 'Dedupe Window (min)', type: 'number', min: 0, defaultValue: 0, description: 'Skip duplicate tasks within this window. 0 = disabled' },
       { key: 'message', label: 'Message', type: 'text', description: 'e.g. Agent is alive and running' },
-      { key: 'target', label: 'Target Channel', type: 'text', description: 'e.g. telegram, discord, slack' },
+      { key: 'target', label: 'Target Channel', type: 'text', description: 'e.g. discord, slack' },
       { key: 'to', label: 'Recipient', type: 'text', description: 'e.g. channel ID or username' },
       { key: 'load_session_context', label: 'Load Session Context', type: 'toggle', defaultValue: false, description: 'Inject recent conversation history into heartbeat prompts' },
     ],
@@ -543,30 +548,6 @@ export const CONFIG_SECTIONS: SectionDef[] = [
     ],
   },
 
-  // ── Telegram ──────────────────────────────────────────────────────
-  {
-    path: 'channels_config.telegram',
-    category: 'channels',
-    title: 'Telegram',
-    description: 'Telegram bot channel',
-    icon: Send,
-    defaultCollapsed: true,
-    fields: [
-      { key: 'bot_token', label: 'Bot Token', type: 'password', sensitive: true, description: 'e.g. 123456:ABC-DEF1234ghIkl-zyx57W2v' },
-      { key: 'allowed_users', label: 'Allowed Users', type: 'tag-list', tagPlaceholder: 'e.g. 123456789 or @username' },
-      {
-        key: 'stream_mode', label: 'Stream Mode', type: 'select', defaultValue: 'off', options: [
-          { value: 'off', label: 'Off' },
-          { value: 'partial', label: 'Partial' },
-        ]
-      },
-      { key: 'draft_update_interval_ms', label: 'Draft Update Interval (ms)', type: 'number', min: 100, defaultValue: 1000, description: 'Default: 1000' },
-      { key: 'mention_only', label: 'Mention Only', type: 'toggle', defaultValue: false },
-      { key: 'interrupt_on_new_message', label: 'Interrupt on New Message', type: 'toggle', defaultValue: false },
-      { key: 'base_url', label: 'Custom Base URL', type: 'text', description: 'e.g. https://api.telegram.org' },
-    ],
-  },
-
   // ── Discord ───────────────────────────────────────────────────────
   {
     path: 'channels_config.discord',
@@ -597,23 +578,6 @@ export const CONFIG_SECTIONS: SectionDef[] = [
       { key: 'app_token', label: 'App Token', type: 'password', sensitive: true, description: 'e.g. xapp-1-...' },
       { key: 'channel_id', label: 'Channel ID', type: 'text', description: 'e.g. C0123456789' },
       { key: 'allowed_users', label: 'Allowed Users', type: 'tag-list', tagPlaceholder: 'e.g. U0123456789' },
-    ],
-  },
-
-  // ── Signal ────────────────────────────────────────────────────────
-  {
-    path: 'channels_config.signal',
-    category: 'channels',
-    title: 'Signal',
-    description: 'Signal messaging channel',
-    icon: MessageCircle,
-    defaultCollapsed: true,
-    fields: [
-      { key: 'http_url', label: 'HTTP URL', type: 'text', description: 'e.g. http://localhost:8080' },
-      { key: 'account', label: 'Account', type: 'text', description: 'e.g. +1234567890' },
-      { key: 'group_id', label: 'Group ID', type: 'text', description: 'e.g. base64-encoded group ID' },
-      { key: 'allowed_from', label: 'Allowed From', type: 'tag-list', tagPlaceholder: 'e.g. +1234567890' },
-      { key: 'ignore_attachments', label: 'Ignore Attachments', type: 'toggle', defaultValue: false },
     ],
   },
 
@@ -813,7 +777,7 @@ export const CONFIG_SECTIONS: SectionDef[] = [
     fields: [
       { key: 'enabled', label: 'Enabled', type: 'toggle', defaultValue: true },
       { key: 'default_timeout_secs', label: 'Default Timeout (s)', type: 'number', min: 1, defaultValue: 300, description: 'Default: 300 (5 minutes)' },
-      { key: 'default_channel', label: 'Default Channel', type: 'text', description: 'Preferred channel when none specified (e.g. slack, telegram). Leave empty to use first available.' },
+      { key: 'default_channel', label: 'Default Channel', type: 'text', description: 'Preferred channel when none specified (e.g. slack, discord). Leave empty to use first available.' },
     ],
   },
 

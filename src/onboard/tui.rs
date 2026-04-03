@@ -1,6 +1,6 @@
 use crate::config::schema::{CloudflareTunnelConfig, NgrokTunnelConfig};
 use crate::config::{
-    ChannelsConfig, Config, DiscordConfig, ProgressMode, StreamMode, TelegramConfig, TunnelConfig,
+    ChannelsConfig, Config, DiscordConfig, TunnelConfig,
     default_model_fallback_for_provider,
 };
 use crate::onboard::wizard::run_quick_setup;
@@ -80,7 +80,7 @@ impl Step {
             Self::Provider => "Select provider, API key, and default model.",
             Self::ProviderDiagnostics => "Run live checks against your selected provider.",
             Self::Runtime => "Choose memory backend and security defaults.",
-            Self::Channels => "Optional: configure Telegram/Discord entry points.",
+            Self::Channels => "Optional: configure Discord entry points.",
             Self::ChannelDiagnostics => "Run channel checks before writing config.",
             Self::Tunnel => "Optional: expose gateway with Cloudflare or ngrok.",
             Self::TunnelDiagnostics => "Probe tunnel credentials before apply.",
@@ -120,9 +120,6 @@ enum FieldKey {
     Model,
     MemoryBackend,
     DisableTotp,
-    EnableTelegram,
-    TelegramToken,
-    TelegramAllowedUsers,
     EnableDiscord,
     DiscordToken,
     DiscordGuildId,
@@ -136,10 +133,6 @@ enum FieldKey {
     ProviderProbeResult,
     ProviderProbeDetails,
     ProviderProbeRemediation,
-    RunTelegramProbe,
-    TelegramProbeResult,
-    TelegramProbeDetails,
-    TelegramProbeRemediation,
     RunDiscordProbe,
     DiscordProbeResult,
     DiscordProbeDetails,
@@ -207,9 +200,6 @@ struct TuiOnboardPlan {
     model: String,
     memory_idx: usize,
     disable_totp: bool,
-    enable_telegram: bool,
-    telegram_token: String,
-    telegram_allowed_users: String,
     enable_discord: bool,
     discord_token: String,
     discord_guild_id: String,
@@ -233,9 +223,6 @@ impl TuiOnboardPlan {
             model: provider_default_model(provider),
             memory_idx: 0,
             disable_totp: false,
-            enable_telegram: false,
-            telegram_token: String::new(),
-            telegram_allowed_users: String::new(),
             enable_discord: false,
             discord_token: String::new(),
             discord_guild_id: String::new(),
@@ -278,7 +265,6 @@ struct TuiState {
     plan: TuiOnboardPlan,
     model_touched: bool,
     provider_probe: CheckStatus,
-    telegram_probe: CheckStatus,
     discord_probe: CheckStatus,
     cloudflare_probe: CheckStatus,
     ngrok_probe: CheckStatus,
@@ -295,7 +281,6 @@ impl TuiState {
             plan: TuiOnboardPlan::new(default_workspace, force),
             model_touched: false,
             provider_probe: CheckStatus::NotRun,
-            telegram_probe: CheckStatus::NotRun,
             discord_probe: CheckStatus::NotRun,
             cloudflare_probe: CheckStatus::NotRun,
             ngrok_probe: CheckStatus::NotRun,
@@ -411,14 +396,6 @@ impl TuiState {
             Step::Channels => {
                 let mut rows = vec![
                     FieldView {
-                        key: FieldKey::EnableTelegram,
-                        label: "Enable Telegram",
-                        value: bool_label(self.plan.enable_telegram),
-                        hint: "Adds Telegram bot channel config.",
-                        required: false,
-                        editable: true,
-                    },
-                    FieldView {
                         key: FieldKey::EnableDiscord,
                         label: "Enable Discord",
                         value: bool_label(self.plan.enable_discord),
@@ -435,32 +412,8 @@ impl TuiState {
                         editable: true,
                     },
                 ];
-                if self.plan.enable_telegram {
-                    rows.insert(
-                        1,
-                        FieldView {
-                            key: FieldKey::TelegramToken,
-                            label: "Telegram bot token",
-                            value: display_value(&self.plan.telegram_token, true),
-                            hint: "Token from @BotFather.",
-                            required: true,
-                            editable: true,
-                        },
-                    );
-                    rows.insert(
-                        2,
-                        FieldView {
-                            key: FieldKey::TelegramAllowedUsers,
-                            label: "Telegram allowlist",
-                            value: display_value(&self.plan.telegram_allowed_users, false),
-                            hint: "Comma-separated user IDs/usernames; empty blocks all.",
-                            required: false,
-                            editable: true,
-                        },
-                    );
-                }
                 if self.plan.enable_discord {
-                    let base = if self.plan.enable_telegram { 4 } else { 2 };
+                    let base = 1;
                     rows.insert(
                         base,
                         FieldView {
@@ -499,40 +452,6 @@ impl TuiState {
             }
             Step::ChannelDiagnostics => {
                 let mut rows = Vec::new();
-                if self.plan.enable_telegram {
-                    rows.push(FieldView {
-                        key: FieldKey::RunTelegramProbe,
-                        label: "Run Telegram test",
-                        value: "Press Enter to call getMe".to_string(),
-                        hint: "Validates bot token with Telegram API.",
-                        required: false,
-                        editable: false,
-                    });
-                    rows.push(FieldView {
-                        key: FieldKey::TelegramProbeResult,
-                        label: "Telegram status",
-                        value: self.telegram_probe.as_line(),
-                        hint: "Requires internet connectivity.",
-                        required: false,
-                        editable: false,
-                    });
-                    rows.push(FieldView {
-                        key: FieldKey::TelegramProbeDetails,
-                        label: "Telegram check details",
-                        value: self.telegram_probe_details(),
-                        hint: "Connection + token health for Telegram bot.",
-                        required: false,
-                        editable: false,
-                    });
-                    rows.push(FieldView {
-                        key: FieldKey::TelegramProbeRemediation,
-                        label: "Telegram remediation",
-                        value: self.telegram_probe_remediation(),
-                        hint: "What to fix when Telegram checks fail.",
-                        required: false,
-                        editable: false,
-                    });
-                }
                 if self.plan.enable_discord {
                     rows.push(FieldView {
                         key: FieldKey::RunDiscordProbe,
@@ -572,7 +491,7 @@ impl TuiState {
                     rows.push(FieldView {
                         key: FieldKey::Continue,
                         label: "No checks configured",
-                        value: "Enable Telegram or Discord in previous step".to_string(),
+                        value: "Enable Discord in previous step".to_string(),
                         hint: "Use n or PageDown to continue.",
                         required: false,
                         editable: false,
@@ -769,9 +688,6 @@ impl TuiState {
             Step::ProviderDiagnostics => Ok(()),
             Step::Runtime => Ok(()),
             Step::Channels => {
-                if self.plan.enable_telegram && self.plan.telegram_token.trim().is_empty() {
-                    bail!("Telegram is enabled but bot token is empty")
-                }
                 if self.plan.enable_discord && self.plan.discord_token.trim().is_empty() {
                     bail!("Discord is enabled but bot token is empty")
                 }
@@ -832,9 +748,6 @@ impl TuiState {
         if self.provider_probe.is_failed() {
             failures.push("provider".to_string());
         }
-        if self.plan.enable_telegram && self.telegram_probe.is_failed() {
-            failures.push("telegram".to_string());
-        }
         if self.plan.enable_discord && self.discord_probe.is_failed() {
             failures.push("discord".to_string());
         }
@@ -890,60 +803,6 @@ impl TuiState {
                         .to_string()
                 } else {
                     format!("Resolve provider error and re-run probe: {details}")
-                }
-            }
-        }
-    }
-
-    fn telegram_probe_details(&self) -> String {
-        if !self.plan.enable_telegram {
-            return "Telegram channel disabled.".to_string();
-        }
-
-        let allow_count = parse_csv_list(&self.plan.telegram_allowed_users).len();
-        let allowlist_summary = if allow_count == 0 {
-            "allowlist empty (messages blocked until populated)".to_string()
-        } else {
-            format!("allowlist entries: {allow_count}")
-        };
-
-        match &self.telegram_probe {
-            CheckStatus::NotRun => format!("Telegram probe not run; {allowlist_summary}."),
-            CheckStatus::Passed(details) => format!("{details}; {allowlist_summary}."),
-            CheckStatus::Failed(details) => format!("{details}; {allowlist_summary}."),
-            CheckStatus::Skipped(details) => format!("{details}; {allowlist_summary}."),
-        }
-    }
-
-    fn telegram_probe_remediation(&self) -> String {
-        if !self.plan.enable_telegram {
-            return "Enable Telegram in Channels step to run diagnostics.".to_string();
-        }
-
-        let allow_count = parse_csv_list(&self.plan.telegram_allowed_users).len();
-        match &self.telegram_probe {
-            CheckStatus::NotRun => "Run Telegram test with Enter or r.".to_string(),
-            CheckStatus::Passed(_) if allow_count == 0 => {
-                "Optional hardening: add Telegram allowlist entries before production use."
-                    .to_string()
-            }
-            CheckStatus::Passed(_) => "No Telegram remediation required.".to_string(),
-            CheckStatus::Skipped(details) => format!("Review skip reason and re-run: {details}"),
-            CheckStatus::Failed(details) => {
-                let lower = details.to_ascii_lowercase();
-                if details.contains("bot token is empty") {
-                    "Set Telegram bot token from @BotFather in Channels step.".to_string()
-                } else if contains_http_status(details, 401)
-                    || contains_http_status(details, 403)
-                    || lower.contains("unauthorized")
-                {
-                    "Regenerate Telegram bot token in @BotFather and update Channels step."
-                        .to_string()
-                } else if looks_like_network_error(details) {
-                    "Verify connectivity to api.telegram.org (proxy/firewall/DNS), then re-run."
-                        .to_string()
-                } else {
-                    format!("Resolve Telegram error and re-run: {details}")
                 }
             }
         }
@@ -1116,8 +975,6 @@ impl TuiState {
             FieldKey::WorkspacePath => (self.plan.workspace_path.clone(), false),
             FieldKey::ApiKey => (self.plan.api_key.clone(), true),
             FieldKey::Model => (self.plan.model.clone(), false),
-            FieldKey::TelegramToken => (self.plan.telegram_token.clone(), true),
-            FieldKey::TelegramAllowedUsers => (self.plan.telegram_allowed_users.clone(), false),
             FieldKey::DiscordToken => (self.plan.discord_token.clone(), true),
             FieldKey::DiscordGuildId => (self.plan.discord_guild_id.clone(), false),
             FieldKey::DiscordAllowedUsers => (self.plan.discord_allowed_users.clone(), false),
@@ -1153,11 +1010,6 @@ impl TuiState {
                 self.model_touched = true;
                 self.provider_probe = CheckStatus::NotRun;
             }
-            FieldKey::TelegramToken => {
-                self.plan.telegram_token = value;
-                self.telegram_probe = CheckStatus::NotRun;
-            }
-            FieldKey::TelegramAllowedUsers => self.plan.telegram_allowed_users = value,
             FieldKey::DiscordToken => {
                 self.plan.discord_token = value;
                 self.discord_probe = CheckStatus::NotRun;
@@ -1213,10 +1065,6 @@ impl TuiState {
             FieldKey::DisableTotp => {
                 self.plan.disable_totp = !self.plan.disable_totp;
             }
-            FieldKey::EnableTelegram => {
-                self.plan.enable_telegram = !self.plan.enable_telegram;
-                self.telegram_probe = CheckStatus::NotRun;
-            }
             FieldKey::EnableDiscord => {
                 self.plan.enable_discord = !self.plan.enable_discord;
                 self.discord_probe = CheckStatus::NotRun;
@@ -1261,12 +1109,6 @@ impl TuiState {
                 self.status = "Running provider probe...".to_string();
                 self.provider_probe = run_provider_probe(&self.plan);
                 self.status = format!("Provider probe {}", self.provider_probe.badge());
-                true
-            }
-            FieldKey::RunTelegramProbe => {
-                self.status = "Running Telegram probe...".to_string();
-                self.telegram_probe = run_telegram_probe(&self.plan);
-                self.status = format!("Telegram probe {}", self.telegram_probe.badge());
                 true
             }
             FieldKey::RunDiscordProbe => {
@@ -1375,7 +1217,6 @@ impl TuiState {
                 match self.current_field_key() {
                     Some(FieldKey::Continue) => self.next_step()?,
                     Some(field_key @ FieldKey::RunProviderProbe)
-                    | Some(field_key @ FieldKey::RunTelegramProbe)
                     | Some(field_key @ FieldKey::RunDiscordProbe)
                     | Some(field_key @ FieldKey::RunCloudflareProbe)
                     | Some(field_key @ FieldKey::RunNgrokProbe) => {
@@ -1437,19 +1278,10 @@ impl TuiState {
         ));
 
         let mut channel_notes = vec!["CLI".to_string()];
-        if self.plan.enable_telegram {
-            channel_notes.push("Telegram".to_string());
-        }
         if self.plan.enable_discord {
             channel_notes.push("Discord".to_string());
         }
         lines.push(format!("Channels: {}", channel_notes.join(", ")));
-        if self.plan.enable_telegram {
-            lines.push(format!(
-                "Telegram diagnostics: {}",
-                self.telegram_probe.as_line()
-            ));
-        }
         if self.plan.enable_discord {
             lines.push(format!(
                 "Discord diagnostics: {}",
@@ -1613,50 +1445,6 @@ fn run_provider_probe(plan: &TuiOnboardPlan) -> CheckStatus {
         }
         _ => CheckStatus::Skipped(format!("no probe implemented for provider `{provider}`")),
     }
-}
-
-fn run_telegram_probe(plan: &TuiOnboardPlan) -> CheckStatus {
-    if !plan.enable_telegram {
-        return CheckStatus::Skipped("telegram channel is disabled".to_string());
-    }
-
-    let token = plan.telegram_token.trim();
-    if token.is_empty() {
-        return CheckStatus::Failed("telegram bot token is empty".to_string());
-    }
-
-    let client = match probe_http_client() {
-        Ok(client) => client,
-        Err(error) => return CheckStatus::Failed(error.to_string()),
-    };
-
-    let url = format!("https://api.telegram.org/bot{token}/getMe");
-    let response = match client.get(url).send() {
-        Ok(response) => response,
-        Err(error) => return CheckStatus::Failed(error.to_string()),
-    };
-    if !response.status().is_success() {
-        return CheckStatus::Failed(format!("HTTP {}", response.status()));
-    }
-
-    let json: Value = match response.json() {
-        Ok(json) => json,
-        Err(error) => return CheckStatus::Failed(error.to_string()),
-    };
-
-    if json.get("ok").and_then(Value::as_bool) == Some(true) {
-        let username = json
-            .pointer("/result/username")
-            .and_then(Value::as_str)
-            .unwrap_or("unknown");
-        return CheckStatus::Passed(format!("token accepted (bot @{username})"));
-    }
-
-    let description = json
-        .get("description")
-        .and_then(Value::as_str)
-        .unwrap_or("unknown Telegram error");
-    CheckStatus::Failed(description.to_string())
 }
 
 fn run_discord_probe(plan: &TuiOnboardPlan) -> CheckStatus {
@@ -2257,21 +2045,6 @@ fn advance_index(current: usize, len: usize, direction: i8) -> usize {
 fn apply_channel_overrides(config: &mut Config, plan: &TuiOnboardPlan) {
     let mut channels = ChannelsConfig::default();
 
-    if plan.enable_telegram {
-        channels.telegram = Some(TelegramConfig {
-            bot_token: plan.telegram_token.trim().to_string(),
-            allowed_users: parse_csv_list(&plan.telegram_allowed_users),
-            stream_mode: StreamMode::Off,
-            draft_update_interval_ms: 1000,
-            interrupt_on_new_message: false,
-            mention_only: false,
-            progress_mode: ProgressMode::Compact,
-            group_reply: None,
-            base_url: None,
-            ack_enabled: true,
-        });
-    }
-
     if plan.enable_discord {
         let guild_id = plan.discord_guild_id.trim();
         channels.discord = Some(DiscordConfig {
@@ -2336,8 +2109,6 @@ fn is_text_input_field(field_key: FieldKey) -> bool {
         FieldKey::WorkspacePath
             | FieldKey::ApiKey
             | FieldKey::Model
-            | FieldKey::TelegramToken
-            | FieldKey::TelegramAllowedUsers
             | FieldKey::DiscordToken
             | FieldKey::DiscordGuildId
             | FieldKey::DiscordAllowedUsers
@@ -2575,12 +2346,9 @@ mod tests {
         let workspace = Path::new("/tmp/zeroclaw-channel-diag-rows").to_path_buf();
         let mut state = TuiState::new(workspace, true);
         state.step = Step::ChannelDiagnostics;
-        state.plan.enable_telegram = true;
         state.plan.enable_discord = true;
 
         let labels: Vec<&str> = state.visible_fields().iter().map(|row| row.label).collect();
-        assert!(labels.contains(&"Telegram check details"));
-        assert!(labels.contains(&"Telegram remediation"));
         assert!(labels.contains(&"Discord check details"));
         assert!(labels.contains(&"Discord remediation"));
     }

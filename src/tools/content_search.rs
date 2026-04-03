@@ -44,6 +44,17 @@ impl Tool for ContentSearchTool {
          Example: pattern='fn main', include='*.rs', output_mode='content'."
     }
 
+    fn prompt_hint(&self) -> Option<&str> {
+        Some(
+            "Search file contents by regex. Use when: finding code patterns, definitions, usages across the workspace. \
+             Don't use when: you know the exact file (use file_read) or need file paths only (use glob_search).",
+        )
+    }
+
+    fn prompt_hint_compact(&self) -> &str {
+        "Search file contents by regex pattern."
+    }
+
     fn parameters_schema(&self) -> serde_json::Value {
         json!({
             "type": "object",
@@ -171,7 +182,10 @@ impl Tool for ContentSearchTool {
         }
 
         // --- Path security checks ---
-        if std::path::Path::new(search_path).is_absolute() {
+        // Reject absolute paths unless they fall under an explicit allowed root.
+        if std::path::Path::new(search_path).is_absolute()
+            && !self.security.is_path_allowed(search_path)
+        {
             return Ok(ToolResult {
                 success: false,
                 output: String::new(),

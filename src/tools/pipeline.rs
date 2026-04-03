@@ -220,6 +220,17 @@ impl Tool for PipelineTool {
          or in parallel when 'parallel: true' is set."
     }
 
+    fn prompt_hint(&self) -> Option<&str> {
+        Some(
+            "Run multiple tool steps in a single call. Use when: chaining dependent tool calls or running independent steps in parallel. \
+             Don't use when: a single tool call suffices.",
+        )
+    }
+
+    fn prompt_hint_compact(&self) -> &str {
+        "Run multiple tool steps in a single call."
+    }
+
     fn parameters_schema(&self) -> serde_json::Value {
         serde_json::json!({
             "type": "object",

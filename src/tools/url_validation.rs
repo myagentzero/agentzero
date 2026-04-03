@@ -79,7 +79,7 @@ fn enforce_global_domain_access_policy(
         && !host_matches_allowlist(host, &config.approved_domains)
     {
         anyhow::bail!(
-            "First-time domain approval required for '{host}'. Ask a human to confirm and then add it to security.url_access.approved_domains (for example via web_access_config)."
+            "First-time domain approval required for '{host}'. Ask a human to confirm and then add it to security.url_access.approved_domains."
         );
     }
 
