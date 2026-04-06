@@ -6,6 +6,8 @@ import {
   Trash2,
   X,
   Filter,
+  Copy,
+  Check,
 } from 'lucide-react';
 import type { MemoryEntry } from '@/types/api';
 import { getMemory, storeMemory, deleteMemory } from '@/lib/api';
@@ -28,6 +30,8 @@ export default function Memory() {
   const [categoryFilter, setCategoryFilter] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [selectedEntry, setSelectedEntry] = useState<MemoryEntry | null>(null);
+  const [copied, setCopied] = useState(false);
 
   // Form state
   const [formKey, setFormKey] = useState('');
@@ -286,15 +290,14 @@ export default function Memory() {
               {entries.map((entry) => (
                 <tr
                   key={entry.id}
-                  className="border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors"
+                  onClick={() => setSelectedEntry(entry)}
+                  className="border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors cursor-pointer"
                 >
                   <td className="px-4 py-3 text-white font-medium font-mono text-xs">
                     {entry.key}
                   </td>
                   <td className="px-4 py-3 text-gray-300 max-w-[300px]">
-                    <span title={entry.content}>
-                      {truncate(entry.content, 80)}
-                    </span>
+                    {truncate(entry.content, 80)}
                   </td>
                   <td className="px-4 py-3">
                     <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-800 text-gray-300 capitalize">
@@ -304,7 +307,7 @@ export default function Memory() {
                   <td className="px-4 py-3 text-gray-400 text-xs whitespace-nowrap">
                     {formatDate(entry.timestamp)}
                   </td>
-                  <td className="px-4 py-3 text-right">
+                  <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
                     {confirmDelete === entry.key ? (
                       <div className="flex items-center justify-end gap-2">
                         <span className="text-xs text-red-400">Delete?</span>
@@ -334,6 +337,81 @@ export default function Memory() {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* Memory Detail Modal */}
+      {selectedEntry && (
+        <div
+          className="fixed inset-0 bg-black/60 flex items-center justify-center z-50"
+          onClick={() => { setSelectedEntry(null); setCopied(false); }}
+        >
+          <div
+            className="bg-gray-900 border border-gray-700 rounded-xl p-6 w-full max-w-lg mx-4 max-h-[80vh] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-3 min-w-0">
+                <h3 className="text-lg font-semibold text-white font-mono truncate">
+                  {selectedEntry.key}
+                </h3>
+                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-800 text-gray-300 capitalize shrink-0">
+                  {selectedEntry.category}
+                </span>
+              </div>
+              <button
+                onClick={() => { setSelectedEntry(null); setCopied(false); }}
+                className="text-gray-400 hover:text-white transition-colors shrink-0 ml-2"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="overflow-y-auto flex-1 mb-4">
+              <pre className="whitespace-pre-wrap text-sm text-gray-300 bg-gray-800 rounded-lg p-4 break-words">
+                {selectedEntry.content}
+              </pre>
+            </div>
+
+            <div className="text-xs text-gray-500 mb-4 space-y-1">
+              <div>Created: {formatDate(selectedEntry.timestamp)}</div>
+              {selectedEntry.session_id && (
+                <div>Session: {selectedEntry.session_id}</div>
+              )}
+              {selectedEntry.score != null && (
+                <div>Score: {selectedEntry.score}</div>
+              )}
+            </div>
+
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(selectedEntry.content);
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 2000);
+                }}
+                className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
+              >
+                {copied ? (
+                  <>
+                    <Check className="h-4 w-4" />
+                    Copied
+                  </>
+                ) : (
+                  <>
+                    <Copy className="h-4 w-4" />
+                    Copy Content
+                  </>
+                )}
+              </button>
+              <button
+                onClick={() => { setSelectedEntry(null); setCopied(false); }}
+                className="px-4 py-2 text-sm font-medium text-gray-300 hover:text-white border border-gray-700 rounded-lg hover:bg-gray-800 transition-colors"
+              >
+                Close
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
