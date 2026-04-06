@@ -386,9 +386,24 @@ export default function Memory() {
             <div className="flex justify-end gap-3">
               <button
                 onClick={() => {
-                  navigator.clipboard.writeText(selectedEntry.content);
-                  setCopied(true);
-                  setTimeout(() => setCopied(false), 2000);
+                  if (navigator.clipboard) {
+                    navigator.clipboard.writeText(selectedEntry.content).then(() => {
+                      setCopied(true);
+                      setTimeout(() => setCopied(false), 2000);
+                    });
+                  } else {
+                    // Fallback for non-secure contexts (HTTP)
+                    const textarea = document.createElement('textarea');
+                    textarea.value = selectedEntry.content;
+                    textarea.style.position = 'fixed';
+                    textarea.style.opacity = '0';
+                    document.body.appendChild(textarea);
+                    textarea.select();
+                    document.execCommand('copy');
+                    document.body.removeChild(textarea);
+                    setCopied(true);
+                    setTimeout(() => setCopied(false), 2000);
+                  }
                 }}
                 className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
               >
