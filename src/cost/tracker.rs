@@ -14,7 +14,6 @@ pub struct CostTracker {
     config: CostConfig,
     storage: Arc<Mutex<CostStorage>>,
     session_id: String,
-    session_costs: Arc<Mutex<Vec<CostRecord>>>,
 }
 
 impl CostTracker {
@@ -30,7 +29,6 @@ impl CostTracker {
             config,
             storage: Arc::new(Mutex::new(storage)),
             session_id: uuid::Uuid::new_v4().to_string(),
-            session_costs: Arc::new(Mutex::new(Vec::new())),
         })
     }
 
@@ -41,10 +39,6 @@ impl CostTracker {
 
     fn lock_storage(&self) -> MutexGuard<'_, CostStorage> {
         self.storage.lock()
-    }
-
-    fn lock_session_costs(&self) -> MutexGuard<'_, Vec<CostRecord>> {
-        self.session_costs.lock()
     }
 
     /// Check if a request is within budget.
@@ -120,40 +114,21 @@ impl CostTracker {
 
         let record = CostRecord::new(&self.session_id, usage);
 
-        // Persist first for durability guarantees.
-        {
-            let mut storage = self.lock_storage();
-            storage.add_record(record.clone())?;
-        }
-
-        // Then update in-memory session snapshot.
-        let mut session_costs = self.lock_session_costs();
-        session_costs.push(record);
+        let mut storage = self.lock_storage();
+        storage.add_record(record)?;
 
         Ok(())
     }
 
     /// Get the current cost summary.
     pub fn get_summary(&self) -> Result<CostSummary> {
-        let (daily_cost, monthly_cost) = {
-            let mut storage = self.lock_storage();
-            storage.get_aggregated_costs()?
-        };
-
-        let session_costs = self.lock_session_costs();
-        let session_cost: f64 = session_costs
-            .iter()
-            .map(|record| record.usage.cost_usd)
-            .sum();
-        let total_tokens: u64 = session_costs
-            .iter()
-            .map(|record| record.usage.total_tokens)
-            .sum();
-        let request_count = session_costs.len();
-        let by_model = build_session_model_stats(&session_costs);
+        let mut storage = self.lock_storage();
+        let (daily_cost, monthly_cost) = storage.get_aggregated_costs()?;
+        let (by_model, total_tokens, request_count) = storage.build_daily_model_stats()?;
+        let hourly_cost = storage.get_hourly_cost()?;
 
         Ok(CostSummary {
-            session_cost_usd: session_cost,
+            hourly_cost_usd: hourly_cost,
             daily_cost_usd: daily_cost,
             monthly_cost_usd: monthly_cost,
             total_tokens,
@@ -204,26 +179,6 @@ fn resolve_storage_path(workspace_dir: &Path) -> Result<PathBuf> {
     Ok(storage_path)
 }
 
-fn build_session_model_stats(session_costs: &[CostRecord]) -> HashMap<String, ModelStats> {
-    let mut by_model: HashMap<String, ModelStats> = HashMap::new();
-
-    for record in session_costs {
-        let entry = by_model
-            .entry(record.usage.model.clone())
-            .or_insert_with(|| ModelStats {
-                model: record.usage.model.clone(),
-                cost_usd: 0.0,
-                total_tokens: 0,
-                request_count: 0,
-            });
-
-        entry.cost_usd += record.usage.cost_usd;
-        entry.total_tokens += record.usage.total_tokens;
-        entry.request_count += 1;
-    }
-
-    by_model
-}
 
 /// Persistent storage for cost records.
 struct CostStorage {
@@ -368,9 +323,66 @@ impl CostStorage {
     }
 
     /// Get aggregated costs for current day and month.
+    ///
+    /// Always re-reads the backing file because other `CostTracker`
+    /// instances (channels, agent loops) may have appended records
+    /// since our last call.
     fn get_aggregated_costs(&mut self) -> Result<(f64, f64)> {
-        self.ensure_period_cache_current()?;
+        let now = Utc::now();
+        self.rebuild_aggregates(now.date_naive(), now.year(), now.month())?;
         Ok((self.daily_cost_usd, self.monthly_cost_usd))
+    }
+
+    /// Build per-model stats from all records for the current day.
+    ///
+    /// Returns `(by_model, total_tokens, request_count)` covering every
+    /// record written today, regardless of which session created it.
+    fn build_daily_model_stats(
+        &self,
+        ) -> Result<(HashMap<String, ModelStats>, u64, usize)> {
+        let today = Utc::now().date_naive();
+        let mut by_model: HashMap<String, ModelStats> = HashMap::new();
+        let mut total_tokens: u64 = 0;
+        let mut request_count: usize = 0;
+
+        self.for_each_record(|record| {
+            if record.usage.timestamp.naive_utc().date() != today {
+                return;
+            }
+
+            let channel = record.usage.channel.as_deref().unwrap_or("unknown");
+            let key = format!("{}|{}", record.usage.model, channel);
+            let entry = by_model.entry(key).or_insert_with(|| ModelStats {
+                model: record.usage.model.clone(),
+                cost_usd: 0.0,
+                total_tokens: 0,
+                request_count: 0,
+                channel: record.usage.channel.clone(),
+            });
+
+            entry.cost_usd += record.usage.cost_usd;
+            entry.total_tokens += record.usage.total_tokens;
+            entry.request_count += 1;
+
+            total_tokens += record.usage.total_tokens;
+            request_count += 1;
+        })?;
+
+        Ok((by_model, total_tokens, request_count))
+    }
+
+    /// Sum costs from the last hour across all sessions.
+    fn get_hourly_cost(&self) -> Result<f64> {
+        let cutoff = Utc::now() - chrono::Duration::hours(1);
+        let mut cost = 0.0;
+
+        self.for_each_record(|record| {
+            if record.usage.timestamp >= cutoff {
+                cost += record.usage.cost_usd;
+            }
+        })?;
+
+        Ok(cost)
     }
 
     /// Get cost for a specific date.
@@ -443,7 +455,7 @@ mod tests {
 
         let summary = tracker.get_summary().unwrap();
         assert_eq!(summary.request_count, 1);
-        assert!(summary.session_cost_usd > 0.0);
+        assert!(summary.hourly_cost_usd > 0.0);
         assert_eq!(summary.by_model.len(), 1);
     }
 
@@ -467,15 +479,16 @@ mod tests {
     }
 
     #[test]
-    fn summary_by_model_is_session_scoped() {
+    fn summary_by_model_includes_all_daily_records() {
         let tmp = TempDir::new().unwrap();
         let storage_path = resolve_storage_path(tmp.path()).unwrap();
         if let Some(parent) = storage_path.parent() {
             fs::create_dir_all(parent).unwrap();
         }
 
-        let old_record = CostRecord::new(
-            "old-session",
+        // Pre-seed a record from a different session (but same day).
+        let other_session_record = CostRecord::new(
+            "other-session",
             TokenUsage::new("legacy/model", 500, 500, 1.0, 1.0),
         );
         let mut file = OpenOptions::new()
@@ -483,7 +496,12 @@ mod tests {
             .append(true)
             .open(storage_path)
             .unwrap();
-        writeln!(file, "{}", serde_json::to_string(&old_record).unwrap()).unwrap();
+        writeln!(
+            file,
+            "{}",
+            serde_json::to_string(&other_session_record).unwrap()
+        )
+        .unwrap();
         file.sync_all().unwrap();
 
         let tracker = CostTracker::new(enabled_config(), tmp.path()).unwrap();
@@ -492,9 +510,11 @@ mod tests {
             .unwrap();
 
         let summary = tracker.get_summary().unwrap();
-        assert_eq!(summary.by_model.len(), 1);
-        assert!(summary.by_model.contains_key("session/model"));
-        assert!(!summary.by_model.contains_key("legacy/model"));
+        // Both today's records should appear in by_model.
+        assert_eq!(summary.by_model.len(), 2);
+        assert!(summary.by_model.contains_key("session/model|unknown"));
+        assert!(summary.by_model.contains_key("legacy/model|unknown"));
+        assert_eq!(summary.request_count, 2);
     }
 
     #[test]

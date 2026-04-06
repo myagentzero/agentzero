@@ -930,7 +930,7 @@ pub async fn handle_api_cost(
     } else {
         Json(serde_json::json!({
             "cost": {
-                "session_cost_usd": 0.0,
+                "hourly_cost_usd": 0.0,
                 "daily_cost_usd": 0.0,
                 "monthly_cost_usd": 0.0,
                 "total_tokens": 0,

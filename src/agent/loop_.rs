@@ -1732,6 +1732,7 @@ pub async fn run_tool_call_loop(
                     error_message: None,
                     input_tokens: resp_input_tokens,
                     output_tokens: resp_output_tokens,
+                    channel: Some(channel_name.to_string()),
                 });
 
                 // First try native structured tool calls (OpenAI-format).
@@ -1844,6 +1845,7 @@ pub async fn run_tool_call_loop(
                     error_message: Some(safe_error.clone()),
                     input_tokens: None,
                     output_tokens: None,
+                    channel: Some(channel_name.to_string()),
                 });
                 runtime_trace::record_event(
                     "llm_response",
@@ -2684,8 +2686,24 @@ pub async fn run(
     }
 
     // ── Wire up agnostic subsystems ──────────────────────────────
-    let base_observer: Arc<dyn Observer> =
-        Arc::from(observability::create_observer(&config.observability));
+    let cost_tracker = if config.cost.enabled {
+        match CostTracker::new(config.cost.clone(), &config.workspace_dir) {
+            Ok(ct) => Some(Arc::new(ct)),
+            Err(e) => {
+                tracing::warn!("Cost observer disabled: {e}");
+                None
+            }
+        }
+    } else {
+        None
+    };
+    let base_observer: Arc<dyn Observer> = Arc::from(
+        observability::create_observer_with_cost_tracking(
+            &config.observability,
+            cost_tracker,
+            &config.cost,
+        ),
+    );
     let observer: Arc<dyn Observer> = Arc::new(
         crate::plugins::bridge::observer::ObserverBridge::new(base_observer),
     );
@@ -3355,8 +3373,24 @@ pub async fn process_message_with_session(
     let observer: Arc<dyn Observer> = match external_observer {
         Some(obs) => obs,
         None => {
-            let base_observer: Arc<dyn Observer> =
-                Arc::from(observability::create_observer(&config.observability));
+            let cost_tracker = if config.cost.enabled {
+                match CostTracker::new(config.cost.clone(), &config.workspace_dir) {
+                    Ok(ct) => Some(Arc::new(ct)),
+                    Err(e) => {
+                        tracing::warn!("Cost observer disabled: {e}");
+                        None
+                    }
+                }
+            } else {
+                None
+            };
+            let base_observer: Arc<dyn Observer> = Arc::from(
+                observability::create_observer_with_cost_tracking(
+                    &config.observability,
+                    cost_tracker,
+                    &config.cost,
+                ),
+            );
             Arc::new(crate::plugins::bridge::observer::ObserverBridge::new(
                 base_observer,
             ))

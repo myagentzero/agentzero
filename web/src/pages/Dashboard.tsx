@@ -167,7 +167,7 @@ export default function Dashboard() {
     );
   }
 
-  const maxCost = Math.max(cost.session_cost_usd, cost.daily_cost_usd, cost.monthly_cost_usd, 0.001);
+  const maxCost = Math.max(cost.hourly_cost_usd, cost.daily_cost_usd, cost.monthly_cost_usd, 0.001);
 
   return (
     <div className="space-y-5 md:space-y-6">
@@ -238,7 +238,7 @@ export default function Dashboard() {
       <div className="space-y-4">
         <CollapsibleSection
           title="Cost Pulse"
-          subtitle="Session, daily, and monthly runtime spend"
+          subtitle="Hourly, daily, and monthly runtime spend"
           icon={DollarSign}
           sectionKey="cost"
           openState={sectionsOpen}
@@ -246,7 +246,7 @@ export default function Dashboard() {
         >
           <div className="space-y-4">
             {[
-              { label: 'Session', value: cost.session_cost_usd },
+              { label: 'Hourly', value: cost.hourly_cost_usd },
               { label: 'Daily', value: cost.daily_cost_usd },
               { label: 'Monthly', value: cost.monthly_cost_usd },
             ].map(({ label, value }) => (

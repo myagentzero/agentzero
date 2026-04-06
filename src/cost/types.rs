@@ -15,6 +15,9 @@ pub struct TokenUsage {
     pub cost_usd: f64,
     /// Timestamp of the request
     pub timestamp: chrono::DateTime<chrono::Utc>,
+    /// Channel that originated the request (e.g. "slack", "notion", "gateway").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channel: Option<String>,
 }
 
 impl TokenUsage {
@@ -51,7 +54,14 @@ impl TokenUsage {
             total_tokens,
             cost_usd,
             timestamp: chrono::Utc::now(),
+            channel: None,
         }
+    }
+
+    /// Set the channel that originated this usage.
+    pub fn with_channel(mut self, channel: Option<String>) -> Self {
+        self.channel = channel;
+        self
     }
 
     /// Get the total cost.
@@ -112,8 +122,8 @@ pub enum BudgetCheck {
 /// Cost summary for reporting.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CostSummary {
-    /// Total cost for the session
-    pub session_cost_usd: f64,
+    /// Total cost in the last hour (rolling window, all sessions).
+    pub hourly_cost_usd: f64,
     /// Total cost for the day
     pub daily_cost_usd: f64,
     /// Total cost for the month
@@ -137,12 +147,15 @@ pub struct ModelStats {
     pub total_tokens: u64,
     /// Number of requests for this model
     pub request_count: usize,
+    /// Channel that originated these requests (if known).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channel: Option<String>,
 }
 
 impl Default for CostSummary {
     fn default() -> Self {
         Self {
-            session_cost_usd: 0.0,
+            hourly_cost_usd: 0.0,
             daily_cost_usd: 0.0,
             monthly_cost_usd: 0.0,
             total_tokens: 0,

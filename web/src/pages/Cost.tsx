@@ -53,10 +53,10 @@ export default function Cost() {
             <div className="p-2 bg-blue-600/20 rounded-lg">
               <DollarSign className="h-5 w-5 text-blue-400" />
             </div>
-            <span className="text-sm text-gray-400">Session Cost</span>
+            <span className="text-sm text-gray-400">Hourly Cost</span>
           </div>
           <p className="text-2xl font-bold text-white">
-            {formatUSD(cost.session_cost_usd)}
+            {formatUSD(cost.hourly_cost_usd)}
           </p>
         </div>
 
@@ -147,6 +147,9 @@ export default function Cost() {
                   <th className="text-left px-5 py-3 text-gray-400 font-medium">
                     Model
                   </th>
+                  <th className="text-left px-5 py-3 text-gray-400 font-medium">
+                    Channel
+                  </th>
                   <th className="text-right px-5 py-3 text-gray-400 font-medium">
                     Cost
                   </th>
@@ -176,6 +179,9 @@ export default function Cost() {
                       >
                         <td className="px-5 py-3 text-white font-medium">
                           {m.model}
+                        </td>
+                        <td className="px-5 py-3 text-gray-400 text-sm">
+                          {m.channel || 'unknown'}
                         </td>
                         <td className="px-5 py-3 text-gray-300 text-right font-mono">
                           {formatUSD(m.cost_usd)}

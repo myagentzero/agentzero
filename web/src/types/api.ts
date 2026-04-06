@@ -103,7 +103,7 @@ export interface PairedDevice {
 }
 
 export interface CostSummary {
-  session_cost_usd: number;
+  hourly_cost_usd: number;
   daily_cost_usd: number;
   monthly_cost_usd: number;
   total_tokens: number;
@@ -116,6 +116,7 @@ export interface ModelStats {
   cost_usd: number;
   total_tokens: number;
   request_count: number;
+  channel?: string;
 }
 
 export interface CliTool {

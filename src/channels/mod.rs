@@ -45,6 +45,7 @@ use crate::approval::{ApprovalManager, ApprovalResponse, PendingApprovalError};
 use crate::config::{Config, NonCliNaturalLanguageApprovalMode, ProgressMode};
 use crate::identity;
 use crate::memory::{self, Memory};
+use crate::cost::CostTracker;
 use crate::observability::{self, Observer, runtime_trace};
 use crate::providers::{self, ChatMessage, Provider};
 use crate::runtime;
@@ -5306,8 +5307,24 @@ pub async fn start_channels(
         config.api_key.as_deref(),
     );
 
-    let base_observer: Arc<dyn Observer> =
-        Arc::from(observability::create_observer(&config.observability));
+    let cost_tracker = if config.cost.enabled {
+        match CostTracker::new(config.cost.clone(), &config.workspace_dir) {
+            Ok(ct) => Some(Arc::new(ct)),
+            Err(e) => {
+                tracing::warn!("Cost observer disabled: {e}");
+                None
+            }
+        }
+    } else {
+        None
+    };
+    let base_observer: Arc<dyn Observer> = Arc::from(
+        observability::create_observer_with_cost_tracking(
+            &config.observability,
+            cost_tracker,
+            &config.cost,
+        ),
+    );
     let bridged_observer = crate::plugins::bridge::observer::ObserverBridge::new(base_observer);
     let observer: Arc<dyn Observer> = if let Some(tx) = event_tx {
         Arc::new(crate::gateway::sse::BroadcastObserver::new(

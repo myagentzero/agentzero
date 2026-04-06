@@ -28,6 +28,8 @@ pub enum ObserverEvent {
         error_message: Option<String>,
         input_tokens: Option<u64>,
         output_tokens: Option<u64>,
+        /// Channel that originated the request (e.g. `"slack"`, `"notion"`, `"gateway"`).
+        channel: Option<String>,
     },
     /// The agent session has finished.
     ///

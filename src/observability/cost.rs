@@ -103,6 +103,7 @@ impl Observer for CostObserver {
             success: true,
             input_tokens,
             output_tokens,
+            channel,
             ..
         } = event
         {
@@ -118,7 +119,8 @@ impl Observer for CostObserver {
             let (input_price, output_price) = self.get_pricing(provider_label, model);
             let full_model_name = format!("{provider_label}/{model}");
 
-            let usage = TokenUsage::new(full_model_name, input, output, input_price, output_price);
+            let usage = TokenUsage::new(full_model_name, input, output, input_price, output_price)
+                .with_channel(channel.clone());
 
             if let Err(e) = self.tracker.record_usage(usage) {
                 tracing::warn!("Failed to record cost usage: {e}");
@@ -178,12 +180,13 @@ mod tests {
             error_message: None,
             input_tokens: Some(1000),
             output_tokens: Some(500),
+            channel: Some("test".into()),
         });
 
         let summary = tracker.get_summary().unwrap();
         assert_eq!(summary.request_count, 1);
         // Cost: (1000/1M)*3 + (500/1M)*15 = 0.003 + 0.0075 = 0.0105
-        assert!((summary.session_cost_usd - 0.0105).abs() < 0.0001);
+        assert!((summary.hourly_cost_usd - 0.0105).abs() < 0.0001);
     }
 
     #[test]
@@ -199,6 +202,7 @@ mod tests {
             error_message: Some("API error".into()),
             input_tokens: Some(1000),
             output_tokens: Some(500),
+            channel: None,
         });
 
         let summary = tracker.get_summary().unwrap();
@@ -218,6 +222,7 @@ mod tests {
             error_message: None,
             input_tokens: None,
             output_tokens: None,
+            channel: None,
         });
 
         let summary = tracker.get_summary().unwrap();
@@ -237,12 +242,13 @@ mod tests {
             error_message: None,
             input_tokens: Some(1_000_000), // 1M tokens
             output_tokens: Some(1_000_000),
+            channel: None,
         });
 
         let summary = tracker.get_summary().unwrap();
         assert_eq!(summary.request_count, 1);
         // Default: $3 input + $15 output = $18 for 1M each
-        assert!((summary.session_cost_usd - 18.0).abs() < 0.01);
+        assert!((summary.hourly_cost_usd - 18.0).abs() < 0.01);
     }
 
     #[test]
@@ -268,12 +274,13 @@ mod tests {
             error_message: None,
             input_tokens: Some(1_000_000),
             output_tokens: Some(1_000_000),
+            channel: None,
         });
 
         let summary = tracker.get_summary().unwrap();
         assert_eq!(summary.request_count, 1);
         // Should use custom pricing ($1 + $2 = $3), not defaults ($3 + $15 = $18)
-        assert!((summary.session_cost_usd - 3.0).abs() < 0.01);
+        assert!((summary.hourly_cost_usd - 3.0).abs() < 0.01);
     }
 
     #[test]
@@ -298,12 +305,13 @@ mod tests {
             error_message: None,
             input_tokens: Some(1000),
             output_tokens: Some(500),
+            channel: None,
         });
 
         let summary = tracker.get_summary().unwrap();
         assert_eq!(summary.request_count, 1);
         // Cost: (1000/1M)*3 + (500/1M)*15 = 0.003 + 0.0075 = 0.0105
-        assert!((summary.session_cost_usd - 0.0105).abs() < 0.0001);
+        assert!((summary.hourly_cost_usd - 0.0105).abs() < 0.0001);
     }
 
     #[test]
@@ -343,10 +351,11 @@ mod tests {
             error_message: None,
             input_tokens: Some(1_000_000),
             output_tokens: Some(0),
+            channel: None,
         });
 
         let summary = tracker.get_summary().unwrap();
         // Should use $5 input price, not default $3
-        assert!((summary.session_cost_usd - 5.0).abs() < 0.01);
+        assert!((summary.hourly_cost_usd - 5.0).abs() < 0.01);
     }
 }
