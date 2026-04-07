@@ -49,6 +49,7 @@ pub mod hardware_memory_map;
 pub mod hardware_memory_read;
 pub mod http_request;
 pub mod image_info;
+pub mod local_context;
 pub mod mcp_client;
 pub mod mcp_protocol;
 pub mod mcp_tool;
@@ -116,6 +117,7 @@ pub use hardware_memory_map::HardwareMemoryMapTool;
 pub use hardware_memory_read::HardwareMemoryReadTool;
 pub use http_request::HttpRequestTool;
 pub use image_info::ImageInfoTool;
+pub use local_context::LocalContextTool;
 pub use mcp_client::McpRegistry;
 pub use mcp_tool::McpToolWrapper;
 pub use memory_forget::MemoryForgetTool;
@@ -440,6 +442,11 @@ pub fn all_tools_with_runtime(
         Arc::new(WeatherTool::new()),
         Arc::new(ReactionTool::new(security.clone())),
     ];
+
+    // Local context tool — date, time, timezone, location.
+    if root_config.local_context.enabled {
+        tool_arcs.push(Arc::new(LocalContextTool::new(&root_config.local_context)));
+    }
 
     // Interactive ask_user tool — conditionally registered.
     if root_config.ask_user.enabled {

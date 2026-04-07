@@ -11,6 +11,9 @@ pub struct TokenUsage {
     pub output_tokens: u64,
     /// Total tokens
     pub total_tokens: u64,
+    /// Tokens served from the provider's prompt cache.
+    #[serde(default)]
+    pub cached_input_tokens: u64,
     /// Calculated cost in USD
     pub cost_usd: f64,
     /// Timestamp of the request
@@ -37,6 +40,18 @@ impl TokenUsage {
         input_price_per_million: f64,
         output_price_per_million: f64,
     ) -> Self {
+        Self::with_cached(model, input_tokens, output_tokens, 0, input_price_per_million, output_price_per_million)
+    }
+
+    /// Create a new token usage record with cached token count.
+    pub fn with_cached(
+        model: impl Into<String>,
+        input_tokens: u64,
+        output_tokens: u64,
+        cached_input_tokens: u64,
+        input_price_per_million: f64,
+        output_price_per_million: f64,
+    ) -> Self {
         let model = model.into();
         let input_price_per_million = Self::sanitize_price(input_price_per_million);
         let output_price_per_million = Self::sanitize_price(output_price_per_million);
@@ -52,6 +67,7 @@ impl TokenUsage {
             input_tokens,
             output_tokens,
             total_tokens,
+            cached_input_tokens,
             cost_usd,
             timestamp: chrono::Utc::now(),
             channel: None,

@@ -254,6 +254,7 @@ pub async fn run_wizard(force: bool) -> Result<Config> {
         wasm: crate::config::WasmConfig::default(),
         notion: crate::config::NotionConfig::default(),
         ask_user: crate::config::AskUserConfig::default(),
+        local_context: crate::config::schema::LocalContextConfig::default(),
     };
 
     println!(
@@ -628,6 +629,7 @@ async fn run_quick_setup_with_home(
         wasm: crate::config::WasmConfig::default(),
         notion: crate::config::NotionConfig::default(),
         ask_user: crate::config::AskUserConfig::default(),
+        local_context: crate::config::schema::LocalContextConfig::default(),
     };
     if no_totp {
         config.security.otp.enabled = false;

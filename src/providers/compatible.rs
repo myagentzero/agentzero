@@ -538,6 +538,14 @@ struct UsageInfo {
     prompt_tokens: Option<u64>,
     #[serde(default)]
     completion_tokens: Option<u64>,
+    #[serde(default)]
+    prompt_tokens_details: Option<PromptTokensDetails>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct PromptTokensDetails {
+    #[serde(default)]
+    cached_tokens: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -755,6 +763,8 @@ struct ResponsesUsage {
     input_tokens: Option<u64>,
     #[serde(default, alias = "completion_tokens")]
     output_tokens: Option<u64>,
+    #[serde(default)]
+    prompt_tokens_details: Option<PromptTokensDetails>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -1052,7 +1062,7 @@ fn parse_responses_chat_response(response: ResponsesResponse) -> ProviderChatRes
         .map(|u| crate::providers::traits::TokenUsage {
             input_tokens: u.input_tokens,
             output_tokens: u.output_tokens,
-            cached_input_tokens: None,
+            cached_input_tokens: u.prompt_tokens_details.and_then(|d| d.cached_tokens),
         });
     ProviderChatResponse {
         text,
@@ -2376,7 +2386,7 @@ impl Provider for OpenAiCompatibleProvider {
         let usage = chat_response.usage.map(|u| TokenUsage {
             input_tokens: u.prompt_tokens,
             output_tokens: u.completion_tokens,
-            cached_input_tokens: None,
+            cached_input_tokens: u.prompt_tokens_details.and_then(|d| d.cached_tokens),
         });
         let choice = chat_response
             .choices
@@ -2540,7 +2550,7 @@ impl Provider for OpenAiCompatibleProvider {
         let usage = native_response.usage.map(|u| TokenUsage {
             input_tokens: u.prompt_tokens,
             output_tokens: u.completion_tokens,
-            cached_input_tokens: None,
+            cached_input_tokens: u.prompt_tokens_details.and_then(|d| d.cached_tokens),
         });
         let choice = native_response
             .choices

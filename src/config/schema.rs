@@ -319,6 +319,10 @@ pub struct Config {
     #[serde(default)]
     pub ask_user: AskUserConfig,
 
+    /// Local context tool configuration (`[local_context]`).
+    #[serde(default)]
+    pub local_context: LocalContextConfig,
+
     /// Proxy configuration for outbound HTTP/HTTPS/SOCKS5 traffic (`[proxy]`).
     #[serde(default)]
     pub proxy: ProxyConfig,
@@ -2362,6 +2366,39 @@ impl Default for AskUserConfig {
     }
 }
 
+/// Local context tool — provides date, time, timezone, and location to the LLM.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(default)]
+pub struct LocalContextConfig {
+    /// Enable the `local_context` tool.
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// User's city name (e.g. "Denver").
+    #[serde(default)]
+    pub city: Option<String>,
+    /// User's latitude coordinate.
+    #[serde(default)]
+    pub latitude: Option<f64>,
+    /// User's longitude coordinate.
+    #[serde(default)]
+    pub longitude: Option<f64>,
+    /// IANA timezone override (e.g. "America/Denver"). Defaults to system timezone.
+    #[serde(default)]
+    pub timezone: Option<String>,
+}
+
+impl Default for LocalContextConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            city: None,
+            latitude: None,
+            longitude: None,
+            timezone: None,
+        }
+    }
+}
+
 /// Default HTTP User-Agent sent with outbound requests.
 pub const DEFAULT_USER_AGENT: &str = "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; Claude/1.0; +https://claude.ai/";
 
@@ -3540,6 +3577,7 @@ fn default_auto_approve() -> Vec<String> {
         "schedule".into(),
         "weather".into(),
         "reaction".into(),
+        "local_context".into(),
     ]
 }
 
@@ -5815,6 +5853,7 @@ impl Default for Config {
             wasm: WasmConfig::default(),
             notion: NotionConfig::default(),
             ask_user: AskUserConfig::default(),
+            local_context: LocalContextConfig::default(),
         }
     }
 }
@@ -8695,6 +8734,10 @@ mod tests {
         assert!(!a.allow_sensitive_file_reads);
         assert!(!a.allow_sensitive_file_writes);
         assert!(a.non_cli_excluded_tools.is_empty());
+        assert!(
+            a.auto_approve.contains(&"local_context".to_string()),
+            "local_context must be in the default auto_approve list"
+        );
     }
 
     #[test]
@@ -9049,6 +9092,7 @@ default_temperature = 0.7
             wasm: WasmConfig::default(),
             notion: NotionConfig::default(),
             ask_user: AskUserConfig::default(),
+            local_context: LocalContextConfig::default(),
         };
 
         let toml_str = toml::to_string_pretty(&config).unwrap();
@@ -9400,6 +9444,7 @@ denied_tools = ["shell"]
             wasm: WasmConfig::default(),
             notion: NotionConfig::default(),
             ask_user: AskUserConfig::default(),
+            local_context: LocalContextConfig::default(),
         };
 
         config.save().await.unwrap();

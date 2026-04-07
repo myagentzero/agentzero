@@ -1552,11 +1552,11 @@ pub async fn run_tool_call_loop(
                 let mut reasoning_content = resp.reasoning_content.clone();
                 let mut stop_reason = resp.stop_reason.clone();
                 let mut raw_stop_reason = resp.raw_stop_reason.clone();
-                let (mut resp_input_tokens, mut resp_output_tokens) = resp
+                let (mut resp_input_tokens, mut resp_output_tokens, mut resp_cached_tokens) = resp
                     .usage
                     .as_ref()
-                    .map(|u| (u.input_tokens, u.output_tokens))
-                    .unwrap_or((None, None));
+                    .map(|u| (u.input_tokens, u.output_tokens, u.cached_input_tokens))
+                    .unwrap_or((None, None, None));
 
                 if let Some(reason) = stop_reason.as_ref() {
                     runtime_trace::record_event(
@@ -1639,6 +1639,8 @@ pub async fn run_tool_call_loop(
                         resp_input_tokens = add_optional_u64(resp_input_tokens, usage.input_tokens);
                         resp_output_tokens =
                             add_optional_u64(resp_output_tokens, usage.output_tokens);
+                        resp_cached_tokens =
+                            add_optional_u64(resp_cached_tokens, usage.cached_input_tokens);
                     }
 
                     let next_text = continuation_resp.text_or_empty().to_string();
@@ -1732,6 +1734,7 @@ pub async fn run_tool_call_loop(
                     error_message: None,
                     input_tokens: resp_input_tokens,
                     output_tokens: resp_output_tokens,
+                    cached_input_tokens: resp_cached_tokens,
                     channel: Some(channel_name.to_string()),
                 });
 
@@ -1845,6 +1848,7 @@ pub async fn run_tool_call_loop(
                     error_message: Some(safe_error.clone()),
                     input_tokens: None,
                     output_tokens: None,
+                    cached_input_tokens: None,
                     channel: Some(channel_name.to_string()),
                 });
                 runtime_trace::record_event(

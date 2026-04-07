@@ -680,6 +680,7 @@ fn record_success(
             error_message: None,
             input_tokens: None,
             output_tokens: None,
+            cached_input_tokens: None,
             channel: Some("gateway".into()),
         });
     state
@@ -704,6 +705,7 @@ fn record_failure(
             error_message: Some(error_message.to_string()),
             input_tokens: None,
             output_tokens: None,
+            cached_input_tokens: None,
             channel: Some("gateway".into()),
         });
     state

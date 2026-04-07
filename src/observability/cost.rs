@@ -103,6 +103,7 @@ impl Observer for CostObserver {
             success: true,
             input_tokens,
             output_tokens,
+            cached_input_tokens,
             channel,
             ..
         } = event
@@ -110,6 +111,7 @@ impl Observer for CostObserver {
             // Only record if we have token counts
             let input = input_tokens.unwrap_or(0);
             let output = output_tokens.unwrap_or(0);
+            let cached = cached_input_tokens.unwrap_or(0);
 
             if input == 0 && output == 0 {
                 return;
@@ -119,7 +121,7 @@ impl Observer for CostObserver {
             let (input_price, output_price) = self.get_pricing(provider_label, model);
             let full_model_name = format!("{provider_label}/{model}");
 
-            let usage = TokenUsage::new(full_model_name, input, output, input_price, output_price)
+            let usage = TokenUsage::with_cached(full_model_name, input, output, cached, input_price, output_price)
                 .with_channel(channel.clone());
 
             if let Err(e) = self.tracker.record_usage(usage) {
@@ -180,6 +182,7 @@ mod tests {
             error_message: None,
             input_tokens: Some(1000),
             output_tokens: Some(500),
+            cached_input_tokens: None,
             channel: Some("test".into()),
         });
 
@@ -202,6 +205,7 @@ mod tests {
             error_message: Some("API error".into()),
             input_tokens: Some(1000),
             output_tokens: Some(500),
+            cached_input_tokens: None,
             channel: None,
         });
 
@@ -222,6 +226,7 @@ mod tests {
             error_message: None,
             input_tokens: None,
             output_tokens: None,
+            cached_input_tokens: None,
             channel: None,
         });
 
@@ -242,6 +247,7 @@ mod tests {
             error_message: None,
             input_tokens: Some(1_000_000), // 1M tokens
             output_tokens: Some(1_000_000),
+            cached_input_tokens: None,
             channel: None,
         });
 
@@ -274,6 +280,7 @@ mod tests {
             error_message: None,
             input_tokens: Some(1_000_000),
             output_tokens: Some(1_000_000),
+            cached_input_tokens: None,
             channel: None,
         });
 
@@ -305,6 +312,7 @@ mod tests {
             error_message: None,
             input_tokens: Some(1000),
             output_tokens: Some(500),
+            cached_input_tokens: None,
             channel: None,
         });
 
@@ -351,6 +359,7 @@ mod tests {
             error_message: None,
             input_tokens: Some(1_000_000),
             output_tokens: Some(0),
+            cached_input_tokens: None,
             channel: None,
         });
 

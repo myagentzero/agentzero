@@ -295,15 +295,20 @@ impl WebSearchTool {
             })
     }
 
-    async fn search_searxng(&self, query: &str) -> anyhow::Result<String> {
+    async fn search_searxng(&self, query: &str, categories: Option<&str>) -> anyhow::Result<String> {
         let instance_url = self.resolve_searxng_instance_url()?;
         let base_url = instance_url.trim_end_matches('/');
 
         let encoded_query = urlencoding::encode(query);
-        let search_url = format!(
+        let mut search_url = format!(
             "{}/search?q={}&format=json&pageno=1",
             base_url, encoded_query
         );
+
+        if let Some(cat) = categories {
+            search_url.push_str("&categories=");
+            search_url.push_str(&urlencoding::encode(cat));
+        }
 
         let builder = reqwest::Client::builder()
             .timeout(Duration::from_secs(self.timeout_secs))
@@ -402,6 +407,11 @@ impl Tool for WebSearchTool {
                 "query": {
                     "type": "string",
                     "description": "The search query. Be specific for better results."
+                },
+                "categories": {
+                    "type": "string",
+                    "description": "SearXNG only. Optional search category to narrow results.",
+                    "enum": ["general", "images", "videos", "news", "map", "music", "science", "files"]
                 }
             },
             "required": ["query"]
@@ -429,10 +439,15 @@ impl Tool for WebSearchTool {
             );
         }
 
+        let categories = args
+            .get("categories")
+            .and_then(|c| c.as_str())
+            .map(|s| s.to_string());
+
         let result = match resolution.route {
             WebSearchProviderRoute::DuckDuckGo => self.search_duckduckgo(query).await?,
             WebSearchProviderRoute::Brave => self.search_brave(query).await?,
-            WebSearchProviderRoute::SearXNG => self.search_searxng(query).await?,
+            WebSearchProviderRoute::SearXNG => self.search_searxng(query, categories.as_deref()).await?,
         };
 
         Ok(ToolResult {

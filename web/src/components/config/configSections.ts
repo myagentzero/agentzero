@@ -39,6 +39,7 @@ import {
   HardDrive,
   Play,
   Github,
+  MapPin,
 } from 'lucide-react';
 import type { SectionDef } from './types';
 
@@ -756,11 +757,13 @@ export const CONFIG_SECTIONS: SectionDef[] = [
           { value: 'brave', label: 'Brave' },
           { value: 'tavily', label: 'Tavily' },
           { value: 'serper', label: 'Serper' },
+          { value: 'searxng', label: 'SearXNG' },
         ]
       },
       { key: 'api_key', label: 'API Key', type: 'password', sensitive: true, description: 'Search provider API key' },
       { key: 'api_url', label: 'API URL', type: 'text', description: 'e.g. https://api.search.brave.com' },
       { key: 'brave_api_key', label: 'Brave API Key', type: 'password', sensitive: true, description: 'Brave Search API key' },
+      { key: 'searxng_instance_url', label: 'SearXNG Instance URL', type: 'text', description: 'Required when provider is SearXNG (e.g. https://searxng.example.com)' },
       { key: 'max_results', label: 'Max Results', type: 'number', min: 1, defaultValue: 5, description: 'Default: 5' },
       { key: 'timeout_secs', label: 'Timeout (s)', type: 'number', min: 1, defaultValue: 15, description: 'Default: 15' },
     ],
@@ -778,6 +781,23 @@ export const CONFIG_SECTIONS: SectionDef[] = [
       { key: 'enabled', label: 'Enabled', type: 'toggle', defaultValue: true },
       { key: 'default_timeout_secs', label: 'Default Timeout (s)', type: 'number', min: 1, defaultValue: 300, description: 'Default: 300 (5 minutes)' },
       { key: 'default_channel', label: 'Default Channel', type: 'text', description: 'Preferred channel when none specified (e.g. slack, discord). Leave empty to use first available.' },
+    ],
+  },
+
+  // ── Local Context ─────────────────────────────────────────────────
+  {
+    path: 'local_context',
+    category: 'tools',
+    title: 'Local Context',
+    description: 'Date, time, timezone, and location context for the agent',
+    icon: MapPin,
+    defaultCollapsed: true,
+    fields: [
+      { key: 'enabled', label: 'Enabled', type: 'toggle', defaultValue: true },
+      { key: 'city', label: 'City', type: 'text', description: 'Your city name (e.g. Denver)' },
+      { key: 'latitude', label: 'Latitude', type: 'number', min: -90, max: 90, step: 0.0001, description: 'e.g. 39.7392' },
+      { key: 'longitude', label: 'Longitude', type: 'number', min: -180, max: 180, step: 0.0001, description: 'e.g. -104.9903' },
+      { key: 'timezone', label: 'Timezone Override', type: 'text', description: 'IANA timezone (e.g. America/Denver). Defaults to system timezone.' },
     ],
   },
 

@@ -211,6 +211,7 @@ pub async fn handle_api_chat(
                     error_message: None,
                     input_tokens: None,
                     output_tokens: None,
+                    cached_input_tokens: None,
                     channel: Some("gateway".into()),
                 });
             state.observer.record_metric(
@@ -247,6 +248,7 @@ pub async fn handle_api_chat(
                     error_message: Some(sanitized.clone()),
                     input_tokens: None,
                     output_tokens: None,
+                    cached_input_tokens: None,
                     channel: Some("gateway".into()),
                 });
             state.observer.record_metric(
@@ -594,6 +596,7 @@ pub async fn handle_v1_chat_completions_with_tools(
                     error_message: None,
                     input_tokens: None,
                     output_tokens: None,
+                    cached_input_tokens: None,
                     channel: Some("gateway".into()),
                 });
             state.observer.record_metric(
@@ -625,6 +628,7 @@ pub async fn handle_v1_chat_completions_with_tools(
                     error_message: Some(sanitized.clone()),
                     input_tokens: None,
                     output_tokens: None,
+                    cached_input_tokens: None,
                     channel: Some("gateway".into()),
                 });
             state.observer.record_metric(

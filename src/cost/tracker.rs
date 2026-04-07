@@ -333,20 +333,20 @@ impl CostStorage {
         Ok((self.daily_cost_usd, self.monthly_cost_usd))
     }
 
-    /// Build per-model stats from all records for the current day.
+    /// Build per-model stats from the last 24 hours (rolling window).
     ///
     /// Returns `(by_model, total_tokens, request_count)` covering every
-    /// record written today, regardless of which session created it.
+    /// record from the last 24 hours, regardless of which session created it.
     fn build_daily_model_stats(
         &self,
         ) -> Result<(HashMap<String, ModelStats>, u64, usize)> {
-        let today = Utc::now().date_naive();
+        let cutoff = Utc::now() - chrono::Duration::hours(24);
         let mut by_model: HashMap<String, ModelStats> = HashMap::new();
         let mut total_tokens: u64 = 0;
         let mut request_count: usize = 0;
 
         self.for_each_record(|record| {
-            if record.usage.timestamp.naive_utc().date() != today {
+            if record.usage.timestamp < cutoff {
                 return;
             }
 

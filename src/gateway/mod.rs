@@ -1214,6 +1214,7 @@ fn handle_webhook_streaming(
                             error_message: None,
                             input_tokens: None,
                             output_tokens: None,
+                            cached_input_tokens: None,
                             channel: Some("gateway".into()),
                         },
                     );
@@ -1248,6 +1249,7 @@ fn handle_webhook_streaming(
                             error_message: Some(sanitized.clone()),
                             input_tokens: None,
                             output_tokens: None,
+                            cached_input_tokens: None,
                             channel: Some("gateway".into()),
                         },
                     );
@@ -1315,6 +1317,7 @@ fn handle_webhook_streaming(
                         error_message: None,
                         input_tokens: None,
                         output_tokens: None,
+                        cached_input_tokens: None,
                         channel: Some("gateway".into()),
                     },
                 );
@@ -1357,6 +1360,7 @@ fn handle_webhook_streaming(
                     error_message: Some(sanitized.clone()),
                     input_tokens: None,
                     output_tokens: None,
+                    cached_input_tokens: None,
                     channel: Some("gateway".into()),
                 },
             );
@@ -1558,6 +1562,7 @@ async fn handle_webhook(
                         error_message: Some(sanitized.clone()),
                         input_tokens: None,
                         output_tokens: None,
+                        cached_input_tokens: None,
                         channel: Some("gateway".into()),
                     });
                 state.observer.record_metric(
@@ -1613,6 +1618,7 @@ async fn handle_webhook(
                     error_message: None,
                     input_tokens: None,
                     output_tokens: None,
+                    cached_input_tokens: None,
                     channel: Some("gateway".into()),
                 });
             state.observer.record_metric(
@@ -1645,6 +1651,7 @@ async fn handle_webhook(
                     error_message: Some(sanitized.clone()),
                     input_tokens: None,
                     output_tokens: None,
+                    cached_input_tokens: None,
                     channel: Some("gateway".into()),
                 });
             state.observer.record_metric(
