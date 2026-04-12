@@ -224,6 +224,7 @@ impl SqliteMemory {
             MemoryCategory::Core => "core".into(),
             MemoryCategory::Daily => "daily".into(),
             MemoryCategory::Conversation => "conversation".into(),
+            MemoryCategory::System => "system".into(),
             MemoryCategory::Custom(name) => name.clone(),
         }
     }
@@ -233,6 +234,7 @@ impl SqliteMemory {
             "core" => MemoryCategory::Core,
             "daily" => MemoryCategory::Daily,
             "conversation" => MemoryCategory::Conversation,
+            "system" => MemoryCategory::System,
             other => MemoryCategory::Custom(other.to_string()),
         }
     }

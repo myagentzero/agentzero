@@ -165,6 +165,7 @@ impl QdrantMemory {
             MemoryCategory::Core => "core".to_string(),
             MemoryCategory::Daily => "daily".to_string(),
             MemoryCategory::Conversation => "conversation".to_string(),
+            MemoryCategory::System => "system".to_string(),
             MemoryCategory::Custom(name) => name.clone(),
         }
     }
@@ -174,6 +175,7 @@ impl QdrantMemory {
             "core" => MemoryCategory::Core,
             "daily" => MemoryCategory::Daily,
             "conversation" => MemoryCategory::Conversation,
+            "system" => MemoryCategory::System,
             other => MemoryCategory::Custom(other.to_string()),
         }
     }

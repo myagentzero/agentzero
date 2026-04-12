@@ -3037,6 +3037,12 @@ pub struct MemoryConfig {
     /// For sqlite backend: prune conversation rows older than this many days
     #[serde(default = "default_conversation_retention_days")]
     pub conversation_retention_days: u32,
+    /// For sqlite backend: prune daily-category rows older than this many days (default: 30)
+    #[serde(default = "default_daily_retention_days")]
+    pub daily_retention_days: u32,
+    /// For sqlite backend: prune system-category rows older than this many days (default: 7)
+    #[serde(default = "default_system_retention_days")]
+    pub system_retention_days: u32,
     /// Embedding provider: "none" | "openai" | "custom:URL"
     #[serde(default = "default_embedding_provider")]
     pub embedding_provider: String,
@@ -3136,6 +3142,12 @@ fn default_purge_after_days() -> u32 {
 fn default_conversation_retention_days() -> u32 {
     30
 }
+fn default_daily_retention_days() -> u32 {
+    30
+}
+fn default_system_retention_days() -> u32 {
+    7
+}
 fn default_embedding_model() -> String {
     "text-embedding-3-small".into()
 }
@@ -3173,6 +3185,8 @@ impl Default for MemoryConfig {
             archive_after_days: default_archive_after_days(),
             purge_after_days: default_purge_after_days(),
             conversation_retention_days: default_conversation_retention_days(),
+            daily_retention_days: default_daily_retention_days(),
+            system_retention_days: default_system_retention_days(),
             embedding_provider: default_embedding_provider(),
             embedding_model: default_embedding_model(),
             embedding_dimensions: default_embedding_dims(),

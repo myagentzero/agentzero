@@ -35,6 +35,8 @@ pub enum MemoryCategory {
     Daily,
     /// Conversation context
     Conversation,
+    /// System-generated memories (auto-cleaned after retention period, default 7 days)
+    System,
     /// User-defined custom category
     Custom(String),
 }
@@ -52,6 +54,7 @@ impl<'de> Deserialize<'de> for MemoryCategory {
             "core" => Ok(Self::Core),
             "daily" => Ok(Self::Daily),
             "conversation" => Ok(Self::Conversation),
+            "system" => Ok(Self::System),
             "" => Err(de::Error::custom("empty memory category")),
             _ => Ok(Self::Custom(s)),
         }
@@ -64,6 +67,7 @@ impl std::fmt::Display for MemoryCategory {
             Self::Core => write!(f, "core"),
             Self::Daily => write!(f, "daily"),
             Self::Conversation => write!(f, "conversation"),
+            Self::System => write!(f, "system"),
             Self::Custom(name) => write!(f, "{name}"),
         }
     }
@@ -134,6 +138,7 @@ mod tests {
         assert_eq!(MemoryCategory::Core.to_string(), "core");
         assert_eq!(MemoryCategory::Daily.to_string(), "daily");
         assert_eq!(MemoryCategory::Conversation.to_string(), "conversation");
+        assert_eq!(MemoryCategory::System.to_string(), "system");
         assert_eq!(
             MemoryCategory::Custom("project_notes".into()).to_string(),
             "project_notes"
@@ -146,11 +151,13 @@ mod tests {
         let core = serde_json::to_string(&MemoryCategory::Core).unwrap();
         let daily = serde_json::to_string(&MemoryCategory::Daily).unwrap();
         let conversation = serde_json::to_string(&MemoryCategory::Conversation).unwrap();
+        let system = serde_json::to_string(&MemoryCategory::System).unwrap();
         let custom = serde_json::to_string(&MemoryCategory::Custom("travel".into())).unwrap();
 
         assert_eq!(core, "\"core\"");
         assert_eq!(daily, "\"daily\"");
         assert_eq!(conversation, "\"conversation\"");
+        assert_eq!(system, "\"system\"");
         assert_eq!(custom, "\"travel\"");
 
         // Deserialization: round-trip for all variants
@@ -165,6 +172,10 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<MemoryCategory>("\"conversation\"").unwrap(),
             MemoryCategory::Conversation
+        );
+        assert_eq!(
+            serde_json::from_str::<MemoryCategory>("\"system\"").unwrap(),
+            MemoryCategory::System
         );
         assert_eq!(
             serde_json::from_str::<MemoryCategory>("\"travel\"").unwrap(),

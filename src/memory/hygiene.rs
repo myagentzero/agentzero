@@ -17,6 +17,8 @@ struct HygieneReport {
     purged_memory_archives: u64,
     purged_session_archives: u64,
     pruned_conversation_rows: u64,
+    pruned_daily_rows: u64,
+    pruned_system_rows: u64,
 }
 
 impl HygieneReport {
@@ -26,6 +28,8 @@ impl HygieneReport {
             + self.purged_memory_archives
             + self.purged_session_archives
             + self.pruned_conversation_rows
+            + self.pruned_daily_rows
+            + self.pruned_system_rows
     }
 }
 
@@ -59,18 +63,28 @@ pub fn run_if_due(config: &MemoryConfig, workspace_dir: &Path) -> Result<()> {
             workspace_dir,
             config.conversation_retention_days,
         )?,
+        pruned_daily_rows: prune_daily_rows(
+            workspace_dir,
+            config.daily_retention_days,
+        )?,
+        pruned_system_rows: prune_system_rows(
+            workspace_dir,
+            config.system_retention_days,
+        )?,
     };
 
     write_state(workspace_dir, &report)?;
 
     if report.total_actions() > 0 {
         tracing::info!(
-            "memory hygiene complete: archived_memory={} archived_sessions={} purged_memory={} purged_sessions={} pruned_conversation_rows={}",
+            "memory hygiene complete: archived_memory={} archived_sessions={} purged_memory={} purged_sessions={} pruned_conversation_rows={} pruned_daily_rows={} pruned_system_rows={}",
             report.archived_memory_files,
             report.archived_session_files,
             report.purged_memory_archives,
             report.purged_session_archives,
             report.pruned_conversation_rows,
+            report.pruned_daily_rows,
+            report.pruned_system_rows,
         );
     }
 
@@ -318,6 +332,50 @@ fn prune_conversation_rows(workspace_dir: &Path, retention_days: u32) -> Result<
     Ok(u64::try_from(affected).unwrap_or(0))
 }
 
+fn prune_daily_rows(workspace_dir: &Path, retention_days: u32) -> Result<u64> {
+    if retention_days == 0 {
+        return Ok(0);
+    }
+
+    let db_path = workspace_dir.join("memory").join("brain.db");
+    if !db_path.exists() {
+        return Ok(0);
+    }
+
+    let conn = Connection::open(db_path)?;
+    conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;")?;
+    let cutoff = (Local::now() - Duration::days(i64::from(retention_days))).to_rfc3339();
+
+    let affected = conn.execute(
+        "DELETE FROM memories WHERE category = 'daily' AND updated_at < ?1",
+        params![cutoff],
+    )?;
+
+    Ok(u64::try_from(affected).unwrap_or(0))
+}
+
+fn prune_system_rows(workspace_dir: &Path, retention_days: u32) -> Result<u64> {
+    if retention_days == 0 {
+        return Ok(0);
+    }
+
+    let db_path = workspace_dir.join("memory").join("brain.db");
+    if !db_path.exists() {
+        return Ok(0);
+    }
+
+    let conn = Connection::open(db_path)?;
+    conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;")?;
+    let cutoff = (Local::now() - Duration::days(i64::from(retention_days))).to_rfc3339();
+
+    let affected = conn.execute(
+        "DELETE FROM memories WHERE category = 'system' AND updated_at < ?1",
+        params![cutoff],
+    )?;
+
+    Ok(u64::try_from(affected).unwrap_or(0))
+}
+
 fn memory_date_from_filename(filename: &str) -> Option<NaiveDate> {
     let stem = filename.strip_suffix(".md")?;
     let date_part = stem.split('_').next().unwrap_or(stem);
@@ -493,6 +551,93 @@ mod tests {
 
         assert!(!old_file.exists(), "old archived file should be purged");
         assert!(keep_file.exists(), "recent archived file should remain");
+    }
+
+    #[tokio::test]
+    async fn prunes_old_daily_rows_in_sqlite_backend() {
+        let tmp = TempDir::new().unwrap();
+        let workspace = tmp.path();
+
+        let mem = SqliteMemory::new(workspace).unwrap();
+        mem.store("daily_old", "stale daily data", MemoryCategory::Daily, None)
+            .await
+            .unwrap();
+        mem.store("core_keep", "durable", MemoryCategory::Core, None)
+            .await
+            .unwrap();
+        drop(mem);
+
+        let db_path = workspace.join("memory").join("brain.db");
+        let conn = Connection::open(&db_path).unwrap();
+        let old_cutoff = (Local::now() - Duration::days(40)).to_rfc3339();
+        conn.execute(
+            "UPDATE memories SET created_at = ?1, updated_at = ?1 WHERE key = 'daily_old'",
+            params![old_cutoff],
+        )
+        .unwrap();
+        drop(conn);
+
+        let mut cfg = default_cfg();
+        cfg.archive_after_days = 0;
+        cfg.purge_after_days = 0;
+        cfg.conversation_retention_days = 0;
+        cfg.daily_retention_days = 30;
+        cfg.system_retention_days = 0;
+
+        run_if_due(&cfg, workspace).unwrap();
+
+        let mem2 = SqliteMemory::new(workspace).unwrap();
+        assert!(
+            mem2.get("daily_old").await.unwrap().is_none(),
+            "old daily rows should be pruned"
+        );
+        assert!(
+            mem2.get("core_keep").await.unwrap().is_some(),
+            "core memory should remain"
+        );
+    }
+
+    #[tokio::test]
+    async fn prunes_old_system_rows_in_sqlite_backend() {
+        let tmp = TempDir::new().unwrap();
+        let workspace = tmp.path();
+
+        let mem = SqliteMemory::new(workspace).unwrap();
+        mem.store("sys_old", "stale system data", MemoryCategory::System, None)
+            .await
+            .unwrap();
+        mem.store("core_keep", "durable", MemoryCategory::Core, None)
+            .await
+            .unwrap();
+        drop(mem);
+
+        let db_path = workspace.join("memory").join("brain.db");
+        let conn = Connection::open(&db_path).unwrap();
+        let old_cutoff = (Local::now() - Duration::days(10)).to_rfc3339();
+        conn.execute(
+            "UPDATE memories SET created_at = ?1, updated_at = ?1 WHERE key = 'sys_old'",
+            params![old_cutoff],
+        )
+        .unwrap();
+        drop(conn);
+
+        let mut cfg = default_cfg();
+        cfg.archive_after_days = 0;
+        cfg.purge_after_days = 0;
+        cfg.conversation_retention_days = 0;
+        cfg.system_retention_days = 7;
+
+        run_if_due(&cfg, workspace).unwrap();
+
+        let mem2 = SqliteMemory::new(workspace).unwrap();
+        assert!(
+            mem2.get("sys_old").await.unwrap().is_none(),
+            "old system rows should be pruned"
+        );
+        assert!(
+            mem2.get("core_keep").await.unwrap().is_some(),
+            "core memory should remain"
+        );
     }
 
     #[tokio::test]

@@ -144,6 +144,7 @@ impl LucidMemory {
             MemoryCategory::Core => "decision",
             MemoryCategory::Daily => "context",
             MemoryCategory::Conversation => "conversation",
+            MemoryCategory::System => "context",
             MemoryCategory::Custom(_) => "learning",
         }
     }
