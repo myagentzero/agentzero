@@ -1026,26 +1026,6 @@ fn check_environment(items: &mut Vec<DiagItem>) {
     // git
     check_command_available("git", &["--version"], cat, items);
 
-    // Shell environment
-    if cfg!(target_os = "windows") {
-        match std::env::var("COMSPEC") {
-            Ok(comspec) if !comspec.trim().is_empty() => {
-                items.push(DiagItem::ok(cat, format!("COMSPEC: {comspec}")));
-            }
-            _ => items.push(DiagItem::warn(
-                cat,
-                "COMSPEC not set (Windows shell fallback may fail)",
-            )),
-        }
-    } else {
-        let shell = std::env::var("SHELL").unwrap_or_default();
-        if shell.is_empty() {
-            items.push(DiagItem::warn(cat, "$SHELL not set"));
-        } else {
-            items.push(DiagItem::ok(cat, format!("shell: {shell}")));
-        }
-    }
-
     // HOME
     if std::env::var("HOME").is_ok() || std::env::var("USERPROFILE").is_ok() {
         items.push(DiagItem::ok(cat, "home directory env set"));

@@ -428,8 +428,6 @@ impl Tool for WebSearchTool {
             anyhow::bail!("Search query cannot be empty");
         }
 
-        tracing::info!("Searching web for: {}", query);
-
         let resolution = resolve_web_search_provider(&self.provider);
         if resolution.used_fallback {
             tracing::warn!(
@@ -443,6 +441,12 @@ impl Tool for WebSearchTool {
             .get("categories")
             .and_then(|c| c.as_str())
             .map(|s| s.to_string());
+
+        tracing::info!(
+            "🔍 Searching web for: {} (categories: {})",
+            query,
+            categories.as_deref().unwrap_or("general")
+        );
 
         let result = match resolution.route {
             WebSearchProviderRoute::DuckDuckGo => self.search_duckduckgo(query).await?,

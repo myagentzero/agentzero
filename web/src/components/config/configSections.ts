@@ -960,6 +960,7 @@ export const CONFIG_SECTIONS: SectionDef[] = [
     defaultCollapsed: true,
     fields: [
       { key: 'enabled', label: 'Enabled', type: 'toggle', defaultValue: false },
+      { key: 'boards', label: 'Boards', type: 'board-list', description: 'Hardware boards that become agent tools' },
       { key: 'datasheet_dir', label: 'Datasheet Directory', type: 'text', description: 'e.g. ./datasheets' },
     ],
   },

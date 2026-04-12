@@ -6,6 +6,7 @@ import NumberField from './fields/NumberField';
 import ToggleField from './fields/ToggleField';
 import SelectField from './fields/SelectField';
 import TagListField from './fields/TagListField';
+import BoardListField from './fields/BoardListField';
 
 interface Props {
   section: SectionDef;
@@ -34,6 +35,8 @@ function renderField(
       return <SelectField {...props} />;
     case 'tag-list':
       return <TagListField {...props} />;
+    case 'board-list':
+      return <BoardListField {...props} />;
     default:
       return <TextField {...props} />;
   }
@@ -93,7 +96,7 @@ export default function ConfigSection({
           {fields.map((field) => {
             const value = getFieldValue(section.path, field.key);
             const masked = isFieldMasked(section.path, field.key);
-            const spanFull = field.type === 'tag-list';
+            const spanFull = field.type === 'tag-list' || field.type === 'board-list';
 
             return (
               <div key={field.key} className={`flex flex-col${spanFull ? ' sm:col-span-2' : ''}`}>

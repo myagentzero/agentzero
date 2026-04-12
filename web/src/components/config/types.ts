@@ -6,7 +6,8 @@ export type FieldType =
   | 'number'
   | 'toggle'
   | 'select'
-  | 'tag-list';
+  | 'tag-list'
+  | 'board-list';
 
 export interface FieldDef {
   key: string;
