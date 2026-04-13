@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="docs/assets/zeroclaw.png" alt="ZeroClaw" width="200" />
+  <img src="docs/assets/banner.png" alt="ZeroClaw — Zero overhead. Zero compromise. 100% Rust. 100% Agnostic." width="800" />
 </p>
 
-<h1 align="center">ZeroClaw 🦀</h1>
+# ZeroClaw 🦀
 
 <p align="center">
   <strong>Zero overhead. Zero compromise. 100% Rust. 100% Agnostic.</strong><br>
@@ -627,18 +627,6 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) and [CLA.md](docs/contributing/cla.md). I
 <!-- BEGIN:RECENT_CONTRIBUTORS -->
 <!-- END:RECENT_CONTRIBUTORS -->
 
-## ⚠️ Official Repository & Impersonation Warning
-
-**This is the only official ZeroClaw repository:**
-
-> https://github.com/myagentzero/zeroclaw
-
-Any other repository, organization, domain, or package claiming to be "ZeroClaw" or implying affiliation with ZeroClaw Labs is **unauthorized and not affiliated with this project**. Known unauthorized forks will be listed in [TRADEMARK.md](docs/maintainers/trademark.md).
-
-If you encounter impersonation or trademark misuse, please [open an issue](https://github.com/myagentzero/zeroclaw/issues).
-
----
-
 ## License
 
 ZeroClaw is dual-licensed for maximum openness and contributor protection:
@@ -664,23 +652,3 @@ The **ZeroClaw** name and logo are trademarks of ZeroClaw Labs. This license doe
 ---
 
 **ZeroClaw** — Zero overhead. Zero compromise. Deploy anywhere. Swap anything. 🦀
-
-## Contributors
-
-<a href="https://github.com/myagentzero/zeroclaw/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=myagentzero/zeroclaw" alt="ZeroClaw contributors" />
-</a>
-
-This list is generated from the GitHub contributors graph and updates automatically.
-
-## Star History
-
-<p align="center">
-  <a href="https://www.star-history.com/#myagentzero/zeroclaw&type=date&legend=top-left">
-    <picture>
-     <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=myagentzero/zeroclaw&type=date&theme=dark&legend=top-left" />
-     <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=myagentzero/zeroclaw&type=date&legend=top-left" />
-     <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=myagentzero/zeroclaw&type=date&legend=top-left" />
-    </picture>
-  </a>
-</p>

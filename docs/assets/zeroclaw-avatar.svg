@@ -1,0 +1,180 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <!-- Background gradient -->
+    <radialGradient id="bg" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#1a1a2e"/>
+      <stop offset="100%" stop-color="#0d0d1a"/>
+    </radialGradient>
+    <!-- Glow effect -->
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="4" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <!-- Stronger glow for eyes -->
+    <filter id="eyeGlow">
+      <feGaussianBlur stdDeviation="8" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <!-- Circuit pattern glow -->
+    <filter id="circuitGlow">
+      <feGaussianBlur stdDeviation="2" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Background circle -->
+  <circle cx="256" cy="256" r="256" fill="url(#bg)"/>
+  
+  <!-- Subtle hex grid pattern -->
+  <g opacity="0.08" stroke="#ff6b35" stroke-width="0.5" fill="none">
+    <path d="M128,80 L158,60 L188,80 L188,120 L158,140 L128,120Z"/>
+    <path d="M188,80 L218,60 L248,80 L248,120 L218,140 L188,120Z"/>
+    <path d="M248,80 L278,60 L308,80 L308,120 L278,140 L248,120Z"/>
+    <path d="M308,80 L338,60 L368,80 L368,120 L338,140 L308,120Z"/>
+    <path d="M158,140 L188,120 L218,140 L218,180 L188,200 L158,180Z"/>
+    <path d="M218,140 L248,120 L278,140 L278,180 L248,200 L218,180Z"/>
+    <path d="M278,140 L308,120 L338,140 L338,180 L308,200 L278,180Z"/>
+    <path d="M128,340 L158,320 L188,340 L188,380 L158,400 L128,380Z"/>
+    <path d="M308,340 L338,320 L368,340 L368,380 L338,400 L308,380Z"/>
+    <path d="M188,400 L218,380 L248,400 L248,440 L218,460 L188,440Z"/>
+    <path d="M248,400 L278,380 L308,400 L308,440 L278,460 L248,440Z"/>
+  </g>
+
+  <!-- Circuit traces -->
+  <g filter="url(#circuitGlow)" stroke="#ff6b35" stroke-width="1.5" fill="none" opacity="0.25">
+    <path d="M80,256 L130,256 L145,240"/>
+    <path d="M432,256 L382,256 L367,240"/>
+    <path d="M256,440 L256,410 L240,395"/>
+    <path d="M256,72 L256,102 L240,117"/>
+    <circle cx="80" cy="256" r="3" fill="#ff6b35"/>
+    <circle cx="432" cy="256" r="3" fill="#ff6b35"/>
+    <circle cx="256" cy="440" r="3" fill="#ff6b35"/>
+    <circle cx="256" cy="72" r="3" fill="#ff6b35"/>
+  </g>
+
+  <!-- CRAB BODY — Main shell -->
+  <ellipse cx="256" cy="270" rx="95" ry="75" fill="#c0392b" opacity="0.9"/>
+  <ellipse cx="256" cy="260" rx="88" ry="68" fill="#e74c3c"/>
+  <!-- Shell highlight -->
+  <ellipse cx="245" cy="240" rx="55" ry="35" fill="#ff6b6b" opacity="0.3"/>
+  
+  <!-- Shell segments -->
+  <g stroke="#c0392b" stroke-width="2" fill="none" opacity="0.5">
+    <path d="M200,235 Q256,210 312,235"/>
+    <path d="M190,260 Q256,235 322,260"/>
+    <path d="M195,285 Q256,260 317,285"/>
+  </g>
+
+  <!-- Left claw arm -->
+  <g filter="url(#glow)">
+    <!-- Upper arm -->
+    <path d="M168,260 L120,220 L95,195" stroke="#e74c3c" stroke-width="14" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+    <!-- Left claw pincer - top -->
+    <path d="M95,195 L55,160 L70,175" stroke="#ff6b35" stroke-width="12" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+    <!-- Left claw pincer - bottom -->
+    <path d="M95,195 L60,200 L75,190" stroke="#ff6b35" stroke-width="12" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+    <!-- Claw tips -->
+    <circle cx="55" cy="160" r="5" fill="#ff9f43"/>
+    <circle cx="60" cy="200" r="5" fill="#ff9f43"/>
+  </g>
+
+  <!-- Right claw arm -->
+  <g filter="url(#glow)">
+    <!-- Upper arm -->
+    <path d="M344,260 L392,220 L417,195" stroke="#e74c3c" stroke-width="14" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+    <!-- Right claw pincer - top -->
+    <path d="M417,195 L457,160 L442,175" stroke="#ff6b35" stroke-width="12" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+    <!-- Right claw pincer - bottom -->
+    <path d="M417,195 L452,200 L437,190" stroke="#ff6b35" stroke-width="12" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+    <!-- Claw tips -->
+    <circle cx="457" cy="160" r="5" fill="#ff9f43"/>
+    <circle cx="452" cy="200" r="5" fill="#ff9f43"/>
+  </g>
+
+  <!-- Legs - left side -->
+  <g stroke="#c0392b" stroke-width="6" fill="none" stroke-linecap="round">
+    <path d="M180,290 L140,320 L120,350"/>
+    <path d="M175,305 L135,340 L118,368"/>
+    <path d="M178,315 L145,355 L130,385"/>
+  </g>
+  <!-- Leg tips left -->
+  <g fill="#ff6b35">
+    <circle cx="120" cy="350" r="4"/>
+    <circle cx="118" cy="368" r="4"/>
+    <circle cx="130" cy="385" r="4"/>
+  </g>
+
+  <!-- Legs - right side -->
+  <g stroke="#c0392b" stroke-width="6" fill="none" stroke-linecap="round">
+    <path d="M332,290 L372,320 L392,350"/>
+    <path d="M337,305 L377,340 L394,368"/>
+    <path d="M334,315 L367,355 L382,385"/>
+  </g>
+  <!-- Leg tips right -->
+  <g fill="#ff6b35">
+    <circle cx="392" cy="350" r="4"/>
+    <circle cx="394" cy="368" r="4"/>
+    <circle cx="382" cy="385" r="4"/>
+  </g>
+
+  <!-- Eye stalks -->
+  <path d="M220,215 L210,175 L208,155" stroke="#e74c3c" stroke-width="8" fill="none" stroke-linecap="round"/>
+  <path d="M292,215 L302,175 L304,155" stroke="#e74c3c" stroke-width="8" fill="none" stroke-linecap="round"/>
+
+  <!-- Eyes - cybernetic -->
+  <g filter="url(#eyeGlow)">
+    <!-- Left eye -->
+    <circle cx="208" cy="150" r="18" fill="#1a1a2e" stroke="#ff6b35" stroke-width="2"/>
+    <circle cx="208" cy="150" r="12" fill="#ff6b35"/>
+    <circle cx="208" cy="150" r="6" fill="#fff" opacity="0.9"/>
+    <circle cx="204" cy="146" r="3" fill="#fff"/>
+    
+    <!-- Right eye -->
+    <circle cx="304" cy="150" r="18" fill="#1a1a2e" stroke="#ff6b35" stroke-width="2"/>
+    <circle cx="304" cy="150" r="12" fill="#ff6b35"/>
+    <circle cx="304" cy="150" r="6" fill="#fff" opacity="0.9"/>
+    <circle cx="300" cy="146" r="3" fill="#fff"/>
+  </g>
+
+  <!-- Rust gear emblem on shell -->
+  <g transform="translate(256,265)" opacity="0.6">
+    <circle r="18" fill="none" stroke="#ff6b35" stroke-width="2"/>
+    <circle r="10" fill="none" stroke="#ff6b35" stroke-width="1.5"/>
+    <!-- Gear teeth -->
+    <g stroke="#ff6b35" stroke-width="3" stroke-linecap="round">
+      <line x1="0" y1="-18" x2="0" y2="-24"/>
+      <line x1="15.6" y1="-9" x2="20.8" y2="-12"/>
+      <line x1="15.6" y1="9" x2="20.8" y2="12"/>
+      <line x1="0" y1="18" x2="0" y2="24"/>
+      <line x1="-15.6" y1="9" x2="-20.8" y2="12"/>
+      <line x1="-15.6" y1="-9" x2="-20.8" y2="-12"/>
+    </g>
+    <!-- Center dot -->
+    <circle r="4" fill="#ff6b35"/>
+  </g>
+
+  <!-- "ZEROCLAW" text arc at bottom -->
+  <text font-family="'Courier New', monospace" font-size="22" font-weight="bold" fill="#ff6b35" text-anchor="middle" filter="url(#circuitGlow)" opacity="0.85">
+    <textPath href="#textArc" startOffset="50%">ZEROCLAW</textPath>
+  </text>
+  <path id="textArc" d="M130,400 Q256,460 382,400" fill="none"/>
+
+  <!-- Binary accent -->
+  <text font-family="'Courier New', monospace" font-size="9" fill="#ff6b35" opacity="0.15" text-anchor="middle">
+    <tspan x="256" y="480">01011010 01000011</tspan>
+  </text>
+
+  <!-- Outer ring accent -->
+  <circle cx="256" cy="256" r="248" fill="none" stroke="#ff6b35" stroke-width="1" opacity="0.2"/>
+  <circle cx="256" cy="256" r="252" fill="none" stroke="#ff6b35" stroke-width="0.5" opacity="0.1" stroke-dasharray="8,4"/>
+</svg>
