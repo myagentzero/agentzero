@@ -297,10 +297,6 @@ impl Agent {
     }
 
     pub fn from_config(config: &Config) -> Result<Self> {
-        if let Err(error) = crate::plugins::runtime::initialize_from_config(&config.plugins) {
-            tracing::warn!("plugin registry initialization skipped: {error}");
-        }
-
         let cost_tracker = if config.cost.enabled {
             match CostTracker::new(config.cost.clone(), &config.workspace_dir) {
                 Ok(ct) => Some(Arc::new(ct)),
@@ -1197,49 +1193,6 @@ mod tests {
         assert_eq!(response, "classified");
         let seen = seen_models.lock();
         assert_eq!(seen.as_slice(), &["hint:fast".to_string()]);
-    }
-
-    #[test]
-    fn from_config_loads_plugin_declared_tools() {
-        let _guard = crate::test_locks::PLUGIN_RUNTIME_LOCK.lock();
-        let tmp = TempDir::new().expect("temp dir");
-        let plugin_dir = tmp.path().join("plugins");
-        std::fs::create_dir_all(&plugin_dir).expect("create plugin dir");
-        std::fs::create_dir_all(tmp.path().join("workspace")).expect("create workspace dir");
-
-        std::fs::write(
-            plugin_dir.join("agent_from_config.plugin.toml"),
-            r#"
-id = "agent-from-config"
-version = "1.0.0"
-module_path = "plugins/agent-from-config.wasm"
-wit_packages = ["zeroclaw:tools@1.0.0"]
-
-[[tools]]
-name = "__agent_from_config_plugin_tool"
-description = "plugin tool exposed for from_config tests"
-"#,
-        )
-        .expect("write plugin manifest");
-
-        let mut config = Config::default();
-        config.workspace_dir = tmp.path().join("workspace");
-        config.config_path = tmp.path().join("config.toml");
-        config.default_provider = Some("ollama".to_string());
-        config.memory.backend = "none".to_string();
-        config.plugins = crate::config::PluginsConfig {
-            enabled: true,
-            load_paths: vec![plugin_dir.to_string_lossy().to_string()],
-            ..crate::config::PluginsConfig::default()
-        };
-
-        let agent = Agent::from_config(&config).expect("agent from config should build");
-        assert!(
-            agent
-                .tools
-                .iter()
-                .any(|tool| tool.name() == "__agent_from_config_plugin_tool")
-        );
     }
 
     fn base_from_config_for_tool_filter_tests() -> Config {

@@ -309,7 +309,6 @@ export const CONFIG_SECTIONS: SectionDef[] = [
         key: 'kind', label: 'Kind', type: 'select', defaultValue: 'native', options: [
           { value: 'native', label: 'Native' },
           { value: 'docker', label: 'Docker' },
-          { value: 'wasm', label: 'Sandboxed' },
         ]
       },
       { key: 'reasoning_enabled', label: 'Reasoning Enabled', type: 'toggle', description: 'Enable model reasoning mode' },
@@ -975,22 +974,6 @@ export const CONFIG_SECTIONS: SectionDef[] = [
     defaultCollapsed: true,
     fields: [
       { key: 'enabled', label: 'Enabled', type: 'toggle', defaultValue: false },
-    ],
-  },
-
-  // ── Wasm ──────────────────────────────────────────────────────────
-  {
-    path: 'wasm',
-    category: 'runtime',
-    title: 'Plugin Engine',
-    description: 'Sandboxed plugin engine',
-    icon: Play,
-    defaultCollapsed: true,
-    fields: [
-      { key: 'enabled', label: 'Enabled', type: 'toggle', defaultValue: true },
-      { key: 'memory_limit_mb', label: 'Memory Limit (MB)', type: 'number', min: 1, defaultValue: 64, description: 'Default: 64' },
-      { key: 'fuel_limit', label: 'Fuel Limit', type: 'number', min: 1, defaultValue: 1000000000, description: 'Default: 1000000000' },
-      { key: 'registry_url', label: 'Registry URL', type: 'text', defaultValue: 'https://zeromarket.vercel.app/api', description: 'Default: ZeroMarket registry' },
     ],
   },
 

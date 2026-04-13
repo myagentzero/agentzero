@@ -30,9 +30,6 @@ pub mod content_search;
 pub mod cron_add;
 pub mod cron_list;
 pub mod cron_remove;
-pub mod cron_run;
-pub mod cron_runs;
-pub mod cron_update;
 pub mod delegate;
 pub mod delegate_coordination_status;
 pub mod docx_read;
@@ -55,7 +52,6 @@ pub mod mcp_protocol;
 pub mod mcp_tool;
 pub mod mcp_transport;
 pub mod memory_forget;
-pub mod memory_observe;
 pub mod memory_recall;
 pub mod memory_store;
 pub mod model_routing_config;
@@ -65,7 +61,6 @@ pub mod pdf_read;
 pub mod pipeline;
 pub mod pptx_read;
 pub mod provider_status;
-pub mod proxy_config;
 pub mod reaction;
 pub mod read_skill;
 pub mod schedule;
@@ -79,8 +74,6 @@ pub mod subagent_spawn;
 pub mod task_plan;
 pub mod traits;
 pub mod url_validation;
-pub mod wasm_module;
-pub mod wasm_tool;
 pub mod weather_tool;
 pub mod web_fetch;
 mod web_search_provider_routing;
@@ -98,9 +91,6 @@ pub use content_search::ContentSearchTool;
 pub use cron_add::CronAddTool;
 pub use cron_list::CronListTool;
 pub use cron_remove::CronRemoveTool;
-pub use cron_run::CronRunTool;
-pub use cron_runs::CronRunsTool;
-pub use cron_update::CronUpdateTool;
 pub use delegate::DelegateTool;
 pub use delegate_coordination_status::DelegateCoordinationStatusTool;
 pub use docx_read::DocxReadTool;
@@ -121,7 +111,6 @@ pub use local_context::LocalContextTool;
 pub use mcp_client::McpRegistry;
 pub use mcp_tool::McpToolWrapper;
 pub use memory_forget::MemoryForgetTool;
-pub use memory_observe::MemoryObserveTool;
 pub use memory_recall::MemoryRecallTool;
 pub use memory_store::MemoryStoreTool;
 pub use model_routing_config::ModelRoutingConfigTool;
@@ -129,7 +118,6 @@ pub use notion_tool::NotionTool;
 pub use pdf_read::PdfReadTool;
 pub use pptx_read::PptxReadTool;
 pub use provider_status::ProviderStatusTool;
-pub use proxy_config::ProxyConfigTool;
 pub use reaction::ReactionTool;
 pub use read_skill::ReadSkillTool;
 pub use schedule::ScheduleTool;
@@ -145,7 +133,6 @@ pub use task_plan::TaskPlanTool;
 pub use traits::Tool;
 #[allow(unused_imports)]
 pub use traits::{ToolResult, ToolSpec};
-pub use wasm_module::WasmModuleTool;
 pub use weather_tool::WeatherTool;
 pub use web_fetch::WebFetchTool;
 pub use web_search_tool::WebSearchTool;
@@ -155,7 +142,6 @@ pub use auth_profile::ManageAuthProfileTool;
 
 use crate::config::{Config, DelegateAgentConfig};
 use crate::memory::Memory;
-use crate::plugins;
 use crate::runtime::{NativeRuntime, RuntimeAdapter};
 use crate::security::SecurityPolicy;
 use async_trait::async_trait;
@@ -296,43 +282,6 @@ pub fn add_bg_tools(tools: Vec<Box<dyn Tool>>) -> (Vec<Box<dyn Tool>>, BgJobStor
     (boxed_registry_from_arcs(extended), bg_job_store)
 }
 
-#[derive(Clone)]
-struct PluginManifestTool {
-    spec: ToolSpec,
-}
-
-impl PluginManifestTool {
-    fn new(spec: ToolSpec) -> Self {
-        Self { spec }
-    }
-}
-
-#[async_trait]
-impl Tool for PluginManifestTool {
-    fn name(&self) -> &str {
-        self.spec.name.as_str()
-    }
-
-    fn description(&self) -> &str {
-        self.spec.description.as_str()
-    }
-
-    fn parameters_schema(&self) -> serde_json::Value {
-        self.spec.parameters.clone()
-    }
-
-    async fn execute(&self, args: serde_json::Value) -> anyhow::Result<ToolResult> {
-        match plugins::runtime::execute_plugin_tool(&self.spec.name, &args).await {
-            Ok(result) => Ok(result),
-            Err(error) => Ok(ToolResult {
-                success: false,
-                output: String::new(),
-                error: Some(error.to_string()),
-            }),
-        }
-    }
-}
-
 /// Create the default tool registry
 pub fn default_tools(security: Arc<SecurityPolicy>) -> Vec<Box<dyn Tool>> {
     default_tools_with_runtime(security, Arc::new(NativeRuntime::new()))
@@ -357,10 +306,6 @@ pub fn default_tools_with_runtime(
         tools.push(Box::new(GlobSearchTool::new(security.clone())));
         tools.push(Box::new(ContentSearchTool::new(security.clone())));
     }
-    if runtime.as_any().is::<crate::runtime::WasmRuntime>() {
-        tools.push(Box::new(WasmModuleTool::new(security, runtime)));
-    }
-
     tools
 }
 
@@ -422,11 +367,7 @@ pub fn all_tools_with_runtime(
         Arc::new(CronAddTool::new(config.clone(), security.clone())),
         Arc::new(CronListTool::new(config.clone())),
         Arc::new(CronRemoveTool::new(config.clone(), security.clone())),
-        Arc::new(CronUpdateTool::new(config.clone(), security.clone())),
-        Arc::new(CronRunTool::new(config.clone(), security.clone())),
-        Arc::new(CronRunsTool::new(config.clone())),
         Arc::new(MemoryStoreTool::new(memory.clone(), security.clone())),
-        Arc::new(MemoryObserveTool::new(memory.clone(), security.clone())),
         Arc::new(MemoryRecallTool::new(memory.clone())),
         Arc::new(MemoryForgetTool::new(memory, security.clone())),
         Arc::new(ScheduleTool::new(security.clone(), root_config.clone())),
@@ -436,7 +377,6 @@ pub fn all_tools_with_runtime(
             security.clone(),
         )),
         Arc::new(ChannelAckConfigTool::new(config.clone(), security.clone())),
-        Arc::new(ProxyConfigTool::new(config.clone(), security.clone())),
         Arc::new(ManageAuthProfileTool::new(config.clone())),
         Arc::new(CalculatorTool::new()),
         Arc::new(WeatherTool::new()),
@@ -484,13 +424,6 @@ pub fn all_tools_with_runtime(
         tool_arcs.push(Arc::new(GlobSearchTool::new(security.clone())));
         tool_arcs.push(Arc::new(ContentSearchTool::new(security.clone())));
     }
-    if runtime.as_any().is::<crate::runtime::WasmRuntime>() {
-        tool_arcs.push(Arc::new(WasmModuleTool::new(
-            security.clone(),
-            runtime.clone(),
-        )));
-    }
-
     if matches!(
         root_config.skills.prompt_injection_mode,
         crate::config::SkillsPromptInjectionMode::Compact
@@ -720,18 +653,6 @@ pub fn all_tools_with_runtime(
         )));
     }
 
-    // Add declared plugin tools from the active plugin registry.
-    if config.plugins.enabled {
-        let registry = plugins::runtime::current_registry();
-        for tool in registry.tools() {
-            tool_arcs.push(Arc::new(PluginManifestTool::new(ToolSpec {
-                name: tool.name.clone(),
-                description: tool.description.clone(),
-                parameters: tool.parameters.clone(),
-            })));
-        }
-    }
-
     // Pipeline tool (execute_pipeline) — multi-step tool chaining.
     if root_config.pipeline.enabled {
         let pipeline_tools: Vec<Arc<dyn Tool>> = tool_arcs.clone();
@@ -752,8 +673,7 @@ pub fn all_tools_with_runtime(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{BrowserConfig, Config, MemoryConfig, WasmRuntimeConfig};
-    use crate::runtime::WasmRuntime;
+    use crate::config::{BrowserConfig, Config, MemoryConfig};
     use serde_json::json;
     use tempfile::TempDir;
 
@@ -861,31 +781,6 @@ mod tests {
     }
 
     #[test]
-    fn default_tools_with_runtime_includes_wasm_module_for_wasm_runtime() {
-        let security = Arc::new(SecurityPolicy::default());
-        let runtime: Arc<dyn RuntimeAdapter> =
-            Arc::new(WasmRuntime::new(WasmRuntimeConfig::default()));
-        let tools = default_tools_with_runtime(security, runtime);
-        let names: Vec<&str> = tools.iter().map(|t| t.name()).collect();
-        assert!(names.contains(&"wasm_module"));
-    }
-
-    #[test]
-    fn default_tools_with_runtime_excludes_shell_and_fs_for_wasm_runtime() {
-        let security = Arc::new(SecurityPolicy::default());
-        let runtime: Arc<dyn RuntimeAdapter> =
-            Arc::new(WasmRuntime::new(WasmRuntimeConfig::default()));
-        let tools = default_tools_with_runtime(security, runtime);
-        let names: Vec<&str> = tools.iter().map(|t| t.name()).collect();
-        assert!(!names.contains(&"shell"));
-        assert!(!names.contains(&"file_read"));
-        assert!(!names.contains(&"file_write"));
-        assert!(!names.contains(&"file_edit"));
-        assert!(!names.contains(&"glob_search"));
-        assert!(!names.contains(&"content_search"));
-    }
-
-    #[test]
     fn all_tools_excludes_browser_when_disabled() {
         let tmp = TempDir::new().unwrap();
         let security = Arc::new(SecurityPolicy::default());
@@ -922,7 +817,6 @@ mod tests {
         let names: Vec<&str> = tools.iter().map(|t| t.name()).collect();
         assert!(names.contains(&"schedule"));
         assert!(names.contains(&"model_routing_config"));
-        assert!(names.contains(&"proxy_config"));
     }
 
     #[test]
@@ -962,7 +856,6 @@ mod tests {
         let names: Vec<&str> = tools.iter().map(|t| t.name()).collect();
         assert!(names.contains(&"content_search"));
         assert!(names.contains(&"model_routing_config"));
-        assert!(names.contains(&"proxy_config"));
     }
 
     #[test]
@@ -1000,48 +893,6 @@ mod tests {
         let names: Vec<&str> = tools.iter().map(|t| t.name()).collect();
         assert!(names.contains(&"docx_read"));
         assert!(names.contains(&"pdf_read"));
-    }
-
-    #[test]
-    fn all_tools_with_runtime_includes_wasm_module_for_wasm_runtime() {
-        let tmp = TempDir::new().unwrap();
-        let security = Arc::new(SecurityPolicy::default());
-        let mem_cfg = MemoryConfig {
-            backend: "markdown".into(),
-            ..MemoryConfig::default()
-        };
-        let mem: Arc<dyn Memory> =
-            Arc::from(crate::memory::create_memory(&mem_cfg, tmp.path(), None).unwrap());
-        let runtime: Arc<dyn RuntimeAdapter> =
-            Arc::new(WasmRuntime::new(WasmRuntimeConfig::default()));
-
-        let browser = BrowserConfig::default();
-        let http = crate::config::HttpRequestConfig::default();
-        let cfg = test_config(&tmp);
-
-        let tools = all_tools_with_runtime(
-            Arc::new(Config::default()),
-            &security,
-            runtime,
-            mem,
-            None,
-            None,
-            &browser,
-            &http,
-            &crate::config::WebFetchConfig::default(),
-            tmp.path(),
-            &HashMap::new(),
-            None,
-            &cfg,
-        );
-        let names: Vec<&str> = tools.iter().map(|t| t.name()).collect();
-        assert!(names.contains(&"wasm_module"));
-        assert!(!names.contains(&"shell"));
-        assert!(!names.contains(&"git_operations"));
-        assert!(!names.contains(&"file_read"));
-        assert!(!names.contains(&"file_write"));
-        assert!(!names.contains(&"file_edit"));
-        assert!(!names.contains(&"openclaw_migration"));
     }
 
     #[test]

@@ -360,10 +360,6 @@ pub async fn run_gateway(
     external_pairing: Option<Arc<PairingGuard>>,
     external_event_tx: Option<tokio::sync::broadcast::Sender<serde_json::Value>>,
 ) -> Result<()> {
-    if let Err(error) = crate::plugins::runtime::initialize_from_config(&config.plugins) {
-        tracing::warn!("plugin registry initialization skipped: {error}");
-    }
-
     // ── Security: refuse public bind without tunnel or explicit opt-in ──
     if is_public_bind(host) && config.tunnel.provider == "none" && !config.gateway.allow_public_bind
     {

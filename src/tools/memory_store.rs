@@ -50,7 +50,7 @@ impl Tool for MemoryStoreTool {
                 },
                 "category": {
                     "type": "string",
-                    "description": "Memory category: 'core' (permanent), 'daily' (session), 'conversation' (chat), or a custom category name. Defaults to 'core'."
+                    "description": "Memory category: 'core' (permanent), 'daily' (session), 'conversation' (chat), 'system' (automated), or a custom category name. Defaults to 'core'."
                 }
             },
             "required": ["key", "content"]

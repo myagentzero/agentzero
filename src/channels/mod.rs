@@ -5242,10 +5242,6 @@ pub async fn start_channels(
     // Ensure stale channel handles are never reused across restarts.
     clear_live_channels();
 
-    if let Err(error) = crate::plugins::runtime::initialize_from_config(&config.plugins) {
-        tracing::warn!("plugin registry initialization skipped: {error}");
-    }
-
     let provider_name = resolved_default_provider(&config);
     let model = resolved_default_model(&config);
     let provider_runtime_options = providers::ProviderRuntimeOptions {
@@ -5412,89 +5408,16 @@ pub async fn start_channels(
 
     let skills = crate::skills::load_skills_with_config(&workspace, &config);
 
-    // Collect tool descriptions for the prompt
-    let mut tool_descs: Vec<(&str, &str)> = vec![
-        (
-            "shell",
-            "Execute terminal commands. Use when: running local checks, build/test commands, diagnostics. Don't use when: a safer dedicated tool exists, or command is destructive without approval.",
-        ),
-        (
-            "file_read",
-            "Read file contents. Use when: inspecting project files, configs, logs. Don't use when: a targeted search is enough.",
-        ),
-        (
-            "file_write",
-            "Write file contents. Use when: applying focused edits, scaffolding files, updating docs/code. Don't use when: side effects are unclear or file ownership is uncertain.",
-        ),
-        (
-            "memory_store",
-            "Save to memory. Use when: preserving durable preferences, decisions, key context. Don't use when: information is transient/noisy/sensitive without need.",
-        ),
-        (
-            "memory_observe",
-            "Store observation memory for long-horizon patterns, signals, and evolving context.",
-        ),
-        (
-            "memory_recall",
-            "Search memory. Use when: retrieving prior decisions, user preferences, historical context. Don't use when: answer is already in current context.",
-        ),
-        (
-            "memory_forget",
-            "Delete a memory entry. Use when: memory is incorrect/stale or explicitly requested for removal. Don't use when: impact is uncertain.",
-        ),
-    ];
-
-    if matches!(
-        config.skills.prompt_injection_mode,
-        crate::config::SkillsPromptInjectionMode::Compact
-    ) {
-        tool_descs.push((
-            "read_skill",
-            "Load the full source for an available skill by name. Use when: compact mode only shows a summary and you need the complete skill instructions.",
-        ));
-    }
-
-    if config.browser.enabled {
-        tool_descs.push((
-            "browser",
-            "Automate browser actions (open/click/type/scroll/screenshot) with backend-aware safety checks.",
-        ));
-    }
-    if config.composio.enabled {
-        tool_descs.push((
-            "composio",
-            "Execute actions on 1000+ apps via Composio (Gmail, Notion, GitHub, Slack, etc.). Use action='list' to discover actions, 'list_accounts' to retrieve connected account IDs, 'execute' to run (optionally with connected_account_id), and 'connect' for OAuth.",
-        ));
-    }
-    tool_descs.push((
-        "schedule",
-        "Manage scheduled tasks (create/list/get/cancel/pause/resume). Supports recurring cron and one-shot delays.",
-    ));
-    if !config.agents.is_empty() {
-        tool_descs.push((
-            "delegate",
-            "Delegate a subtask to a specialized agent. Use when: a task benefits from a different model (e.g. fast summarization, deep reasoning, code generation). The sub-agent runs a single prompt and returns its response.",
-        ));
-        tool_descs.push((
-            "subagent_spawn",
-            "Spawn a delegate agent in the background. Returns immediately with a session_id. Use for long-running tasks that should not block.",
-        ));
-        tool_descs.push((
-            "subagent_list",
-            "List running and completed background sub-agents. Filter by status: running, completed, failed, killed, or all.",
-        ));
-        tool_descs.push((
-            "subagent_manage",
-            "Manage a background sub-agent: 'status' to check progress/output, 'kill' to cancel a running session.",
-        ));
-    }
-
     // Filter out tools excluded for non-CLI channels so the system prompt
     // does not advertise them for channel-driven runs.
     let excluded = &config.autonomy.non_cli_excluded_tools;
-    if !excluded.is_empty() {
-        tool_descs.retain(|(name, _)| !excluded.iter().any(|ex| ex == name));
-    }
+
+    // Collect tool descriptions from the registry — each tool provides its own prompt_hint().
+    let tool_descs: Vec<(&str, &str)> = tools_registry
+        .iter()
+        .filter_map(|t| t.prompt_hint().map(|h| (t.name(), h)))
+        .filter(|(name, _)| excluded.is_empty() || !excluded.iter().any(|ex| ex == name))
+        .collect();
 
     let bootstrap_max_chars = if config.agent.compact_context {
         Some(6000)

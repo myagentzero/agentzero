@@ -104,11 +104,11 @@ Tool categories:
 - **File/Shell**: `shell`, `file_read`, `file_write`, `file_edit`, `glob_search`, `content_search`
 - **Memory**: `memory_store`, `memory_recall`, `memory_forget`
 - **Web**: `browser`, `web_fetch`, `web_search_tool`, `http_request`
-- **Scheduling**: `cron_add`, `cron_list`, `cron_remove`, `cron_update`, `cron_run`, `cron_runs`, `schedule`
+- **Scheduling**: `cron_add`, `cron_list`, `cron_remove`, `schedule`
 - **Delegation**: `delegate` (sub-agent spawning), `composio` (OAuth integrations)
 - **Hardware**: `hardware_board_info`, `hardware_memory_map`, `hardware_memory_read`
 - **SOP**: `sop_execute`, `sop_advance`, `sop_approve`, `sop_list`, `sop_status`
-- **Utility**: `git_operations`, `image_info`, `pdf_read`, `screenshot`, `pushover`, `model_routing_config`, `proxy_config`, `cli_discovery`, `schema`
+- **Utility**: `git_operations`, `image_info`, `pdf_read`, `screenshot`, `pushover`, `model_routing_config`, `cli_discovery`, `schema`
 
 ### Memory
 

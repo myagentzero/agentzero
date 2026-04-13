@@ -44,7 +44,6 @@ pub use traits::{
 };
 
 use crate::auth::AuthService;
-use crate::plugins;
 use compatible::{AuthStyle, CompatibleApiMode, OpenAiCompatibleProvider};
 use reliable::ReliableProvider;
 use serde::Deserialize;
@@ -84,31 +83,7 @@ const ZAI_GLOBAL_BASE_URL: &str = "https://api.z.ai/api/coding/paas/v4";
 const ZAI_CN_BASE_URL: &str = "https://open.bigmodel.cn/api/coding/paas/v4";
 const SILICONFLOW_BASE_URL: &str = "https://api.siliconflow.cn/v1";
 const STEPFUN_BASE_URL: &str = "https://api.stepfun.com/v1";
-const VERCEL_AI_GATEWAY_BASE_URL: &str = "https://ai-gateway.vercel.sh/v1";
 
-struct PluginProvider {
-    name: String,
-}
-
-#[async_trait::async_trait]
-impl Provider for PluginProvider {
-    async fn chat_with_system(
-        &self,
-        system_prompt: Option<&str>,
-        message: &str,
-        model: &str,
-        temperature: f64,
-    ) -> anyhow::Result<String> {
-        plugins::runtime::execute_plugin_provider_chat(
-            &self.name,
-            system_prompt,
-            message,
-            model,
-            temperature,
-        )
-        .await
-    }
-}
 pub(crate) fn is_minimax_intl_alias(name: &str) -> bool {
     matches!(
         name,
@@ -993,7 +968,6 @@ fn resolve_provider_credential(name: &str, credential_override: Option<&str>) ->
         "nvidia" | "nvidia-nim" | "build.nvidia.com" => vec!["NVIDIA_API_KEY"],
         "synthetic" => vec!["SYNTHETIC_API_KEY"],
         "opencode" | "opencode-zen" => vec!["OPENCODE_API_KEY"],
-        "vercel" | "vercel-ai" => vec!["VERCEL_API_KEY"],
         "cloudflare" | "cloudflare-ai" => vec!["CLOUDFLARE_API_KEY"],
         "ovhcloud" | "ovh" => vec!["OVH_AI_ENDPOINTS_ACCESS_TOKEN"],
         "astrai" => vec!["ASTRAI_API_KEY"],
@@ -1249,12 +1223,6 @@ fn create_provider_with_url_and_options(
         "venice" => Ok(Box::new(OpenAiCompatibleProvider::new(
             "Venice",
             "https://api.venice.ai",
-            key,
-            AuthStyle::Bearer,
-        ))),
-        "vercel" | "vercel-ai" => Ok(Box::new(OpenAiCompatibleProvider::new(
-            "Vercel AI Gateway",
-            VERCEL_AI_GATEWAY_BASE_URL,
             key,
             AuthStyle::Bearer,
         ))),
@@ -1589,12 +1557,6 @@ fn create_provider_with_url_and_options(
         }
 
         _ => {
-            let registry = plugins::runtime::current_registry();
-            if registry.has_provider(name) {
-                return Ok(Box::new(PluginProvider {
-                    name: name.to_string(),
-                }));
-            }
             anyhow::bail!(
                 "Unknown provider: {name}. Check README for supported providers or run `zeroclaw onboard --interactive` to reconfigure.\n\
                  Tip: Use \"custom:https://your-api.com\" for OpenAI-compatible endpoints.\n\
@@ -1937,12 +1899,6 @@ pub fn list_providers() -> Vec<ProviderInfo> {
             name: "venice",
             display_name: "Venice",
             aliases: &[],
-            local: false,
-        },
-        ProviderInfo {
-            name: "vercel",
-            display_name: "Vercel AI Gateway",
-            aliases: &["vercel-ai"],
             local: false,
         },
         ProviderInfo {
@@ -2597,20 +2553,6 @@ mod tests {
     }
 
     #[test]
-    fn factory_vercel() {
-        assert!(create_provider("vercel", Some("key")).is_ok());
-        assert!(create_provider("vercel-ai", Some("key")).is_ok());
-    }
-
-    #[test]
-    fn vercel_gateway_base_url_matches_public_gateway_endpoint() {
-        assert_eq!(
-            VERCEL_AI_GATEWAY_BASE_URL,
-            "https://ai-gateway.vercel.sh/v1"
-        );
-    }
-
-    #[test]
     fn factory_cloudflare() {
         assert!(create_provider("cloudflare", Some("key")).is_ok());
         assert!(create_provider("cloudflare-ai", Some("key")).is_ok());
@@ -3083,36 +3025,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn factory_plugin_provider_from_manifest_registry() {
-        let dir = tempfile::tempdir().expect("temp dir");
-        let manifest_path = dir.path().join("demo.plugin.toml");
-        std::fs::write(
-            &manifest_path,
-            r#"
-id = "provider-demo"
-version = "1.0.0"
-module_path = "plugins/provider-demo.wasm"
-wit_packages = ["zeroclaw:providers@1.0.0"]
-providers = ["demo-plugin-provider"]
-"#,
-        )
-        .expect("write manifest");
-
-        let cfg = crate::config::PluginsConfig {
-            enabled: true,
-            load_paths: vec![dir.path().to_string_lossy().to_string()],
-            ..crate::config::PluginsConfig::default()
-        };
-        crate::plugins::runtime::initialize_from_config(&cfg)
-            .expect("plugin runtime should initialize");
-
-        assert!(
-            create_provider("demo-plugin-provider", None).is_ok(),
-            "manifest-declared plugin provider should resolve from factory"
-        );
-    }
-
     // ── Error cases ──────────────────────────────────────────
 
     #[test]
@@ -3285,7 +3197,6 @@ providers = ["demo-plugin-provider"]
             "ollama",
             "gemini",
             "venice",
-            "vercel",
             "cloudflare",
             "moonshot",
             "moonshot-intl",

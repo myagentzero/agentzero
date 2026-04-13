@@ -42,7 +42,6 @@ pub mod discovery;
 pub mod loader;
 pub mod manifest;
 pub mod registry;
-pub mod runtime;
 pub mod traits;
 
 #[allow(unused_imports)]

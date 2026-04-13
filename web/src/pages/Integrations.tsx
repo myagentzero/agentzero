@@ -58,7 +58,6 @@ const FALLBACK_MODEL_OPTIONS: Record<string, string[]> = {
   xai: ['x-ai/grok-4', 'x-ai/grok-3'],
   mistral: ['mistral-large-latest', 'codestral-latest', 'mistral-small-latest'],
   perplexity: ['sonar-pro', 'sonar-reasoning-pro', 'sonar'],
-  vercel: ['openai/gpt-5.2', 'anthropic/claude-sonnet-4-6', 'google/gemini-3.1-pro'],
   bedrock: ['anthropic.claude-sonnet-4-5-20250929-v1:0', 'anthropic.claude-opus-4-6-v1:0'],
   groq: ['llama-3.3-70b-versatile', 'mixtral-8x7b-32768'],
   together: [
@@ -70,7 +69,7 @@ const FALLBACK_MODEL_OPTIONS: Record<string, string[]> = {
 };
 
 function customModelFormatHint(integrationId: string): string {
-  if (integrationId === 'openrouter' || integrationId === 'vercel') {
+  if (integrationId === 'openrouter') {
     return 'Format: anthropic/claude-sonnet-4-6';
   }
   return 'Format: claude-sonnet-4-6 (or provider/model when required)';

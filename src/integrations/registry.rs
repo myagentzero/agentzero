@@ -224,18 +224,6 @@ pub fn all_integrations() -> Vec<IntegrationEntry> {
             },
         },
         IntegrationEntry {
-            name: "Vercel AI",
-            description: "Vercel AI Gateway",
-            category: IntegrationCategory::AiModel,
-            status_fn: |c| {
-                if c.default_provider.as_deref() == Some("vercel") {
-                    IntegrationStatus::Active
-                } else {
-                    IntegrationStatus::Available
-                }
-            },
-        },
-        IntegrationEntry {
             name: "Cloudflare AI",
             description: "Cloudflare AI Gateway",
             category: IntegrationCategory::AiModel,

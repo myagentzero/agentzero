@@ -483,7 +483,7 @@ pub async fn handle_api_integrations_credentials_put(
     // Apply credential updates based on integration
     match provider_key {
         "openrouter" | "anthropic" | "openai" | "google" | "deepseek" | "xai" | "mistral"
-        | "perplexity" | "vercel" | "bedrock" | "groq" | "together" | "cohere" | "fireworks"
+        | "perplexity" | "bedrock" | "groq" | "together" | "cohere" | "fireworks"
         | "venice" | "moonshot" | "stepfun" | "synthetic" | "opencode" | "zai" | "glm"
         | "minimax" | "qwen" | "qianfan" | "doubao" | "volcengine" | "ark" | "siliconflow" => {
             if let Some(api_key) = fields.get("api_key").and_then(|v| v.as_str()) {
@@ -568,7 +568,6 @@ fn provider_key_from_integration_id(id: &str) -> Option<&'static str> {
         "xai" => Some("xai"),
         "mistral" => Some("mistral"),
         "perplexity" => Some("perplexity"),
-        "vercel-ai" => Some("vercel"),
         "amazon-bedrock" => Some("bedrock"),
         "groq" => Some("groq"),
         "together-ai" => Some("together"),
@@ -635,7 +634,6 @@ fn integration_id_from_provider(provider: &str) -> Option<String> {
         "xai" | "x-ai" => "xAI",
         "mistral" => "Mistral",
         "perplexity" => "Perplexity",
-        "vercel" => "Vercel AI",
         "bedrock" => "Amazon Bedrock",
         "groq" => "Groq",
         "together" => "Together AI",
@@ -1386,7 +1384,6 @@ mod tests {
             ("xai", "xai"),
             ("mistral", "mistral"),
             ("perplexity", "perplexity"),
-            ("vercel", "vercel"),
             ("bedrock", "bedrock"),
             ("groq", "groq"),
             ("together", "together"),

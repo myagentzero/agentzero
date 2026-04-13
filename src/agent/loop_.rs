@@ -2685,10 +2685,6 @@ pub async fn run(
     interactive: bool,
     hooks: Option<&crate::hooks::HookRunner>,
 ) -> Result<String> {
-    if let Err(error) = crate::plugins::runtime::initialize_from_config(&config.plugins) {
-        tracing::warn!("plugin registry initialization skipped: {error}");
-    }
-
     // ── Wire up agnostic subsystems ──────────────────────────────
     let cost_tracker = if config.cost.enabled {
         match CostTracker::new(config.cost.clone(), &config.workspace_dir) {
@@ -3371,9 +3367,6 @@ pub async fn process_message_with_session(
     session_id: Option<&str>,
     external_observer: Option<Arc<dyn Observer>>,
 ) -> Result<String> {
-    if let Err(error) = crate::plugins::runtime::initialize_from_config(&config.plugins) {
-        tracing::warn!("plugin registry initialization skipped: {error}");
-    }
     let observer: Arc<dyn Observer> = match external_observer {
         Some(obs) => obs,
         None => {

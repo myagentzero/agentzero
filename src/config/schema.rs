@@ -5,7 +5,7 @@ use anyhow::{Context, Result};
 use directories::UserDirs;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::sync::{OnceLock, RwLock};
@@ -382,10 +382,6 @@ pub struct Config {
     /// - `Some(false)`: force vision support off
     #[serde(default)]
     pub model_support_vision: Option<bool>,
-
-    /// WASM plugin engine configuration (`[wasm]` section).
-    #[serde(default)]
-    pub wasm: WasmConfig,
 
     /// Notion integration configuration (`[notion]`).
     #[serde(default)]
@@ -1282,52 +1278,6 @@ impl Default for SkillCreationConfig {
     }
 }
 
-/// WASM plugin engine configuration (`[wasm]` section).
-///
-/// Controls limits applied to every WASM tool invocation.
-/// Requires the `wasm-tools` compile-time feature to have any effect.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct WasmConfig {
-    /// Enable loading WASM tools from installed skill packages.
-    /// Default: `true` (auto-discovers plugins in the skills directory).
-    #[serde(default = "default_true")]
-    pub enabled: bool,
-    /// Maximum linear memory per WASM invocation in MiB.
-    /// Valid range: 1..=256. Default: `64`.
-    #[serde(default = "default_wasm_memory_limit_mb")]
-    pub memory_limit_mb: u64,
-    /// CPU fuel budget per invocation (roughly one unit ≈ one WASM instruction).
-    /// Default: 1_000_000_000.
-    #[serde(default = "default_wasm_fuel_limit")]
-    pub fuel_limit: u64,
-    /// URL of the ZeroMarket (or compatible) registry used by `zeroclaw skill install`.
-    /// Default: the public ZeroMarket registry.
-    #[serde(default = "default_registry_url")]
-    pub registry_url: String,
-}
-
-fn default_wasm_memory_limit_mb() -> u64 {
-    64
-}
-
-fn default_wasm_fuel_limit() -> u64 {
-    1_000_000_000
-}
-
-fn default_registry_url() -> String {
-    "https://zeromarket.vercel.app/api".to_string()
-}
-
-impl Default for WasmConfig {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            memory_limit_mb: default_wasm_memory_limit_mb(),
-            fuel_limit: default_wasm_fuel_limit(),
-            registry_url: default_registry_url(),
-        }
-    }
-}
 
 /// Skill self-improvement configuration (`[skills.auto_improve]` section).
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -2498,7 +2448,7 @@ impl ProxyConfig {
         for selector in self.normalized_services() {
             if !is_supported_proxy_service_selector(&selector) {
                 anyhow::bail!(
-                    "Unsupported proxy service selector '{selector}'. Use tool `proxy_config` action `list_services` for valid values"
+                    "Unsupported proxy service selector '{selector}'. Valid values: litellm, openai, anthropic, google, ollama, or custom service names"
                 );
             }
         }
@@ -3690,17 +3640,13 @@ impl Default for AutonomyConfig {
 /// Runtime adapter configuration (`[runtime]` section).
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct RuntimeConfig {
-    /// Runtime kind (`native` | `docker` | `wasm`).
+    /// Runtime kind (`native` | `docker`).
     #[serde(default = "default_runtime_kind")]
     pub kind: String,
 
     /// Docker runtime settings (used when `kind = "docker"`).
     #[serde(default)]
     pub docker: DockerRuntimeConfig,
-
-    /// WASM runtime settings (used when `kind = "wasm"`).
-    #[serde(default)]
-    pub wasm: WasmRuntimeConfig,
 
     /// Global reasoning override for providers that expose explicit controls.
     /// - `None`: provider default behavior
@@ -3749,99 +3695,6 @@ pub struct DockerRuntimeConfig {
     pub allowed_workspace_roots: Vec<String>,
 }
 
-/// WASM runtime configuration (`[runtime.wasm]` section).
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct WasmRuntimeConfig {
-    /// Workspace-relative directory that stores `.wasm` modules.
-    #[serde(default = "default_wasm_tools_dir")]
-    pub tools_dir: String,
-
-    /// Fuel limit per invocation (instruction budget).
-    #[serde(default = "default_runtime_wasm_fuel_limit")]
-    pub fuel_limit: u64,
-
-    /// Memory limit per invocation in MB.
-    #[serde(default = "default_runtime_wasm_memory_limit_mb")]
-    pub memory_limit_mb: u64,
-
-    /// Maximum `.wasm` module size in MB.
-    #[serde(default = "default_wasm_max_module_size_mb")]
-    pub max_module_size_mb: u64,
-
-    /// Allow reading files from workspace inside WASM host calls (future-facing).
-    #[serde(default)]
-    pub allow_workspace_read: bool,
-
-    /// Allow writing files to workspace inside WASM host calls (future-facing).
-    #[serde(default)]
-    pub allow_workspace_write: bool,
-
-    /// Explicit host allowlist for outbound HTTP from WASM modules (future-facing).
-    #[serde(default)]
-    pub allowed_hosts: Vec<String>,
-
-    /// WASM runtime security controls (`[runtime.wasm.security]` section).
-    #[serde(default)]
-    pub security: WasmSecurityConfig,
-}
-
-/// How to handle invocation capabilities that exceed baseline runtime policy.
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum WasmCapabilityEscalationMode {
-    /// Reject any invocation that asks for capabilities above runtime config.
-    #[default]
-    Deny,
-    /// Automatically clamp invocation capabilities to runtime config ceilings.
-    Clamp,
-}
-
-/// Integrity policy for WASM modules pinned by SHA-256 digest.
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum WasmModuleHashPolicy {
-    /// Disable module hash validation.
-    Disabled,
-    /// Warn on missing or mismatched hashes, but allow execution.
-    #[default]
-    Warn,
-    /// Require exact hash match before execution.
-    Enforce,
-}
-
-/// Security policy controls for WASM runtime hardening.
-#[allow(clippy::struct_excessive_bools)]
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct WasmSecurityConfig {
-    /// Require `runtime.wasm.tools_dir` to stay workspace-relative and traversal-free.
-    #[serde(default = "default_true")]
-    pub require_workspace_relative_tools_dir: bool,
-
-    /// Reject module files that are symlinks before execution.
-    #[serde(default = "default_true")]
-    pub reject_symlink_modules: bool,
-
-    /// Reject `runtime.wasm.tools_dir` when it is itself a symlink.
-    #[serde(default = "default_true")]
-    pub reject_symlink_tools_dir: bool,
-
-    /// Strictly validate host allowlist entries (`host` or `host:port` only).
-    #[serde(default = "default_true")]
-    pub strict_host_validation: bool,
-
-    /// Capability escalation handling policy.
-    #[serde(default)]
-    pub capability_escalation_mode: WasmCapabilityEscalationMode,
-
-    /// Module digest verification policy.
-    #[serde(default)]
-    pub module_hash_policy: WasmModuleHashPolicy,
-
-    /// Optional pinned SHA-256 digest map keyed by module name (without `.wasm`).
-    #[serde(default)]
-    pub module_sha256: BTreeMap<String, String>,
-}
-
 fn default_runtime_kind() -> String {
     "native".into()
 }
@@ -3862,22 +3715,6 @@ fn default_docker_cpu_limit() -> Option<f64> {
     Some(1.0)
 }
 
-fn default_wasm_tools_dir() -> String {
-    "tools/wasm".into()
-}
-
-fn default_runtime_wasm_fuel_limit() -> u64 {
-    1_000_000
-}
-
-fn default_runtime_wasm_memory_limit_mb() -> u64 {
-    64
-}
-
-fn default_wasm_max_module_size_mb() -> u64 {
-    50
-}
-
 impl Default for DockerRuntimeConfig {
     fn default() -> Self {
         Self {
@@ -3892,41 +3729,11 @@ impl Default for DockerRuntimeConfig {
     }
 }
 
-impl Default for WasmRuntimeConfig {
-    fn default() -> Self {
-        Self {
-            tools_dir: default_wasm_tools_dir(),
-            fuel_limit: default_runtime_wasm_fuel_limit(),
-            memory_limit_mb: default_runtime_wasm_memory_limit_mb(),
-            max_module_size_mb: default_wasm_max_module_size_mb(),
-            allow_workspace_read: false,
-            allow_workspace_write: false,
-            allowed_hosts: Vec::new(),
-            security: WasmSecurityConfig::default(),
-        }
-    }
-}
-
-impl Default for WasmSecurityConfig {
-    fn default() -> Self {
-        Self {
-            require_workspace_relative_tools_dir: true,
-            reject_symlink_modules: true,
-            reject_symlink_tools_dir: true,
-            strict_host_validation: true,
-            capability_escalation_mode: WasmCapabilityEscalationMode::Deny,
-            module_hash_policy: WasmModuleHashPolicy::Warn,
-            module_sha256: BTreeMap::new(),
-        }
-    }
-}
-
 impl Default for RuntimeConfig {
     fn default() -> Self {
         Self {
             kind: default_runtime_kind(),
             docker: DockerRuntimeConfig::default(),
-            wasm: WasmRuntimeConfig::default(),
             reasoning_enabled: None,
             reasoning_level: None,
         }
@@ -5864,7 +5671,6 @@ impl Default for Config {
             agents_ipc: AgentsIpcConfig::default(),
             mcp: McpConfig::default(),
             model_support_vision: None,
-            wasm: WasmConfig::default(),
             notion: NotionConfig::default(),
             ask_user: AskUserConfig::default(),
             local_context: LocalContextConfig::default(),
@@ -7793,34 +7599,6 @@ impl Config {
             }
         }
 
-        // WASM config
-        if self.wasm.memory_limit_mb == 0 || self.wasm.memory_limit_mb > 256 {
-            anyhow::bail!(
-                "wasm.memory_limit_mb must be between 1 and 256, got {}",
-                self.wasm.memory_limit_mb
-            );
-        }
-        if self.wasm.fuel_limit == 0 {
-            anyhow::bail!("wasm.fuel_limit must be greater than 0");
-        }
-        {
-            let url = &self.wasm.registry_url;
-            // Extract what comes after "https://" and check that the host part
-            // (up to the first '/', '?', '#', or ':') is non-empty.
-            let has_valid_host = url
-                .strip_prefix("https://")
-                .map(|rest| {
-                    let host = rest.split(&['/', '?', '#', ':'][..]).next().unwrap_or("");
-                    !host.is_empty()
-                })
-                .unwrap_or(false);
-            if !has_valid_host {
-                anyhow::bail!(
-                    "wasm.registry_url must be a valid HTTPS URL with a non-empty host, got '{url}'"
-                );
-            }
-        }
-
         Ok(())
     }
 
@@ -8556,59 +8334,6 @@ mod tests {
     }
 
     #[test]
-    async fn wasm_config_default_has_correct_values() {
-        let cfg = WasmConfig::default();
-        assert!(cfg.enabled, "WASM tools should be enabled by default");
-        assert_eq!(cfg.memory_limit_mb, 64);
-        assert_eq!(cfg.fuel_limit, 1_000_000_000);
-        assert_eq!(cfg.registry_url, "https://zeromarket.vercel.app/api");
-    }
-
-    #[test]
-    async fn wasm_config_invalid_values_rejected() {
-        let mut c = Config::default();
-
-        // memory_limit_mb = 0
-        c.wasm.memory_limit_mb = 0;
-        assert!(c.validate().is_err(), "memory_limit_mb=0 should fail");
-
-        // memory_limit_mb = 257
-        c.wasm = WasmConfig::default();
-        c.wasm.memory_limit_mb = 257;
-        assert!(c.validate().is_err(), "memory_limit_mb=257 should fail");
-
-        // fuel_limit = 0
-        c.wasm = WasmConfig::default();
-        c.wasm.fuel_limit = 0;
-        assert!(c.validate().is_err(), "fuel_limit=0 should fail");
-
-        // empty registry_url
-        c.wasm = WasmConfig::default();
-        c.wasm.registry_url = String::new();
-        assert!(c.validate().is_err(), "empty registry_url should fail");
-
-        // http:// instead of https://
-        c.wasm = WasmConfig::default();
-        c.wasm.registry_url = "http://example.com".to_string();
-        assert!(c.validate().is_err(), "http registry_url should fail");
-
-        // bare "https://"
-        c.wasm = WasmConfig::default();
-        c.wasm.registry_url = "https://".to_string();
-        assert!(c.validate().is_err(), "https:// without host should fail");
-
-        // port-only, no hostname
-        c.wasm = WasmConfig::default();
-        c.wasm.registry_url = "https://:443".to_string();
-        assert!(c.validate().is_err(), "https://:443 should fail");
-
-        // query-only, no hostname
-        c.wasm = WasmConfig::default();
-        c.wasm.registry_url = "https://?q=1".to_string();
-        assert!(c.validate().is_err(), "https://?q=1 should fail");
-    }
-
-    #[test]
     async fn config_debug_redacts_sensitive_values() {
         let mut config = Config::default();
         config.workspace_dir = PathBuf::from("/tmp/workspace");
@@ -8874,26 +8599,6 @@ action = "require_approval"
         assert_eq!(r.docker.cpu_limit, Some(1.0));
         assert!(r.docker.read_only_rootfs);
         assert!(r.docker.mount_workspace);
-        assert_eq!(r.wasm.tools_dir, "tools/wasm");
-        assert_eq!(r.wasm.fuel_limit, 1_000_000);
-        assert_eq!(r.wasm.memory_limit_mb, 64);
-        assert_eq!(r.wasm.max_module_size_mb, 50);
-        assert!(!r.wasm.allow_workspace_read);
-        assert!(!r.wasm.allow_workspace_write);
-        assert!(r.wasm.allowed_hosts.is_empty());
-        assert!(r.wasm.security.require_workspace_relative_tools_dir);
-        assert!(r.wasm.security.reject_symlink_modules);
-        assert!(r.wasm.security.reject_symlink_tools_dir);
-        assert!(r.wasm.security.strict_host_validation);
-        assert_eq!(
-            r.wasm.security.capability_escalation_mode,
-            WasmCapabilityEscalationMode::Deny
-        );
-        assert_eq!(
-            r.wasm.security.module_hash_policy,
-            WasmModuleHashPolicy::Warn
-        );
-        assert!(r.wasm.security.module_sha256.is_empty());
     }
 
     #[test]
@@ -9103,7 +8808,6 @@ default_temperature = 0.7
             agents_ipc: AgentsIpcConfig::default(),
             mcp: McpConfig::default(),
             model_support_vision: None,
-            wasm: WasmConfig::default(),
             notion: NotionConfig::default(),
             ask_user: AskUserConfig::default(),
             local_context: LocalContextConfig::default(),
@@ -9201,74 +8905,6 @@ reasoning_enabled = false
         let parsed: Config = toml::from_str(raw).unwrap();
         assert_eq!(parsed.runtime.reasoning_enabled, Some(false));
     }
-
-    #[test]
-    async fn runtime_wasm_deserializes() {
-        let raw = r#"
-default_temperature = 0.7
-
-[runtime]
-kind = "wasm"
-
-[runtime.wasm]
-tools_dir = "skills/wasm"
-fuel_limit = 500000
-memory_limit_mb = 32
-max_module_size_mb = 8
-allow_workspace_read = true
-allow_workspace_write = false
-allowed_hosts = ["api.example.com", "cdn.example.com:443"]
-
-[runtime.wasm.security]
-require_workspace_relative_tools_dir = false
-reject_symlink_modules = false
-reject_symlink_tools_dir = false
-strict_host_validation = false
-capability_escalation_mode = "clamp"
-module_hash_policy = "enforce"
-
-[runtime.wasm.security.module_sha256]
-calc = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-"#;
-
-        let parsed: Config = toml::from_str(raw).unwrap();
-        assert_eq!(parsed.runtime.kind, "wasm");
-        assert_eq!(parsed.runtime.wasm.tools_dir, "skills/wasm");
-        assert_eq!(parsed.runtime.wasm.fuel_limit, 500_000);
-        assert_eq!(parsed.runtime.wasm.memory_limit_mb, 32);
-        assert_eq!(parsed.runtime.wasm.max_module_size_mb, 8);
-        assert!(parsed.runtime.wasm.allow_workspace_read);
-        assert!(!parsed.runtime.wasm.allow_workspace_write);
-        assert_eq!(
-            parsed.runtime.wasm.allowed_hosts,
-            vec!["api.example.com", "cdn.example.com:443"]
-        );
-        assert!(
-            !parsed
-                .runtime
-                .wasm
-                .security
-                .require_workspace_relative_tools_dir
-        );
-        assert!(!parsed.runtime.wasm.security.reject_symlink_modules);
-        assert!(!parsed.runtime.wasm.security.reject_symlink_tools_dir);
-        assert!(!parsed.runtime.wasm.security.strict_host_validation);
-        assert_eq!(
-            parsed.runtime.wasm.security.capability_escalation_mode,
-            WasmCapabilityEscalationMode::Clamp
-        );
-        assert_eq!(
-            parsed.runtime.wasm.security.module_hash_policy,
-            WasmModuleHashPolicy::Enforce
-        );
-        assert_eq!(
-            parsed.runtime.wasm.security.module_sha256.get("calc"),
-            Some(&"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string())
-        );
-    }
-
-    // runtime_wasm_{dev,staging,prod}_template_deserializes tests removed:
-    // dev/config.wasm.*.toml templates are empty stubs and cannot deserialize.
 
     #[test]
     async fn model_support_vision_deserializes() {
@@ -9455,7 +9091,6 @@ denied_tools = ["shell"]
             agents_ipc: AgentsIpcConfig::default(),
             mcp: McpConfig::default(),
             model_support_vision: None,
-            wasm: WasmConfig::default(),
             notion: NotionConfig::default(),
             ask_user: AskUserConfig::default(),
             local_context: LocalContextConfig::default(),

@@ -379,11 +379,6 @@ fn factory_resolves_vllm_provider() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[test]
-fn factory_resolves_vercel_provider() {
-    assert_provider_ok("vercel", Some("test-key"), None);
-}
-
-#[test]
 fn factory_resolves_cloudflare_provider() {
     assert_provider_ok("cloudflare", Some("test-key"), None);
 }
@@ -420,11 +415,6 @@ fn factory_aws_bedrock_alias_resolves_to_bedrock() {
 #[test]
 fn factory_github_copilot_alias_resolves_to_copilot() {
     assert_provider_ok("github-copilot", Some("test-key"), None);
-}
-
-#[test]
-fn factory_vercel_ai_alias_resolves_to_vercel() {
-    assert_provider_ok("vercel-ai", Some("test-key"), None);
 }
 
 #[test]

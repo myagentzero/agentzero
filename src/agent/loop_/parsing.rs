@@ -887,7 +887,6 @@ pub(super) fn map_tool_name_alias(tool_name: &str) -> &str {
         // Memory variations
         "memoryrecall" | "memory_recall" | "recall" | "memrecall" => "memory_recall",
         "memorystore" | "memory_store" | "store" | "memstore" => "memory_store",
-        "memoryobserve" | "memory_observe" | "observe" | "memobserve" => "memory_observe",
         "memoryforget" | "memory_forget" | "forget" | "memforget" => "memory_forget",
         // HTTP variations
         "http_request" | "http" | "fetch" | "curl" | "wget" => "http_request",
@@ -1029,7 +1028,6 @@ pub(super) fn default_param_for_tool(tool: &str) -> &'static str {
         | "memoryforget" | "forget" | "memforget" | "web_search_tool" | "web_search"
         | "websearch" | "search" => "query",
         "memory_store" | "memorystore" | "store" | "memstore" => "content",
-        "memory_observe" | "memoryobserve" | "observe" | "memobserve" => "observation",
         // HTTP and browser tools default to "url"
         "http_request" | "http" | "fetch" | "curl" | "wget" | "browser_open" | "browser" => "url",
         _ => "input",
