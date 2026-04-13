@@ -756,7 +756,18 @@ impl Agent {
             for (call, result) in calls.iter().zip(results.iter()) {
                 let args_sig =
                     serde_json::to_string(&call.arguments).unwrap_or_else(|_| "{}".into());
-                loop_detector.record_call(&call.name, &args_sig, &result.output, result.success);
+                let error_reason = if result.success {
+                    None
+                } else {
+                    Some(result.output.as_str())
+                };
+                loop_detector.record_call(
+                    &call.name,
+                    &args_sig,
+                    &result.output,
+                    result.success,
+                    error_reason,
+                );
             }
 
             let formatted = self.tool_dispatcher.format_results(&results);

@@ -84,10 +84,12 @@ impl PipelineTool {
             return Err(PipelineError::TooManySteps(self.config.max_steps));
         }
 
-        // Check all tools are on the allowlist before executing any.
-        for step in &request.steps {
-            if !self.allowed_set.contains(&step.tool) {
-                return Err(PipelineError::UnknownTool(step.tool.clone()));
+        // Empty allowlist = all registered tools are permitted.
+        if !self.allowed_set.is_empty() {
+            for step in &request.steps {
+                if !self.allowed_set.contains(&step.tool) {
+                    return Err(PipelineError::UnknownTool(step.tool.clone()));
+                }
             }
         }
 
@@ -102,6 +104,8 @@ impl PipelineTool {
         let mut results: Vec<StepResult> = Vec::with_capacity(steps.len());
 
         for (i, step) in steps.iter().enumerate() {
+            tracing::info!(step = i, tool = %step.tool, "⚙️  Pipeline step {}/{}", i + 1, steps.len());
+
             let tool = self
                 .find_tool(&step.tool)
                 .ok_or_else(|| PipelineError::UnknownTool(step.tool.clone()))?;
@@ -128,6 +132,8 @@ impl PipelineTool {
                 });
             }
 
+            tracing::info!(step = i, tool = %step.tool, "✔️  Step {}/{} succeeded", i + 1, steps.len());
+
             results.push(StepResult {
                 index: i,
                 tool: step.tool.clone(),
@@ -145,6 +151,8 @@ impl PipelineTool {
         steps: &[PipelineStep],
     ) -> std::result::Result<Vec<StepResult>, PipelineError> {
         use tokio::task::JoinSet;
+
+        tracing::info!(steps = steps.len(), "⚙️  Pipeline launching {} parallel step{}", steps.len(), if steps.len() == 1 { "" } else { "s" });
 
         let mut join_set = JoinSet::new();
 
@@ -215,15 +223,16 @@ impl Tool for PipelineTool {
     }
 
     fn description(&self) -> &str {
-        "Execute a multi-step tool pipeline in a single call. Steps run sequentially by default \
-         with result interpolation (use {{step[N].result}} to reference prior outputs), \
-         or in parallel when 'parallel: true' is set."
+        "Execute a multi-step tool pipeline in a single call. Steps run sequentially by default with result interpolation \
+        (use {{step[N].result}} to reference prior outputs), or in parallel when 'parallel: true' is set."
     }
 
     fn prompt_hint(&self) -> Option<&str> {
         Some(
-            "Run multiple tool steps in a single call. Use when: chaining dependent tool calls or running independent steps in parallel. \
-             Don't use when: a single tool call suffices.",
+            "Run multiple tool steps in a single call. Sequential mode (default) supports \
+             {{step[N].result}} interpolation between steps. Parallel mode runs all steps \
+             concurrently but disables interpolation. Use when: chaining dependent tool calls \
+             or batching independent steps. Don't use when: a single tool call suffices.",
         )
     }
 
@@ -237,7 +246,11 @@ impl Tool for PipelineTool {
             "properties": {
                 "steps": {
                     "type": "array",
-                    "description": "Ordered list of tool invocations",
+                    "description": format!(
+                        "Ordered list of tool invocations (max {} steps). \
+                         Tools must be on the configured allowlist (if set).",
+                        self.config.max_steps
+                    ),
                     "items": {
                         "type": "object",
                         "properties": {
@@ -247,7 +260,9 @@ impl Tool for PipelineTool {
                             },
                             "args": {
                                 "type": "object",
-                                "description": "Arguments to pass to the tool. Use {{step[N].result}} to interpolate prior step outputs."
+                                "description": "Arguments to pass to the tool. In sequential mode, \
+                                    use {{step[N].result}} to interpolate prior step outputs \
+                                    (not available in parallel mode)."
                             }
                         },
                         "required": ["tool", "args"]
@@ -255,7 +270,7 @@ impl Tool for PipelineTool {
                 },
                 "parallel": {
                     "type": "boolean",
-                    "description": "Run steps in parallel (no interpolation). Default: false",
+                    "description": "Run all steps concurrently. Disables {{step[N].result}} interpolation. Default: false",
                     "default": false
                 }
             },
@@ -267,8 +282,18 @@ impl Tool for PipelineTool {
         let request: PipelineRequest = serde_json::from_value(args)
             .map_err(|e| anyhow::anyhow!("Invalid pipeline request: {e}"))?;
 
+        tracing::info!(
+            steps = request.steps.len(),
+            parallel = request.parallel,
+            "🚀 Pipeline starting ({} step{}{})",
+            request.steps.len(),
+            if request.steps.len() == 1 { "" } else { "s" },
+            if request.parallel { ", parallel" } else { "" }
+        );
+
         // Validate before execution.
         if let Err(e) = self.validate(&request) {
+            tracing::info!("❌ Pipeline validation failed: {e}");
             return Ok(ToolResult {
                 success: false,
                 output: String::new(),
@@ -284,6 +309,12 @@ impl Tool for PipelineTool {
 
         match results {
             Ok(step_results) => {
+                tracing::info!(
+                    steps = step_results.len(),
+                    "✅ Pipeline completed successfully ({} step{})",
+                    step_results.len(),
+                    if step_results.len() == 1 { "" } else { "s" }
+                );
                 let output = serde_json::to_string_pretty(&step_results)
                     .unwrap_or_else(|_| "Pipeline completed".to_string());
                 Ok(ToolResult {
@@ -292,11 +323,14 @@ impl Tool for PipelineTool {
                     error: None,
                 })
             }
-            Err(e) => Ok(ToolResult {
-                success: false,
-                output: String::new(),
-                error: Some(e.to_string()),
-            }),
+            Err(e) => {
+                tracing::info!("❌ Pipeline failed: {e}");
+                Ok(ToolResult {
+                    success: false,
+                    output: String::new(),
+                    error: Some(e.to_string()),
+                })
+            }
         }
     }
 }
@@ -592,6 +626,32 @@ mod tests {
 
         let request = PipelineRequest {
             steps: vec![],
+            parallel: false,
+        };
+
+        assert!(tool.validate(&request).is_ok());
+    }
+
+    #[test]
+    fn validate_empty_allowlist_permits_any_tool() {
+        let config = PipelineConfig {
+            enabled: true,
+            max_steps: 20,
+            allowed_tools: vec![],
+        };
+        let tool = PipelineTool::new(config, vec![]);
+
+        let request = PipelineRequest {
+            steps: vec![
+                PipelineStep {
+                    tool: "shell".into(),
+                    args: serde_json::json!({}),
+                },
+                PipelineStep {
+                    tool: "any_tool_name".into(),
+                    args: serde_json::json!({}),
+                },
+            ],
             parallel: false,
         };
 

@@ -2440,7 +2440,13 @@ pub async fn run_tool_call_loop(
             // ── Loop detection: record call ──────────────────────
             {
                 let sig = tool_call_signature(&call.name, &call.arguments);
-                loop_detector.record_call(&sig.0, &sig.1, &outcome.output, outcome.success);
+                loop_detector.record_call(
+                    &sig.0,
+                    &sig.1,
+                    &outcome.output,
+                    outcome.success,
+                    outcome.error_reason.as_deref(),
+                );
             }
 
             ordered_results[*idx] = Some((call.name.clone(), call.tool_call_id.clone(), outcome));
@@ -2515,6 +2521,11 @@ pub async fn run_tool_call_loop(
                 loop_detection_prompt = Some(warning);
             }
             DetectionVerdict::HardStop(reason) => {
+                let recent_errors: serde_json::Value = loop_detector
+                    .recent_failure_reasons()
+                    .iter()
+                    .map(|(tool, err)| serde_json::json!({ "tool": tool, "error": err }))
+                    .collect();
                 runtime_trace::record_event(
                     "loop_detected_hard_stop",
                     Some(channel_name),
@@ -2523,7 +2534,11 @@ pub async fn run_tool_call_loop(
                     Some(&turn_id),
                     Some(false),
                     Some("loop persisted after warning, stopping early"),
-                    serde_json::json!({ "iteration": iteration + 1, "reason": &reason }),
+                    serde_json::json!({
+                        "iteration": iteration + 1,
+                        "reason": &reason,
+                        "recent_tool_errors": recent_errors,
+                    }),
                 );
                 anyhow::bail!(
                     "Agent stopped early due to detected loop pattern (iteration {}/{}): {}",

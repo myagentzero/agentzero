@@ -65,6 +65,7 @@ async fn execute_one_tool(
                 })
             } else {
                 let reason = r.error.unwrap_or(r.output);
+                tracing::warn!(tool = %call_name, error = %reason, "tool returned failure");
                 Ok(ToolExecutionOutcome {
                     output: format!("Error: {reason}"),
                     success: false,
@@ -80,6 +81,7 @@ async fn execute_one_tool(
                 duration,
                 success: false,
             });
+            tracing::warn!(tool = %call_name, error = %e, "tool execution error");
             let reason = format!("Error executing {call_name}: {e}");
             Ok(ToolExecutionOutcome {
                 output: reason.clone(),

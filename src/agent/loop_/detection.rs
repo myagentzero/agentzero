@@ -69,6 +69,7 @@ pub(crate) struct LoopDetector {
     config: LoopDetectionConfig,
     history: Vec<CallRecord>,
     consecutive_failures: HashMap<String, usize>,
+    last_failure_reason: HashMap<String, String>,
     warning_injected: bool,
 }
 
@@ -78,17 +79,26 @@ impl LoopDetector {
             config,
             history: Vec::new(),
             consecutive_failures: HashMap::new(),
+            last_failure_reason: HashMap::new(),
             warning_injected: false,
         }
     }
 
     /// Record a completed tool invocation.
     ///
-    /// * `tool_name` — canonical tool name (lowercased by caller).
-    /// * `args_sig`  — canonical JSON args string from `tool_call_signature()`.
-    /// * `output`    — raw tool output text.
-    /// * `success`   — whether the tool reported success.
-    pub fn record_call(&mut self, tool_name: &str, args_sig: &str, output: &str, success: bool) {
+    /// * `tool_name`    — canonical tool name (lowercased by caller).
+    /// * `args_sig`     — canonical JSON args string from `tool_call_signature()`.
+    /// * `output`       — raw tool output text.
+    /// * `success`      — whether the tool reported success.
+    /// * `error_reason` — optional error description (surfaced in loop-detection messages).
+    pub fn record_call(
+        &mut self,
+        tool_name: &str,
+        args_sig: &str,
+        output: &str,
+        success: bool,
+        error_reason: Option<&str>,
+    ) {
         let result_hash = hash_output(output);
         self.history.push(CallRecord {
             tool_name: tool_name.to_owned(),
@@ -99,12 +109,22 @@ impl LoopDetector {
 
         if success {
             self.consecutive_failures.remove(tool_name);
+            self.last_failure_reason.remove(tool_name);
         } else {
             *self
                 .consecutive_failures
                 .entry(tool_name.to_owned())
                 .or_insert(0) += 1;
+            if let Some(reason) = error_reason {
+                self.last_failure_reason
+                    .insert(tool_name.to_owned(), reason.to_owned());
+            }
         }
+    }
+
+    /// Return a snapshot of the most recent failure reasons keyed by tool name.
+    pub fn recent_failure_reasons(&self) -> &HashMap<String, String> {
+        &self.last_failure_reason
     }
 
     /// Evaluate the current history and return a verdict.
@@ -206,10 +226,11 @@ impl LoopDetector {
         }
         for (tool, count) in &self.consecutive_failures {
             if *count >= threshold {
-                return Some(format!(
-                    "Tool '{}' failed {} consecutive times",
-                    tool, count
-                ));
+                let mut msg = format!("Tool '{}' failed {} consecutive times", tool, count);
+                if let Some(reason) = self.last_failure_reason.get(tool) {
+                    msg.push_str(&format!(" (last error: {})", reason));
+                }
+                return Some(msg);
             }
         }
         None
@@ -264,8 +285,8 @@ mod tests {
     #[test]
     fn below_threshold_does_not_trigger() {
         let mut det = LoopDetector::new(default_config());
-        det.record_call("echo", r#"{"msg":"hi"}"#, "hello", true);
-        det.record_call("echo", r#"{"msg":"hi"}"#, "hello", true);
+        det.record_call("echo", r#"{"msg":"hi"}"#, "hello", true, None);
+        det.record_call("echo", r#"{"msg":"hi"}"#, "hello", true, None);
         assert_eq!(det.check(), DetectionVerdict::Continue);
     }
 
@@ -274,7 +295,7 @@ mod tests {
     fn no_progress_repeat_triggers_warning() {
         let mut det = LoopDetector::new(default_config());
         for _ in 0..3 {
-            det.record_call("echo", r#"{"msg":"hi"}"#, "hello", true);
+            det.record_call("echo", r#"{"msg":"hi"}"#, "hello", true, None);
         }
         match det.check() {
             DetectionVerdict::InjectWarning(msg) => {
@@ -288,9 +309,9 @@ mod tests {
     #[test]
     fn same_input_different_output_does_not_trigger() {
         let mut det = LoopDetector::new(default_config());
-        det.record_call("echo", r#"{"msg":"hi"}"#, "result_1", true);
-        det.record_call("echo", r#"{"msg":"hi"}"#, "result_2", true);
-        det.record_call("echo", r#"{"msg":"hi"}"#, "result_3", true);
+        det.record_call("echo", r#"{"msg":"hi"}"#, "result_1", true, None);
+        det.record_call("echo", r#"{"msg":"hi"}"#, "result_2", true, None);
+        det.record_call("echo", r#"{"msg":"hi"}"#, "result_3", true, None);
         assert_eq!(det.check(), DetectionVerdict::Continue);
     }
 
@@ -299,11 +320,11 @@ mod tests {
     fn warning_then_continued_loop_triggers_hard_stop() {
         let mut det = LoopDetector::new(default_config());
         for _ in 0..3 {
-            det.record_call("echo", r#"{"msg":"hi"}"#, "same", true);
+            det.record_call("echo", r#"{"msg":"hi"}"#, "same", true, None);
         }
         assert!(matches!(det.check(), DetectionVerdict::InjectWarning(_)));
         // One more identical call
-        det.record_call("echo", r#"{"msg":"hi"}"#, "same", true);
+        det.record_call("echo", r#"{"msg":"hi"}"#, "same", true, None);
         match det.check() {
             DetectionVerdict::HardStop(msg) => {
                 assert!(msg.contains("no progress"), "msg: {msg}");
@@ -317,10 +338,10 @@ mod tests {
     fn ping_pong_triggers_warning() {
         let mut det = LoopDetector::new(default_config());
         // 2 cycles: A-B-A-B
-        det.record_call("tool_a", r#"{"x":1}"#, "out_a", true);
-        det.record_call("tool_b", r#"{"y":2}"#, "out_b", true);
-        det.record_call("tool_a", r#"{"x":1}"#, "out_a", true);
-        det.record_call("tool_b", r#"{"y":2}"#, "out_b", true);
+        det.record_call("tool_a", r#"{"x":1}"#, "out_a", true, None);
+        det.record_call("tool_b", r#"{"y":2}"#, "out_b", true, None);
+        det.record_call("tool_a", r#"{"x":1}"#, "out_a", true, None);
+        det.record_call("tool_b", r#"{"y":2}"#, "out_b", true, None);
         match det.check() {
             DetectionVerdict::InjectWarning(msg) => {
                 assert!(msg.contains("Ping-pong"), "msg: {msg}");
@@ -333,10 +354,10 @@ mod tests {
     #[test]
     fn ping_pong_with_progress_does_not_trigger() {
         let mut det = LoopDetector::new(default_config());
-        det.record_call("tool_a", r#"{"x":1}"#, "out_a_1", true);
-        det.record_call("tool_b", r#"{"y":2}"#, "out_b_1", true);
-        det.record_call("tool_a", r#"{"x":1}"#, "out_a_2", true); // different output
-        det.record_call("tool_b", r#"{"y":2}"#, "out_b_2", true); // different output
+        det.record_call("tool_a", r#"{"x":1}"#, "out_a_1", true, None);
+        det.record_call("tool_b", r#"{"y":2}"#, "out_b_1", true, None);
+        det.record_call("tool_a", r#"{"x":1}"#, "out_a_2", true, None); // different output
+        det.record_call("tool_b", r#"{"y":2}"#, "out_b_2", true, None); // different output
         assert_eq!(det.check(), DetectionVerdict::Continue);
     }
 
@@ -344,12 +365,13 @@ mod tests {
     #[test]
     fn failure_streak_triggers_warning() {
         let mut det = LoopDetector::new(default_config());
-        det.record_call("shell", r#"{"cmd":"bad1"}"#, "error: not found 1", false);
-        det.record_call("shell", r#"{"cmd":"bad2"}"#, "error: not found 2", false);
-        det.record_call("shell", r#"{"cmd":"bad3"}"#, "error: not found 3", false);
+        det.record_call("shell", r#"{"cmd":"bad1"}"#, "error: not found 1", false, Some("not found 1"));
+        det.record_call("shell", r#"{"cmd":"bad2"}"#, "error: not found 2", false, Some("not found 2"));
+        det.record_call("shell", r#"{"cmd":"bad3"}"#, "error: not found 3", false, Some("not found 3"));
         match det.check() {
             DetectionVerdict::InjectWarning(msg) => {
                 assert!(msg.contains("failed 3 consecutive"), "msg: {msg}");
+                assert!(msg.contains("last error: not found 3"), "msg should contain last error: {msg}");
             }
             other => panic!("expected InjectWarning, got {other:?}"),
         }
@@ -359,11 +381,11 @@ mod tests {
     #[test]
     fn failure_streak_resets_on_success() {
         let mut det = LoopDetector::new(default_config());
-        det.record_call("shell", r#"{"cmd":"bad"}"#, "err", false);
-        det.record_call("shell", r#"{"cmd":"bad"}"#, "err", false);
-        det.record_call("shell", r#"{"cmd":"good"}"#, "ok", true); // resets
-        det.record_call("shell", r#"{"cmd":"bad"}"#, "err", false);
-        det.record_call("shell", r#"{"cmd":"bad"}"#, "err", false);
+        det.record_call("shell", r#"{"cmd":"bad"}"#, "err", false, Some("err"));
+        det.record_call("shell", r#"{"cmd":"bad"}"#, "err", false, Some("err"));
+        det.record_call("shell", r#"{"cmd":"good"}"#, "ok", true, None); // resets
+        det.record_call("shell", r#"{"cmd":"bad"}"#, "err", false, Some("err"));
+        det.record_call("shell", r#"{"cmd":"bad"}"#, "err", false, Some("err"));
         assert_eq!(det.check(), DetectionVerdict::Continue);
     }
 
@@ -372,7 +394,7 @@ mod tests {
     fn all_disabled_never_triggers() {
         let mut det = LoopDetector::new(disabled_config());
         for _ in 0..20 {
-            det.record_call("echo", r#"{"msg":"hi"}"#, "same", true);
+            det.record_call("echo", r#"{"msg":"hi"}"#, "same", true, None);
         }
         assert_eq!(det.check(), DetectionVerdict::Continue);
     }
@@ -381,11 +403,11 @@ mod tests {
     #[test]
     fn mixed_tools_no_false_positive() {
         let mut det = LoopDetector::new(default_config());
-        det.record_call("file_read", r#"{"path":"a.rs"}"#, "content_a", true);
-        det.record_call("shell", r#"{"cmd":"ls"}"#, "file_list", true);
-        det.record_call("memory_store", r#"{"key":"x"}"#, "stored", true);
-        det.record_call("file_read", r#"{"path":"b.rs"}"#, "content_b", true);
-        det.record_call("shell", r#"{"cmd":"cargo test"}"#, "ok", true);
+        det.record_call("file_read", r#"{"path":"a.rs"}"#, "content_a", true, None);
+        det.record_call("shell", r#"{"cmd":"ls"}"#, "file_list", true, None);
+        det.record_call("memory_store", r#"{"key":"x"}"#, "stored", true, None);
+        det.record_call("file_read", r#"{"path":"b.rs"}"#, "content_b", true, None);
+        det.record_call("shell", r#"{"cmd":"cargo test"}"#, "ok", true, None);
         assert_eq!(det.check(), DetectionVerdict::Continue);
     }
 
