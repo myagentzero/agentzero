@@ -3178,7 +3178,7 @@ pub async fn run(
 
             if let Some(system_message) = history.first_mut() {
                 if system_message.role == "system" {
-                    crate::agent::prompt::refresh_prompt_datetime(&mut system_message.content);
+                    crate::agent::prompt::refresh_prompt_datetime(&mut system_message.content, config.local_context.timezone.as_deref());
                 }
             }
 

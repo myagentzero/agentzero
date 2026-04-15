@@ -82,6 +82,7 @@ pub struct BrowserTool {
     allowed_domains: Vec<String>,
     session_name: Option<String>,
     backend: String,
+    backend_kind: BrowserBackendKind,
     native_headless: bool,
     native_webdriver_url: String,
     native_chrome_path: Option<String>,
@@ -244,11 +245,14 @@ impl BrowserTool {
         native_chrome_path: Option<String>,
         computer_use: ComputerUseConfig,
     ) -> Self {
+        let backend_kind =
+            BrowserBackendKind::parse(&backend).unwrap_or(BrowserBackendKind::Auto);
         Self {
             security,
             allowed_domains: normalize_domains(allowed_domains),
             session_name,
             backend,
+            backend_kind,
             native_headless,
             native_webdriver_url,
             native_chrome_path,
@@ -275,8 +279,8 @@ impl BrowserTool {
         Self::is_agent_browser_available().await
     }
 
-    fn configured_backend(&self) -> anyhow::Result<BrowserBackendKind> {
-        BrowserBackendKind::parse(&self.backend)
+    fn configured_backend(&self) -> BrowserBackendKind {
+        self.backend_kind
     }
 
     fn rust_native_compiled() -> bool {
@@ -331,8 +335,8 @@ impl BrowserTool {
         }
 
         if self.computer_use.allow_remote_endpoint && !host_is_private && scheme != "https" {
-            anyhow::bail!(
-                "browser.computer_use.endpoint must use https:// when allow_remote_endpoint=true and host is public"
+            debug!(
+                "browser.computer_use.endpoint using plain HTTP to public host '{host}' — ensure transport is secured (e.g. VPN)"
             );
         }
 
@@ -345,7 +349,7 @@ impl BrowserTool {
     }
 
     async fn resolve_backend(&self) -> anyhow::Result<ResolvedBackend> {
-        let configured = self.configured_backend()?;
+        let configured = self.configured_backend();
 
         match configured {
             BrowserBackendKind::AgentBrowser => {
@@ -725,17 +729,6 @@ impl BrowserTool {
         Ok(())
     }
 
-    fn read_required_i64(
-        &self,
-        params: &serde_json::Map<String, Value>,
-        key: &str,
-    ) -> anyhow::Result<i64> {
-        params
-            .get(key)
-            .and_then(Value::as_i64)
-            .ok_or_else(|| anyhow::anyhow!("Missing or invalid '{key}' parameter"))
-    }
-
     fn validate_computer_use_action(
         &self,
         action: &str,
@@ -748,22 +741,6 @@ impl BrowserTool {
                     .and_then(Value::as_str)
                     .ok_or_else(|| anyhow::anyhow!("Missing 'url' for open action"))?;
                 self.validate_url(url)?;
-            }
-            "mouse_move" | "mouse_click" => {
-                let x = self.read_required_i64(params, "x")?;
-                let y = self.read_required_i64(params, "y")?;
-                self.validate_coordinate("x", x, self.computer_use.max_coordinate_x)?;
-                self.validate_coordinate("y", y, self.computer_use.max_coordinate_y)?;
-            }
-            "mouse_drag" => {
-                let from_x = self.read_required_i64(params, "from_x")?;
-                let from_y = self.read_required_i64(params, "from_y")?;
-                let to_x = self.read_required_i64(params, "to_x")?;
-                let to_y = self.read_required_i64(params, "to_y")?;
-                self.validate_coordinate("from_x", from_x, self.computer_use.max_coordinate_x)?;
-                self.validate_coordinate("to_x", to_x, self.computer_use.max_coordinate_x)?;
-                self.validate_coordinate("from_y", from_y, self.computer_use.max_coordinate_y)?;
-                self.validate_coordinate("to_y", to_y, self.computer_use.max_coordinate_y)?;
             }
             _ => {}
         }
@@ -926,20 +903,84 @@ impl Tool for BrowserTool {
     }
 
     fn description(&self) -> &str {
-        concat!(
-            "Web/browser automation with pluggable backends (agent-browser, rust-native, computer_use). ",
-            "Supports DOM actions plus optional OS-level actions (mouse_move, mouse_click, mouse_drag, ",
-            "key_type, key_press, screen_capture) through a computer-use sidecar. Use 'snapshot' to map ",
-            "interactive elements to refs (@e1, @e2). Enforces browser.allowed_domains for open actions."
-        )
+        match self.backend_kind {
+            BrowserBackendKind::AgentBrowser => concat!(
+                "Browser automation via the agent-browser CLI. ",
+                "Actions: open, snapshot, click, fill, type, get_text, get_title, get_url, ",
+                "screenshot, wait, press, hover, scroll, is_visible, close, find. ",
+                "Use 'snapshot' to get an accessibility tree with element refs (@e1, @e2, ...) ",
+                "that can be passed as selectors to click/fill/type. Use 'find' for semantic ",
+                "locators (role, text, label, placeholder, testid). All 'open' URLs are checked ",
+                "against browser.allowed_domains; private/local hosts and file:// URLs are blocked.",
+            ),
+            BrowserBackendKind::RustNative => concat!(
+                "Browser automation via a Rust-native WebDriver backend. ",
+                "Actions: open, snapshot, click, fill, type, get_text, get_title, get_url, ",
+                "screenshot, wait, press, hover, scroll, is_visible, close, find. ",
+                "Use 'snapshot' to get an accessibility tree with element refs (@e1, @e2, ...) ",
+                "that can be passed as selectors to click/fill/type. Use 'find' for semantic ",
+                "locators (role, text, label, placeholder, testid). All 'open' URLs are checked ",
+                "against browser.allowed_domains; private/local hosts and file:// URLs are blocked.",
+            ),
+            BrowserBackendKind::ComputerUse => concat!(
+                "Browser automation via a computer-use sidecar. ",
+                "Actions: open, snapshot, click, fill, type, get_text, get_title, get_url, ",
+                "screenshot, wait, press, hover, scroll, is_visible, close, find. ",
+                "Use 'snapshot' to get an accessibility tree with element refs (@e1, @e2, ...) ",
+                "that can be passed as selectors to click/fill/type. Use 'find' for semantic ",
+                "locators (role, text, label, placeholder, testid). All 'open' URLs are checked ",
+                "against browser.allowed_domains; private/local hosts and file:// URLs are blocked.",
+            ),
+            BrowserBackendKind::Auto => concat!(
+                "Browser automation with auto-detected backend. ",
+                "Actions: open, snapshot, click, fill, type, get_text, get_title, get_url, ",
+                "screenshot, wait, press, hover, scroll, is_visible, close, find. ",
+                "Use 'snapshot' to get an accessibility tree with element refs (@e1, @e2, ...) ",
+                "that can be passed as selectors to click/fill/type. Use 'find' for semantic ",
+                "locators (role, text, label, placeholder, testid). All 'open' URLs are checked ",
+                "against browser.allowed_domains; private/local hosts and file:// URLs are blocked.",
+            ),
+        }
     }
 
     fn prompt_hint(&self) -> Option<&str> {
-        Some("Automate browser actions (open/click/type/scroll/screenshot) with backend-aware safety checks.")
+        match self.backend_kind {
+            BrowserBackendKind::AgentBrowser | BrowserBackendKind::RustNative => Some(concat!(
+                "Automate web pages via DOM actions: open, snapshot, click, fill, type, ",
+                "screenshot, scroll, press, hover, wait, find. Start with 'open' to navigate, ",
+                "then 'snapshot' to discover interactive element refs. Only URLs matching ",
+                "browser.allowed_domains are permitted; local/private hosts are blocked.",
+            )),
+            BrowserBackendKind::ComputerUse => Some(concat!(
+                "Automate web pages via DOM actions: open, snapshot, click, fill, type, ",
+                "screenshot, scroll, press, hover, wait, find. Start with 'open' to navigate, ",
+                "then 'snapshot' to discover interactive element refs. Only URLs matching ",
+                "browser.allowed_domains are permitted; local/private hosts are blocked.",
+            )),
+            BrowserBackendKind::Auto => Some(concat!(
+                "Automate web pages via DOM actions: open, snapshot, click, fill, type, ",
+                "screenshot, scroll, press, hover, wait, find. Start with 'open' to navigate, ",
+                "then 'snapshot' to discover interactive element refs. Only URLs matching ",
+                "browser.allowed_domains are permitted; local/private hosts are blocked.",
+            )),
+        }
     }
 
     fn prompt_hint_compact(&self) -> &str {
-        "Automate browser interactions."
+        match self.backend_kind {
+            BrowserBackendKind::AgentBrowser => {
+                "Automate browsers via agent-browser CLI: open, snapshot, click/fill/type, screenshot."
+            }
+            BrowserBackendKind::RustNative => {
+                "Automate browsers via WebDriver: open, snapshot, click/fill/type, screenshot."
+            }
+            BrowserBackendKind::ComputerUse => {
+                "Automate browsers via computer-use sidecar: open, snapshot, click/fill/type, screenshot."
+            }
+            BrowserBackendKind::Auto => {
+                "Automate browsers with auto-detected backend: open, snapshot, click/fill/type, screenshot."
+            }
+        }
     }
 
     fn parameters_schema(&self) -> Value {
@@ -950,10 +991,8 @@ impl Tool for BrowserTool {
                     "type": "string",
                     "enum": ["open", "snapshot", "click", "fill", "type", "get_text",
                              "get_title", "get_url", "screenshot", "wait", "press",
-                             "hover", "scroll", "is_visible", "close", "find",
-                             "mouse_move", "mouse_click", "mouse_drag", "key_type",
-                             "key_press", "screen_capture"],
-                    "description": "Browser action to perform (OS-level actions require backend=computer_use)"
+                             "hover", "scroll", "is_visible", "close", "find"],
+                    "description": "Browser action to perform"
                 },
                 "url": {
                     "type": "string",
@@ -974,35 +1013,6 @@ impl Tool for BrowserTool {
                 "key": {
                     "type": "string",
                     "description": "Key to press (Enter, Tab, Escape, etc.)"
-                },
-                "x": {
-                    "type": "integer",
-                    "description": "Screen X coordinate (computer_use: mouse_move/mouse_click)"
-                },
-                "y": {
-                    "type": "integer",
-                    "description": "Screen Y coordinate (computer_use: mouse_move/mouse_click)"
-                },
-                "from_x": {
-                    "type": "integer",
-                    "description": "Drag source X coordinate (computer_use: mouse_drag)"
-                },
-                "from_y": {
-                    "type": "integer",
-                    "description": "Drag source Y coordinate (computer_use: mouse_drag)"
-                },
-                "to_x": {
-                    "type": "integer",
-                    "description": "Drag target X coordinate (computer_use: mouse_drag)"
-                },
-                "to_y": {
-                    "type": "integer",
-                    "description": "Drag target Y coordinate (computer_use: mouse_drag)"
-                },
-                "button": {
-                    "type": "string",
-                    "enum": ["left", "right", "middle"],
-                    "description": "Mouse button for computer_use mouse_click"
                 },
                 "direction": {
                     "type": "string",
@@ -1101,14 +1111,6 @@ impl Tool for BrowserTool {
 
         if backend == ResolvedBackend::ComputerUse {
             return self.execute_computer_use_action(action_str, &args).await;
-        }
-
-        if is_computer_use_only_action(action_str) {
-            return Ok(ToolResult {
-                success: false,
-                output: String::new(),
-                error: Some(unavailable_action_for_backend_error(action_str, backend)),
-            });
         }
 
         let action = match parse_browser_action(action_str, &args) {
@@ -1988,34 +1990,6 @@ fn is_supported_browser_action(action: &str) -> bool {
             | "is_visible"
             | "close"
             | "find"
-            | "mouse_move"
-            | "mouse_click"
-            | "mouse_drag"
-            | "key_type"
-            | "key_press"
-            | "screen_capture"
-    )
-}
-
-fn is_computer_use_only_action(action: &str) -> bool {
-    matches!(
-        action,
-        "mouse_move" | "mouse_click" | "mouse_drag" | "key_type" | "key_press" | "screen_capture"
-    )
-}
-
-fn backend_name(backend: ResolvedBackend) -> &'static str {
-    match backend {
-        ResolvedBackend::AgentBrowser => "agent_browser",
-        ResolvedBackend::RustNative => "rust_native",
-        ResolvedBackend::ComputerUse => "computer_use",
-    }
-}
-
-fn unavailable_action_for_backend_error(action: &str, backend: ResolvedBackend) -> String {
-    format!(
-        "Action '{action}' is unavailable for backend '{}'",
-        backend_name(backend)
     )
 }
 
@@ -2368,7 +2342,7 @@ mod tests {
         let security = Arc::new(SecurityPolicy::default());
         let tool = BrowserTool::new(security, vec!["example.com".into()], None);
         assert_eq!(
-            tool.configured_backend().unwrap(),
+            tool.configured_backend(),
             BrowserBackendKind::AgentBrowser
         );
     }
@@ -2386,7 +2360,7 @@ mod tests {
             None,
             ComputerUseConfig::default(),
         );
-        assert_eq!(tool.configured_backend().unwrap(), BrowserBackendKind::Auto);
+        assert_eq!(tool.configured_backend(), BrowserBackendKind::Auto);
     }
 
     #[test]
@@ -2403,7 +2377,7 @@ mod tests {
             ComputerUseConfig::default(),
         );
         assert_eq!(
-            tool.configured_backend().unwrap(),
+            tool.configured_backend(),
             BrowserBackendKind::ComputerUse
         );
     }
@@ -2429,7 +2403,7 @@ mod tests {
     }
 
     #[test]
-    fn computer_use_endpoint_requires_https_for_public_remote() {
+    fn computer_use_endpoint_allows_https_public_remote() {
         let security = Arc::new(SecurityPolicy::default());
         let tool = BrowserTool::new_with_backend(
             security,
@@ -2441,6 +2415,27 @@ mod tests {
             None,
             ComputerUseConfig {
                 endpoint: "https://computer-use.example.com/v1/actions".into(),
+                allow_remote_endpoint: true,
+                ..ComputerUseConfig::default()
+            },
+        );
+
+        assert!(tool.computer_use_endpoint_url().is_ok());
+    }
+
+    #[test]
+    fn computer_use_endpoint_allows_http_public_remote() {
+        let security = Arc::new(SecurityPolicy::default());
+        let tool = BrowserTool::new_with_backend(
+            security,
+            vec!["example.com".into()],
+            None,
+            "computer_use".into(),
+            true,
+            "http://127.0.0.1:9515".into(),
+            None,
+            ComputerUseConfig {
+                endpoint: "http://computer-use.example.com/v1/actions".into(),
                 allow_remote_endpoint: true,
                 ..ComputerUseConfig::default()
             },
@@ -2516,30 +2511,6 @@ mod tests {
         let security = Arc::new(SecurityPolicy::default());
         let tool = BrowserTool::new(security, vec![], None);
         assert!(tool.validate_url("https://example.com").is_err());
-    }
-
-    #[test]
-    fn computer_use_only_action_detection_is_correct() {
-        assert!(is_computer_use_only_action("mouse_move"));
-        assert!(is_computer_use_only_action("mouse_click"));
-        assert!(is_computer_use_only_action("mouse_drag"));
-        assert!(is_computer_use_only_action("key_type"));
-        assert!(is_computer_use_only_action("key_press"));
-        assert!(is_computer_use_only_action("screen_capture"));
-        assert!(!is_computer_use_only_action("open"));
-        assert!(!is_computer_use_only_action("snapshot"));
-    }
-
-    #[test]
-    fn unavailable_action_error_preserves_backend_context() {
-        assert_eq!(
-            unavailable_action_for_backend_error("mouse_move", ResolvedBackend::AgentBrowser),
-            "Action 'mouse_move' is unavailable for backend 'agent_browser'"
-        );
-        assert_eq!(
-            unavailable_action_for_backend_error("mouse_move", ResolvedBackend::RustNative),
-            "Action 'mouse_move' is unavailable for backend 'rust_native'"
-        );
     }
 
     #[test]

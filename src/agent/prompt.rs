@@ -3,7 +3,7 @@ use crate::identity;
 use crate::skills::Skill;
 use crate::tools::Tool;
 use anyhow::Result;
-use chrono::Local;
+use chrono::{Local, Utc};
 use std::fmt::Write;
 use std::path::Path;
 
@@ -13,7 +13,7 @@ const DATETIME_HEADER: &str = "## Current Date & Time\n\n";
 /// Refresh the `## Current Date & Time` section in an existing system prompt.
 /// Long-lived sessions keep a stable system prompt; this updates only the
 /// timestamp payload so per-turn "current time" answers stay accurate.
-pub fn refresh_prompt_datetime(prompt: &mut String) {
+pub fn refresh_prompt_datetime(prompt: &mut String, timezone_override: Option<&str>) {
     let Some(section_start) = prompt.find(DATETIME_HEADER) else {
         return;
     };
@@ -24,8 +24,7 @@ pub fn refresh_prompt_datetime(prompt: &mut String) {
         .map(|offset| content_start + offset)
         .unwrap_or(prompt.len());
 
-    let now = Local::now();
-    let replacement = format!("{} ({})", now.format("%Y-%m-%d %H:%M:%S"), now.format("%Z"));
+    let replacement = format_datetime(timezone_override);
     prompt.replace_range(content_start..content_end, &replacement);
 }
 
@@ -42,6 +41,9 @@ pub struct PromptContext<'a> {
     /// (allowed commands, forbidden paths, autonomy level) so it can plan
     /// tool calls without trial-and-error.
     pub security_summary: Option<String>,
+    /// Optional IANA timezone override from `local_context.timezone`.
+    /// When set, the datetime section uses this instead of the system timezone.
+    pub timezone_override: Option<&'a str>,
 }
 
 pub trait PromptSection: Send + Sync {
@@ -252,14 +254,25 @@ impl PromptSection for DateTimeSection {
         "datetime"
     }
 
-    fn build(&self, _ctx: &PromptContext<'_>) -> Result<String> {
-        let now = Local::now();
+    fn build(&self, ctx: &PromptContext<'_>) -> Result<String> {
         Ok(format!(
-            "## Current Date & Time\n\n{} ({})",
-            now.format("%Y-%m-%d %H:%M:%S"),
-            now.format("%Z")
+            "## Current Date & Time\n\n{}",
+            format_datetime(ctx.timezone_override)
         ))
     }
+}
+
+/// Format the current datetime using the configured timezone override,
+/// falling back to the system local timezone.
+fn format_datetime(timezone_override: Option<&str>) -> String {
+    if let Some(tz_name) = timezone_override {
+        if let Ok(tz) = tz_name.parse::<chrono_tz::Tz>() {
+            let now = Utc::now().with_timezone(&tz);
+            return format!("{} ({})", now.format("%Y-%m-%d %H:%M:%S"), tz_name);
+        }
+    }
+    let now = Local::now();
+    format!("{} ({})", now.format("%Y-%m-%d %H:%M:%S"), now.format("%Z"))
 }
 
 impl PromptSection for ChannelMediaSection {
@@ -396,6 +409,7 @@ mod tests {
             identity_config: Some(&identity_config),
             dispatcher_instructions: "",
             security_summary: None,
+            timezone_override: None,
         };
 
         let section = IdentitySection;
@@ -445,6 +459,7 @@ mod tests {
             identity_config: Some(&identity_config),
             dispatcher_instructions: "",
             security_summary: None,
+            timezone_override: None,
         };
 
         let section = IdentitySection;
@@ -493,6 +508,7 @@ mod tests {
             identity_config: Some(&identity_config),
             dispatcher_instructions: "",
             security_summary: None,
+            timezone_override: None,
         };
 
         let section = IdentitySection;
@@ -517,6 +533,7 @@ mod tests {
             identity_config: None,
             dispatcher_instructions: "instr",
             security_summary: None,
+            timezone_override: None,
         };
         let prompt = SystemPromptBuilder::with_defaults().build(&ctx).unwrap();
         assert!(prompt.contains("## Tools"));
@@ -553,6 +570,7 @@ mod tests {
             identity_config: None,
             dispatcher_instructions: "",
             security_summary: None,
+            timezone_override: None,
         };
 
         let output = SkillsSection.build(&ctx).unwrap();
@@ -592,6 +610,7 @@ mod tests {
             identity_config: None,
             dispatcher_instructions: "",
             security_summary: None,
+            timezone_override: None,
         };
 
         let output = SkillsSection.build(&ctx).unwrap();
@@ -606,7 +625,7 @@ mod tests {
     #[test]
     fn refresh_prompt_datetime_updates_timestamp_in_place() {
         let mut prompt = "## Runtime\n\nHost: test\n\n## Current Date & Time\n\n2000-01-01 00:00:00 (UTC)\n\n## Next Section".to_string();
-        super::refresh_prompt_datetime(&mut prompt);
+        super::refresh_prompt_datetime(&mut prompt, None);
 
         assert!(prompt.contains("## Current Date & Time\n\n"));
         assert!(prompt.contains("\n\n## Next Section"));
@@ -628,7 +647,7 @@ mod tests {
     fn refresh_prompt_datetime_noops_when_section_missing() {
         let mut prompt = "## Runtime\n\nHost: test".to_string();
         let original = prompt.clone();
-        super::refresh_prompt_datetime(&mut prompt);
+        super::refresh_prompt_datetime(&mut prompt, None);
         assert_eq!(prompt, original);
     }
 
@@ -644,6 +663,7 @@ mod tests {
             identity_config: None,
             dispatcher_instructions: "instr",
             security_summary: None,
+            timezone_override: None,
         };
 
         let rendered = DateTimeSection.build(&ctx).unwrap();
@@ -653,6 +673,42 @@ mod tests {
         assert!(payload.chars().any(|c| c.is_ascii_digit()));
         assert!(payload.contains(" ("));
         assert!(payload.ends_with(')'));
+    }
+
+    #[test]
+    fn datetime_section_uses_timezone_override() {
+        let tools: Vec<Box<dyn Tool>> = vec![];
+        let ctx = PromptContext {
+            workspace_dir: Path::new("/tmp"),
+            model_name: "test-model",
+            tools: &tools,
+            skills: &[],
+            skills_prompt_mode: crate::config::SkillsPromptInjectionMode::Full,
+            identity_config: None,
+            dispatcher_instructions: "instr",
+            security_summary: None,
+            timezone_override: Some("America/Denver"),
+        };
+
+        let rendered = DateTimeSection.build(&ctx).unwrap();
+        assert!(rendered.contains("America/Denver"));
+    }
+
+    #[test]
+    fn refresh_prompt_datetime_with_timezone_override() {
+        let mut prompt = "## Current Date & Time\n\n2000-01-01 00:00:00 (UTC)\n\n## Next".to_string();
+        super::refresh_prompt_datetime(&mut prompt, Some("America/Denver"));
+        assert!(!prompt.contains("2000-01-01 00:00:00 (UTC)"));
+        assert!(prompt.contains("America/Denver"));
+    }
+
+    #[test]
+    fn refresh_prompt_datetime_invalid_timezone_falls_back_to_local() {
+        let mut prompt = "## Current Date & Time\n\n2000-01-01 00:00:00 (UTC)\n\n## Next".to_string();
+        super::refresh_prompt_datetime(&mut prompt, Some("Invalid/Timezone"));
+        assert!(!prompt.contains("2000-01-01 00:00:00 (UTC)"));
+        // Falls back to local — should not contain the invalid timezone name
+        assert!(!prompt.contains("Invalid/Timezone"));
     }
 
     #[test]
@@ -683,6 +739,7 @@ mod tests {
             identity_config: None,
             dispatcher_instructions: "",
             security_summary: None,
+            timezone_override: None,
         };
 
         let prompt = SystemPromptBuilder::with_defaults().build(&ctx).unwrap();

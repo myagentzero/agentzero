@@ -65,6 +65,8 @@ pub struct Agent {
     /// Pre-rendered security policy summary injected into the system prompt
     /// so the LLM knows the concrete constraints before making tool calls.
     security_summary: Option<String>,
+    /// IANA timezone override from `local_context.timezone`.
+    timezone_override: Option<String>,
 }
 
 pub struct AgentBuilder {
@@ -89,6 +91,7 @@ pub struct AgentBuilder {
     route_model_by_hint: Option<HashMap<String, String>>,
     research_config: Option<ResearchPhaseConfig>,
     security_summary: Option<String>,
+    timezone_override: Option<String>,
 }
 
 impl AgentBuilder {
@@ -115,6 +118,7 @@ impl AgentBuilder {
             route_model_by_hint: None,
             research_config: None,
             security_summary: None,
+            timezone_override: None,
         }
     }
 
@@ -230,6 +234,11 @@ impl AgentBuilder {
         self
     }
 
+    pub fn timezone_override(mut self, tz: Option<String>) -> Self {
+        self.timezone_override = tz;
+        self
+    }
+
     pub fn build(self) -> Result<Agent> {
         let tools = self
             .tools
@@ -275,6 +284,7 @@ impl AgentBuilder {
             route_model_by_hint: self.route_model_by_hint.unwrap_or_default(),
             research_config: self.research_config.unwrap_or_default(),
             security_summary: self.security_summary,
+            timezone_override: self.timezone_override,
         })
     }
 }
@@ -445,6 +455,7 @@ impl Agent {
             .auto_save(config.memory.auto_save)
             .research_config(config.research.clone())
             .security_summary(Some(security.prompt_summary()))
+            .timezone_override(config.local_context.timezone.clone())
             .build()
     }
 
@@ -486,6 +497,7 @@ impl Agent {
             identity_config: Some(&self.identity_config),
             dispatcher_instructions: &instructions,
             security_summary: self.security_summary.clone(),
+            timezone_override: self.timezone_override.as_deref(),
         };
         self.prompt_builder.build(&ctx)
     }
@@ -578,7 +590,7 @@ impl Agent {
                 )));
         } else if let Some(ConversationMessage::Chat(system_msg)) = self.history.first_mut() {
             if system_msg.role == "system" {
-                crate::agent::prompt::refresh_prompt_datetime(&mut system_msg.content);
+                crate::agent::prompt::refresh_prompt_datetime(&mut system_msg.content, self.timezone_override.as_deref());
             }
         }
 

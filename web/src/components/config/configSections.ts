@@ -40,6 +40,7 @@ import {
   Play,
   Github,
   MapPin,
+  Monitor,
 } from 'lucide-react';
 import type { SectionDef } from './types';
 
@@ -697,10 +698,31 @@ export const CONFIG_SECTIONS: SectionDef[] = [
           { value: 'agent_browser', label: 'Agent Browser' },
           { value: 'native', label: 'Native' },
           { value: 'computer_use', label: 'Computer Use' },
+          { value: 'auto', label: 'Auto' },
         ]
       },
       { key: 'native_headless', label: 'Native Headless', type: 'toggle', defaultValue: true },
       { key: 'native_webdriver_url', label: 'WebDriver URL', type: 'text', defaultValue: 'http://127.0.0.1:9515', description: 'Default: http://127.0.0.1:9515' },
+      { key: 'native_chrome_path', label: 'Chrome Path', type: 'text', description: 'Optional Chrome/Chromium executable path for native backend' },
+    ],
+  },
+
+  // ── Browser: Computer Use ────────────────────────────────────────
+  {
+    path: 'browser.computer_use',
+    category: 'tools',
+    title: 'Browser: Computer Use',
+    description: 'OS-level mouse, keyboard, and screenshot sidecar',
+    icon: Monitor,
+    defaultCollapsed: true,
+    fields: [
+      { key: 'endpoint', label: 'Sidecar Endpoint', type: 'text', defaultValue: 'http://127.0.0.1:8787/v1/actions', description: 'Default: http://127.0.0.1:8787/v1/actions' },
+      { key: 'api_key', label: 'API Key', type: 'password', sensitive: true, description: 'Optional bearer token for sidecar auth' },
+      { key: 'timeout_ms', label: 'Timeout (ms)', type: 'number', min: 1, defaultValue: 15000, description: 'Default: 15000' },
+      { key: 'allow_remote_endpoint', label: 'Allow Remote Endpoint', type: 'toggle', defaultValue: false, description: 'Allow public/remote sidecar endpoints' },
+      { key: 'window_allowlist', label: 'Window Allowlist', type: 'tag-list', tagPlaceholder: 'e.g. Firefox, Terminal' },
+      { key: 'max_coordinate_x', label: 'Max X Coordinate', type: 'number', min: 0, description: 'Optional X-axis boundary for mouse actions' },
+      { key: 'max_coordinate_y', label: 'Max Y Coordinate', type: 'number', min: 0, description: 'Optional Y-axis boundary for mouse actions' },
     ],
   },
 

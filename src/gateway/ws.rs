@@ -333,10 +333,10 @@ fn build_ws_system_prompt(
     prompt
 }
 
-fn refresh_ws_history_system_prompt_datetime(history: &mut [ChatMessage]) {
+fn refresh_ws_history_system_prompt_datetime(history: &mut [ChatMessage], timezone_override: Option<&str>) {
     if let Some(system_message) = history.first_mut() {
         if system_message.role == "system" {
-            crate::agent::prompt::refresh_prompt_datetime(&mut system_message.content);
+            crate::agent::prompt::refresh_prompt_datetime(&mut system_message.content, timezone_override);
         }
     }
 }
@@ -480,7 +480,8 @@ async fn handle_socket(mut socket: WebSocket, state: AppState, session_id: Strin
             continue;
         }
 
-        refresh_ws_history_system_prompt_datetime(&mut history);
+        let tz_override = { state.config.lock().local_context.timezone.clone() };
+        refresh_ws_history_system_prompt_datetime(&mut history, tz_override.as_deref());
 
         // Add user message to history
         history.push(ChatMessage::user(&content));
@@ -717,7 +718,7 @@ mod tests {
             ChatMessage::system("## Current Date & Time\n\n2000-01-01 00:00:00 (UTC)\n"),
             ChatMessage::user("hello"),
         ];
-        refresh_ws_history_system_prompt_datetime(&mut history);
+        refresh_ws_history_system_prompt_datetime(&mut history, None);
         assert!(!history[0].content.contains("2000-01-01 00:00:00 (UTC)"));
         assert_eq!(history[1].content, "hello");
     }

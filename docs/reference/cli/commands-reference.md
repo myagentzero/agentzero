@@ -24,7 +24,7 @@ Last verified: **March 26, 2026**.
 | `integrations` | Inspect integration details |
 | `skills` | List/install/remove skills |
 | `migrate` | Import from external runtimes (currently OpenClaw) |
-| `config` | Export machine-readable config schema |
+| `config` | Manage configuration (view/set properties, export schema) |
 | `completions` | Generate shell completion scripts to stdout |
 | `hardware` | Discover and introspect USB hardware |
 | `peripheral` | Configure and flash peripherals |

@@ -306,6 +306,7 @@ struct ChannelRuntimeContext {
     gateway_pairing: Option<Arc<PairingGuard>>,
     #[cfg(feature = "skill-creation")]
     skill_creation: crate::config::SkillCreationConfig,
+    timezone_override: Option<String>,
 }
 
 #[derive(Clone)]
@@ -641,9 +642,10 @@ fn build_channel_system_prompt(
     channel_name: &str,
     reply_target: &str,
     expose_internal_tool_details: bool,
+    timezone_override: Option<&str>,
 ) -> String {
     let mut prompt = base_prompt.to_string();
-    crate::agent::prompt::refresh_prompt_datetime(&mut prompt);
+    crate::agent::prompt::refresh_prompt_datetime(&mut prompt, timezone_override);
 
     if let Some(instructions) = channel_delivery_instructions(channel_name) {
         if prompt.is_empty() {
@@ -3746,6 +3748,7 @@ If this input is legitimate, rephrase the request and avoid instruction-override
         &msg.channel,
         &msg.reply_target,
         expose_internal_tool_details,
+        ctx.timezone_override.as_deref(),
     );
     system_prompt.push_str(&build_runtime_tool_visibility_prompt(
         ctx.tools_registry.as_ref(),
@@ -5585,6 +5588,7 @@ pub async fn start_channels(
         gateway_pairing,
         #[cfg(feature = "skill-creation")]
         skill_creation: config.skills.skill_creation.clone(),
+        timezone_override: config.local_context.timezone.clone(),
     });
 
     run_message_dispatch_loop(rx, runtime_ctx, max_in_flight_messages).await;
@@ -5943,6 +5947,7 @@ mod tests {
             gateway_pairing: None,
             #[cfg(feature = "skill-creation")]
             skill_creation: crate::config::SkillCreationConfig::default(),
+            timezone_override: None,
         };
 
         assert!(compact_sender_history(&ctx, &sender));
@@ -6003,6 +6008,7 @@ mod tests {
             gateway_pairing: None,
             #[cfg(feature = "skill-creation")]
             skill_creation: crate::config::SkillCreationConfig::default(),
+            timezone_override: None,
         };
 
         append_sender_turn(&ctx, &sender, ChatMessage::user("hello"));
@@ -6066,6 +6072,7 @@ mod tests {
             gateway_pairing: None,
             #[cfg(feature = "skill-creation")]
             skill_creation: crate::config::SkillCreationConfig::default(),
+            timezone_override: None,
         };
 
         assert!(rollback_orphan_user_turn(&ctx, &sender, "pending"));
@@ -6670,6 +6677,7 @@ BTC is currently around $65,000 based on latest tool output."#
             gateway_pairing: None,
             #[cfg(feature = "skill-creation")]
             skill_creation: crate::config::SkillCreationConfig::default(),
+            timezone_override: None,
         });
 
         process_channel_message(
@@ -6760,6 +6768,7 @@ BTC is currently around $65,000 based on latest tool output."#
             gateway_pairing: None,
             #[cfg(feature = "skill-creation")]
             skill_creation: crate::config::SkillCreationConfig::default(),
+            timezone_override: None,
         });
 
         process_channel_message(
@@ -6837,6 +6846,7 @@ BTC is currently around $65,000 based on latest tool output."#
             gateway_pairing: None,
             #[cfg(feature = "skill-creation")]
             skill_creation: crate::config::SkillCreationConfig::default(),
+            timezone_override: None,
         });
 
         process_channel_message(
@@ -6928,6 +6938,7 @@ BTC is currently around $65,000 based on latest tool output."#
             gateway_pairing: None,
             #[cfg(feature = "skill-creation")]
             skill_creation: crate::config::SkillCreationConfig::default(),
+            timezone_override: None,
         });
 
         process_channel_message(
@@ -7018,6 +7029,7 @@ BTC is currently around $65,000 based on latest tool output."#
             gateway_pairing: None,
             #[cfg(feature = "skill-creation")]
             skill_creation: crate::config::SkillCreationConfig::default(),
+            timezone_override: None,
         });
 
         process_channel_message(
@@ -7093,6 +7105,7 @@ BTC is currently around $65,000 based on latest tool output."#
             gateway_pairing: None,
             #[cfg(feature = "skill-creation")]
             skill_creation: crate::config::SkillCreationConfig::default(),
+            timezone_override: None,
         });
 
         process_channel_message(
@@ -7170,6 +7183,7 @@ BTC is currently around $65,000 based on latest tool output."#
             gateway_pairing: None,
             #[cfg(feature = "skill-creation")]
             skill_creation: crate::config::SkillCreationConfig::default(),
+            timezone_override: None,
         });
 
         process_channel_message(
@@ -7249,6 +7263,7 @@ BTC is currently around $65,000 based on latest tool output."#
             gateway_pairing: None,
             #[cfg(feature = "skill-creation")]
             skill_creation: crate::config::SkillCreationConfig::default(),
+            timezone_override: None,
         });
 
         process_channel_message(
@@ -7359,6 +7374,7 @@ BTC is currently around $65,000 based on latest tool output."#
             gateway_pairing: None,
             #[cfg(feature = "skill-creation")]
             skill_creation: crate::config::SkillCreationConfig::default(),
+            timezone_override: None,
         });
         assert_eq!(
             runtime_ctx
@@ -7504,6 +7520,7 @@ BTC is currently around $65,000 based on latest tool output."#
             gateway_pairing: None,
             #[cfg(feature = "skill-creation")]
             skill_creation: crate::config::SkillCreationConfig::default(),
+            timezone_override: None,
         });
 
         process_channel_message(
@@ -7596,6 +7613,7 @@ BTC is currently around $65,000 based on latest tool output."#
             gateway_pairing: None,
             #[cfg(feature = "skill-creation")]
             skill_creation: crate::config::SkillCreationConfig::default(),
+            timezone_override: None,
         });
 
         process_channel_message(
@@ -7677,6 +7695,7 @@ BTC is currently around $65,000 based on latest tool output."#
             gateway_pairing: None,
             #[cfg(feature = "skill-creation")]
             skill_creation: crate::config::SkillCreationConfig::default(),
+            timezone_override: None,
         });
 
         let runtime_ctx_for_first_turn = runtime_ctx.clone();
@@ -7844,6 +7863,7 @@ BTC is currently around $65,000 based on latest tool output."#
             gateway_pairing: None,
             #[cfg(feature = "skill-creation")]
             skill_creation: crate::config::SkillCreationConfig::default(),
+            timezone_override: None,
         });
         assert_eq!(
             runtime_ctx
@@ -7964,6 +7984,7 @@ BTC is currently around $65,000 based on latest tool output."#
             gateway_pairing: None,
             #[cfg(feature = "skill-creation")]
             skill_creation: crate::config::SkillCreationConfig::default(),
+            timezone_override: None,
         });
 
         process_channel_message(
@@ -8079,6 +8100,7 @@ BTC is currently around $65,000 based on latest tool output."#
             gateway_pairing: None,
             #[cfg(feature = "skill-creation")]
             skill_creation: crate::config::SkillCreationConfig::default(),
+            timezone_override: None,
         });
 
         process_channel_message(
@@ -8174,6 +8196,7 @@ BTC is currently around $65,000 based on latest tool output."#
             gateway_pairing: None,
             #[cfg(feature = "skill-creation")]
             skill_creation: crate::config::SkillCreationConfig::default(),
+            timezone_override: None,
         });
 
         process_channel_message(
@@ -8281,6 +8304,7 @@ BTC is currently around $65,000 based on latest tool output."#
             gateway_pairing: None,
             #[cfg(feature = "skill-creation")]
             skill_creation: crate::config::SkillCreationConfig::default(),
+            timezone_override: None,
         });
 
         process_channel_message(
@@ -8389,6 +8413,7 @@ BTC is currently around $65,000 based on latest tool output."#
             gateway_pairing: None,
             #[cfg(feature = "skill-creation")]
             skill_creation: crate::config::SkillCreationConfig::default(),
+            timezone_override: None,
         });
 
         process_channel_message(
@@ -8553,6 +8578,7 @@ BTC is currently around $65,000 based on latest tool output."#
             gateway_pairing: None,
             #[cfg(feature = "skill-creation")]
             skill_creation: crate::config::SkillCreationConfig::default(),
+            timezone_override: None,
         });
         maybe_apply_runtime_config_update(runtime_ctx.as_ref())
             .await
@@ -8653,6 +8679,7 @@ BTC is currently around $65,000 based on latest tool output."#
             gateway_pairing: None,
             #[cfg(feature = "skill-creation")]
             skill_creation: crate::config::SkillCreationConfig::default(),
+            timezone_override: None,
         });
 
         process_channel_message(
@@ -8806,6 +8833,7 @@ BTC is currently around $65,000 based on latest tool output."#
             gateway_pairing: None,
             #[cfg(feature = "skill-creation")]
             skill_creation: crate::config::SkillCreationConfig::default(),
+            timezone_override: None,
         });
 
         process_channel_message(
@@ -8935,6 +8963,7 @@ BTC is currently around $65,000 based on latest tool output."#
             gateway_pairing: None,
             #[cfg(feature = "skill-creation")]
             skill_creation: crate::config::SkillCreationConfig::default(),
+            timezone_override: None,
         });
 
         process_channel_message(
@@ -9040,6 +9069,7 @@ BTC is currently around $65,000 based on latest tool output."#
             gateway_pairing: None,
             #[cfg(feature = "skill-creation")]
             skill_creation: crate::config::SkillCreationConfig::default(),
+            timezone_override: None,
         });
 
         process_channel_message(
@@ -9168,6 +9198,7 @@ BTC is currently around $65,000 based on latest tool output."#
             gateway_pairing: None,
             #[cfg(feature = "skill-creation")]
             skill_creation: crate::config::SkillCreationConfig::default(),
+            timezone_override: None,
         });
 
         process_channel_message(
@@ -9291,6 +9322,7 @@ BTC is currently around $65,000 based on latest tool output."#
             gateway_pairing: None,
             #[cfg(feature = "skill-creation")]
             skill_creation: crate::config::SkillCreationConfig::default(),
+            timezone_override: None,
         });
 
         process_channel_message(
@@ -9373,6 +9405,7 @@ BTC is currently around $65,000 based on latest tool output."#
             gateway_pairing: None,
             #[cfg(feature = "skill-creation")]
             skill_creation: crate::config::SkillCreationConfig::default(),
+            timezone_override: None,
         });
 
         process_channel_message(
@@ -9486,6 +9519,7 @@ BTC is currently around $65,000 based on latest tool output."#
             gateway_pairing: None,
             #[cfg(feature = "skill-creation")]
             skill_creation: crate::config::SkillCreationConfig::default(),
+            timezone_override: None,
         });
 
         process_channel_message(
@@ -9684,6 +9718,7 @@ BTC is currently around $65,000 based on latest tool output."#
             gateway_pairing: None,
             #[cfg(feature = "skill-creation")]
             skill_creation: crate::config::SkillCreationConfig::default(),
+            timezone_override: None,
         });
 
         maybe_apply_runtime_config_update(runtime_ctx.as_ref())
@@ -9891,6 +9926,7 @@ BTC is currently around $65,000 based on latest tool output."#
             gateway_pairing: None,
             #[cfg(feature = "skill-creation")]
             skill_creation: crate::config::SkillCreationConfig::default(),
+            timezone_override: None,
         });
 
         process_channel_message(
@@ -9962,6 +9998,7 @@ BTC is currently around $65,000 based on latest tool output."#
             gateway_pairing: None,
             #[cfg(feature = "skill-creation")]
             skill_creation: crate::config::SkillCreationConfig::default(),
+            timezone_override: None,
         });
 
         process_channel_message(
@@ -10147,6 +10184,7 @@ BTC is currently around $65,000 based on latest tool output."#
             gateway_pairing: None,
             #[cfg(feature = "skill-creation")]
             skill_creation: crate::config::SkillCreationConfig::default(),
+            timezone_override: None,
         });
 
         let (tx, rx) = tokio::sync::mpsc::channel::<traits::ChannelMessage>(4);
@@ -10240,6 +10278,7 @@ BTC is currently around $65,000 based on latest tool output."#
             gateway_pairing: None,
             #[cfg(feature = "skill-creation")]
             skill_creation: crate::config::SkillCreationConfig::default(),
+            timezone_override: None,
         });
 
         let (tx, rx) = tokio::sync::mpsc::channel::<traits::ChannelMessage>(8);
@@ -10349,6 +10388,7 @@ BTC is currently around $65,000 based on latest tool output."#
             gateway_pairing: None,
             #[cfg(feature = "skill-creation")]
             skill_creation: crate::config::SkillCreationConfig::default(),
+            timezone_override: None,
         });
 
         let (tx, rx) = tokio::sync::mpsc::channel::<traits::ChannelMessage>(8);
@@ -10436,6 +10476,7 @@ BTC is currently around $65,000 based on latest tool output."#
             gateway_pairing: None,
             #[cfg(feature = "skill-creation")]
             skill_creation: crate::config::SkillCreationConfig::default(),
+            timezone_override: None,
         });
 
         process_channel_message(
@@ -10508,6 +10549,7 @@ BTC is currently around $65,000 based on latest tool output."#
             gateway_pairing: None,
             #[cfg(feature = "skill-creation")]
             skill_creation: crate::config::SkillCreationConfig::default(),
+            timezone_override: None,
         });
 
         process_channel_message(
@@ -11088,6 +11130,7 @@ BTC is currently around $65,000 based on latest tool output."#
             gateway_pairing: None,
             #[cfg(feature = "skill-creation")]
             skill_creation: crate::config::SkillCreationConfig::default(),
+            timezone_override: None,
         });
 
         process_channel_message(
@@ -11186,6 +11229,7 @@ BTC is currently around $65,000 based on latest tool output."#
             gateway_pairing: None,
             #[cfg(feature = "skill-creation")]
             skill_creation: crate::config::SkillCreationConfig::default(),
+            timezone_override: None,
         });
 
         process_channel_message(
@@ -11288,6 +11332,7 @@ BTC is currently around $65,000 based on latest tool output."#
             gateway_pairing: None,
             #[cfg(feature = "skill-creation")]
             skill_creation: crate::config::SkillCreationConfig::default(),
+            timezone_override: None,
         });
 
         process_channel_message(
@@ -11466,11 +11511,11 @@ Done reminder set for 1:38 AM."#;
 
     #[test]
     fn build_channel_system_prompt_includes_visibility_policy() {
-        let hidden = build_channel_system_prompt("base", "telegram", "chat", false);
+        let hidden = build_channel_system_prompt("base", "telegram", "chat", false, None);
         assert!(hidden.contains("run tools/functions in the background"));
         assert!(hidden.contains("Do not reveal raw tool names"));
 
-        let exposed = build_channel_system_prompt("base", "telegram", "chat", true);
+        let exposed = build_channel_system_prompt("base", "telegram", "chat", true, None);
         assert!(exposed.contains("user explicitly requested command/tool details"));
     }
 
@@ -11478,7 +11523,7 @@ Done reminder set for 1:38 AM."#;
     fn build_channel_system_prompt_refreshes_datetime_section() {
         let base_prompt =
             "## Current Date & Time\n\n2000-01-01 00:00:00 (UTC)\n\n## Runtime\n\nHost: test";
-        let rendered = build_channel_system_prompt(base_prompt, "telegram", "chat", false);
+        let rendered = build_channel_system_prompt(base_prompt, "telegram", "chat", false, None);
         assert!(!rendered.contains("2000-01-01 00:00:00 (UTC)"));
         assert!(rendered.contains("## Current Date & Time\n\n"));
         assert!(rendered.contains("## Runtime\n\nHost: test"));
@@ -12060,6 +12105,7 @@ BTC is currently around $65,000 based on latest tool output."#;
             gateway_pairing: None,
             #[cfg(feature = "skill-creation")]
             skill_creation: crate::config::SkillCreationConfig::default(),
+            timezone_override: None,
         });
 
         // Simulate a photo attachment message with [IMAGE:] marker.
@@ -12139,6 +12185,7 @@ BTC is currently around $65,000 based on latest tool output."#;
             gateway_pairing: None,
             #[cfg(feature = "skill-creation")]
             skill_creation: crate::config::SkillCreationConfig::default(),
+            timezone_override: None,
         });
 
         process_channel_message(
