@@ -180,6 +180,9 @@ pub struct Config {
     /// Path to config.toml - computed from home, not serialized
     #[serde(skip)]
     pub config_path: PathBuf,
+    /// Runtime-only: skip workspace bootstrap file injection (set by cron light_context)
+    #[serde(skip)]
+    pub skip_bootstrap_files: bool,
     /// API key for the selected provider. Always overridden by `ZEROCLAW_API_KEY` env var.
     /// `API_KEY` env var is only used as fallback when no config key is set.
     pub api_key: Option<String>,
@@ -267,7 +270,7 @@ pub struct Config {
     #[serde(default)]
     pub goal_loop: GoalLoopConfig,
 
-    /// Channel configurations: Telegram, Discord, Slack, etc. (`[channels_config]`).
+    /// Channel configurations: slack, Discord, Slack, etc. (`[channels_config]`).
     #[serde(default)]
     pub channels_config: ChannelsConfig,
 
@@ -386,6 +389,10 @@ pub struct Config {
     /// Notion integration configuration (`[notion]`).
     #[serde(default)]
     pub notion: NotionConfig,
+
+    /// Jira integration configuration (`[jira]`).
+    #[serde(default)]
+    pub jira: JiraConfig,
 }
 
 /// Named provider profile definition compatible with Codex app-server style config.
@@ -1277,7 +1284,6 @@ impl Default for SkillCreationConfig {
         }
     }
 }
-
 
 /// Skill self-improvement configuration (`[skills.auto_improve]` section).
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -2296,7 +2302,7 @@ pub struct AskUserConfig {
     /// Default timeout in seconds when waiting for a user response
     #[serde(default = "default_ask_user_timeout_secs")]
     pub default_timeout_secs: u64,
-    /// Preferred channel when none is specified (e.g. "slack", "telegram").
+    /// Preferred channel when none is specified (e.g. "slack", "slack").
     /// When empty, uses the first available channel.
     #[serde(default)]
     pub default_channel: Option<String>,
@@ -2350,7 +2356,7 @@ impl Default for LocalContextConfig {
 }
 
 /// Default HTTP User-Agent sent with outbound requests.
-pub const DEFAULT_USER_AGENT: &str = "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; Claude/1.0; +https://claude.ai/";
+pub const DEFAULT_USER_AGENT: &str = "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36";
 
 fn default_user_agent() -> String {
     DEFAULT_USER_AGENT.into()
@@ -3486,7 +3492,7 @@ pub struct AutonomyConfig {
     #[serde(default)]
     pub allowed_roots: Vec<String>,
 
-    /// Tools to exclude from non-CLI channels (e.g. Telegram, Discord).
+    /// Tools to exclude from non-CLI channels (e.g. slack, Discord).
     ///
     /// When a tool is listed here, non-CLI channels will not expose it to the
     /// model in tool specs.
@@ -3501,8 +3507,8 @@ pub struct AutonomyConfig {
     /// Supported entry formats:
     /// - `"*"`: allow any sender on any channel
     /// - `"alice"`: allow sender `alice` on any channel
-    /// - `"telegram:alice"`: allow sender `alice` only on `telegram`
-    /// - `"telegram:*"`: allow any sender on `telegram`
+    /// - `"slack:alice"`: allow sender `alice` only on `slack`
+    /// - `"slack:*"`: allow any sender on `slack`
     /// - `"*:alice"`: allow sender `alice` on any channel
     #[serde(default)]
     pub non_cli_approval_approvers: Vec<String>,
@@ -3518,11 +3524,11 @@ pub struct AutonomyConfig {
 
     /// Optional per-channel override for natural-language approval mode.
     ///
-    /// Keys are channel names (for example: `telegram`, `discord`, `slack`).
+    /// Keys are channel names (for example: `slack`, `discord`, `slack`).
     /// Values use the same enum as `non_cli_natural_language_approval_mode`.
     ///
     /// Example:
-    /// - `telegram = "direct"` for private-chat ergonomics
+    /// - `slack = "direct"` for private-chat ergonomics
     /// - `discord = "request_confirm"` for stricter team channels
     #[serde(default)]
     pub non_cli_natural_language_approval_mode_by_channel:
@@ -4099,7 +4105,7 @@ pub struct HeartbeatConfig {
     /// Optional fallback task text when `HEARTBEAT.md` has no task entries.
     #[serde(default)]
     pub message: Option<String>,
-    /// Optional delivery channel for heartbeat output (for example: `telegram`).
+    /// Optional delivery channel for heartbeat output (for example: `slack`).
     #[serde(default, alias = "channel")]
     pub target: Option<String>,
     /// Optional delivery recipient/chat identifier (required when `target` is set).
@@ -4146,7 +4152,7 @@ pub struct GoalLoopConfig {
     pub step_timeout_secs: u64,
     /// Maximum steps to execute per cycle. Default: `3`.
     pub max_steps_per_cycle: u32,
-    /// Optional channel to deliver goal events to (e.g. "telegram").
+    /// Optional channel to deliver goal events to (e.g. "slack").
     #[serde(default)]
     pub channel: Option<String>,
     /// Optional recipient/chat_id for goal event delivery.
@@ -4287,7 +4293,7 @@ impl<T: ChannelConfig> crate::config::traits::ConfigHandle for ConfigWrapper<T> 
 
 /// Top-level channel configurations (`[channels_config]` section).
 ///
-/// Each channel sub-section (e.g. `telegram`, `discord`) is optional;
+/// Each channel sub-section (e.g. `slack`, `discord`) is optional;
 /// setting it to `Some(...)` enables that channel.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct ChannelsConfig {
@@ -5546,6 +5552,49 @@ impl Default for AuditConfig {
     }
 }
 
+// -- Jira --
+
+/// Jira integration configuration (`[jira]`).
+///
+/// When `enabled = true`, the agent exposes a `jira` tool for reading tickets,
+/// searching with JQL, listing projects, and adding comments.
+/// Requires `base_url`, `email`, and `api_token` (or the `JIRA_API_TOKEN` env var).
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct JiraConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub base_url: String,
+    #[serde(default)]
+    pub email: String,
+    #[serde(default)]
+    pub api_token: String,
+    #[serde(default = "default_jira_allowed_actions")]
+    pub allowed_actions: Vec<String>,
+    #[serde(default = "default_jira_timeout")]
+    pub timeout_secs: u64,
+}
+
+fn default_jira_allowed_actions() -> Vec<String> {
+    vec!["get_ticket".into()]
+}
+fn default_jira_timeout() -> u64 {
+    30
+}
+
+impl Default for JiraConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            base_url: String::new(),
+            email: String::new(),
+            api_token: String::new(),
+            allowed_actions: default_jira_allowed_actions(),
+            timeout_secs: default_jira_timeout(),
+        }
+    }
+}
+
 // -- Notion --
 
 /// Notion integration configuration (`[notion]`).
@@ -5621,6 +5670,7 @@ impl Default for Config {
         Self {
             workspace_dir: zeroclaw_dir.join("workspace"),
             config_path: zeroclaw_dir.join("config.toml"),
+            skip_bootstrap_files: false,
             api_key: None,
             api_url: None,
             default_provider: Some(DEFAULT_PROVIDER_NAME.to_string()),
@@ -5672,6 +5722,7 @@ impl Default for Config {
             mcp: McpConfig::default(),
             model_support_vision: None,
             notion: NotionConfig::default(),
+            jira: JiraConfig::default(),
             ask_user: AskUserConfig::default(),
             local_context: LocalContextConfig::default(),
         }
@@ -6509,6 +6560,17 @@ impl Config {
             // Notion API key (top-level, not in ChannelsConfig)
             if !config.notion.api_key.is_empty() {
                 decrypt_secret(&store, &mut config.notion.api_key, "config.notion.api_key")?;
+            }
+
+            // Jira secrets (top-level, not in ChannelsConfig)
+            if !config.jira.base_url.is_empty() {
+                decrypt_secret(&store, &mut config.jira.base_url, "config.jira.base_url")?;
+            }
+            if !config.jira.email.is_empty() {
+                decrypt_secret(&store, &mut config.jira.email, "config.jira.email")?;
+            }
+            if !config.jira.api_token.is_empty() {
+                decrypt_secret(&store, &mut config.jira.api_token, "config.jira.api_token")?;
             }
 
             config.apply_env_overrides();
@@ -8172,6 +8234,25 @@ impl Config {
             )?;
         }
 
+        // Jira secrets (top-level, not in ChannelsConfig)
+        if !config_to_save.jira.base_url.is_empty() {
+            encrypt_secret(
+                &store,
+                &mut config_to_save.jira.base_url,
+                "config.jira.base_url",
+            )?;
+        }
+        if !config_to_save.jira.email.is_empty() {
+            encrypt_secret(&store, &mut config_to_save.jira.email, "config.jira.email")?;
+        }
+        if !config_to_save.jira.api_token.is_empty() {
+            encrypt_secret(
+                &store,
+                &mut config_to_save.jira.api_token,
+                "config.jira.api_token",
+            )?;
+        }
+
         let toml_str =
             toml::to_string_pretty(&config_to_save).context("Failed to serialize config")?;
 
@@ -8703,6 +8784,7 @@ default_temperature = 0.7
         let config = Config {
             workspace_dir: PathBuf::from("/tmp/test/workspace"),
             config_path: PathBuf::from("/tmp/test/config.toml"),
+            skip_bootstrap_files: false,
             api_key: Some("sk-test-key".into()),
             api_url: None,
             default_provider: Some("openrouter".into()),
@@ -8809,6 +8891,7 @@ default_temperature = 0.7
             mcp: McpConfig::default(),
             model_support_vision: None,
             notion: NotionConfig::default(),
+            jira: JiraConfig::default(),
             ask_user: AskUserConfig::default(),
             local_context: LocalContextConfig::default(),
         };
@@ -9041,6 +9124,7 @@ denied_tools = ["shell"]
         let config = Config {
             workspace_dir: dir.join("workspace"),
             config_path: config_path.clone(),
+            skip_bootstrap_files: false,
             api_key: Some("sk-roundtrip".into()),
             api_url: None,
             default_provider: Some("openrouter".into()),
@@ -9092,6 +9176,7 @@ denied_tools = ["shell"]
             mcp: McpConfig::default(),
             model_support_vision: None,
             notion: NotionConfig::default(),
+            jira: JiraConfig::default(),
             ask_user: AskUserConfig::default(),
             local_context: LocalContextConfig::default(),
         };
@@ -9142,6 +9227,9 @@ denied_tools = ["shell"]
             "fallback-a-credential".into(),
         );
         config.gateway.paired_tokens = vec!["zc_0123456789abcdef".into()];
+        config.jira.base_url = "https://mycompany.atlassian.net".into();
+        config.jira.email = "user@example.com".into();
+        config.jira.api_token = "jira-api-token-secret".into();
 
         config.agents.insert(
             "worker".into(),
@@ -9262,6 +9350,28 @@ denied_tools = ["shell"]
         let paired_token = &stored.gateway.paired_tokens[0];
         assert!(crate::security::SecretStore::is_encrypted(paired_token));
         assert_eq!(store.decrypt(paired_token).unwrap(), "zc_0123456789abcdef");
+
+        assert!(crate::security::SecretStore::is_encrypted(
+            &stored.jira.base_url
+        ));
+        assert_eq!(
+            store.decrypt(&stored.jira.base_url).unwrap(),
+            "https://mycompany.atlassian.net"
+        );
+        assert!(crate::security::SecretStore::is_encrypted(
+            &stored.jira.email
+        ));
+        assert_eq!(
+            store.decrypt(&stored.jira.email).unwrap(),
+            "user@example.com"
+        );
+        assert!(crate::security::SecretStore::is_encrypted(
+            &stored.jira.api_token
+        ));
+        assert_eq!(
+            store.decrypt(&stored.jira.api_token).unwrap(),
+            "jira-api-token-secret"
+        );
 
         let _ = fs::remove_dir_all(&dir).await;
     }

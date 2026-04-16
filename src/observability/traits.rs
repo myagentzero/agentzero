@@ -55,7 +55,7 @@ pub enum ObserverEvent {
     TurnComplete,
     /// A message was sent or received through a channel.
     ChannelMessage {
-        /// Channel name (e.g., `"telegram"`, `"discord"`).
+        /// Channel name (e.g., `"slack"`, `"discord"`).
         channel: String,
         /// `"inbound"` or `"outbound"`.
         direction: String,

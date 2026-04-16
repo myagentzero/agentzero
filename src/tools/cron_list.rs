@@ -26,7 +26,15 @@ impl Tool for CronListTool {
     }
 
     fn prompt_hint(&self) -> Option<&str> {
-        Some("List all cron jobs with schedule, status, and metadata.")
+        Some(
+            "List all cron jobs with schedule, status, and next run time. \
+             Use when: checking existing jobs before creating duplicates, finding a job_id for removal, \
+             or reviewing what's scheduled. Don't use when: the user already provided the job_id.",
+        )
+    }
+
+    fn prompt_hint_compact(&self) -> &str {
+        "List all scheduled cron jobs."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {

@@ -63,14 +63,8 @@ pub fn run_if_due(config: &MemoryConfig, workspace_dir: &Path) -> Result<()> {
             workspace_dir,
             config.conversation_retention_days,
         )?,
-        pruned_daily_rows: prune_daily_rows(
-            workspace_dir,
-            config.daily_retention_days,
-        )?,
-        pruned_system_rows: prune_system_rows(
-            workspace_dir,
-            config.system_retention_days,
-        )?,
+        pruned_daily_rows: prune_daily_rows(workspace_dir, config.daily_retention_days)?,
+        pruned_system_rows: prune_system_rows(workspace_dir, config.system_retention_days)?,
     };
 
     write_state(workspace_dir, &report)?;

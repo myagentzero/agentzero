@@ -2,8 +2,8 @@ use crate::config::schema::IrcConfig;
 use crate::config::{
     AutonomyConfig, BrowserConfig, ChannelsConfig, ComposioConfig, Config, DiscordConfig,
     HeartbeatConfig, HttpRequestConfig, HttpRequestCredentialProfile, IdentityConfig, MemoryConfig,
-    ObservabilityConfig, RuntimeConfig, SecretsConfig, SlackConfig, StorageConfig,
-    WebFetchConfig, WebSearchConfig, WebhookConfig,
+    ObservabilityConfig, RuntimeConfig, SecretsConfig, SlackConfig, StorageConfig, WebFetchConfig,
+    WebSearchConfig, WebhookConfig,
 };
 use crate::hardware::{self, HardwareConfig};
 use crate::identity::{
@@ -47,14 +47,14 @@ pub struct ProjectContext {
 const BANNER: &str = r"
     ⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡
 
-    ███████╗███████╗██████╗  ██████╗  ██████╗██╗      █████╗ ██╗    ██╗
-    ╚══███╔╝██╔════╝██╔══██╗██╔═══██╗██╔════╝██║     ██╔══██╗██║    ██║
-      ███╔╝ █████╗  ██████╔╝██║   ██║██║     ██║     ███████║██║ █╗ ██║
-     ███╔╝  ██╔══╝  ██╔══██╗██║   ██║██║     ██║     ██╔══██║██║███╗██║
-    ███████╗███████╗██║  ██║╚██████╔╝╚██████╗███████╗██║  ██║╚███╔███╔╝
-    ╚══════╝╚══════╝╚═╝  ╚═╝ ╚═════╝  ╚═════╝╚══════╝╚═╝  ╚═╝ ╚══╝╚══╝
+     █████╗  ██████╗ ███████╗███╗   ██╗████████╗███████╗███████╗██████╗  ██████╗
+    ██╔══██╗██╔════╝ ██╔════╝████╗  ██║╚══██╔══╝╚══███╔╝██╔════╝██╔══██╗██╔═══██╗
+    ███████║██║  ███╗█████╗  ██╔██╗ ██║   ██║     ███╔╝ █████╗  ██████╔╝██║   ██║
+    ██╔══██║██║   ██║██╔══╝  ██║╚██╗██║   ██║    ███╔╝  ██╔══╝  ██╔══██╗██║   ██║
+    ██║  ██║╚██████╔╝███████╗██║ ╚████║   ██║   ███████╗███████╗██║  ██║╚██████╔╝
+    ╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚═╝  ╚═══╝   ╚═╝   ╚══════╝╚══════╝╚═╝  ╚═╝ ╚═════╝
 
-    Zero overhead. Zero compromise. 100% Rust. 100% Agnostic.
+                    Zero overhead. Zero compromise. 100% Rust. 100% Agnostic.
 
     ⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡
 ";
@@ -197,6 +197,7 @@ pub async fn run_wizard(force: bool) -> Result<Config> {
     let config = Config {
         workspace_dir: workspace_dir.clone(),
         config_path: config_path.clone(),
+        skip_bootstrap_files: false,
         api_key: if api_key.is_empty() {
             None
         } else {
@@ -252,6 +253,7 @@ pub async fn run_wizard(force: bool) -> Result<Config> {
         mcp: crate::config::schema::McpConfig::default(),
         model_support_vision: None,
         notion: crate::config::NotionConfig::default(),
+        jira: crate::config::JiraConfig::default(),
         ask_user: crate::config::AskUserConfig::default(),
         local_context: crate::config::schema::LocalContextConfig::default(),
     };
@@ -573,6 +575,7 @@ async fn run_quick_setup_with_home(
     let mut config = Config {
         workspace_dir: workspace_dir.clone(),
         config_path: config_path.clone(),
+        skip_bootstrap_files: false,
         api_key: credential_override.map(|c| {
             let mut s = String::with_capacity(c.len());
             s.push_str(c);
@@ -628,6 +631,7 @@ async fn run_quick_setup_with_home(
         mcp: crate::config::schema::McpConfig::default(),
         model_support_vision: None,
         notion: crate::config::NotionConfig::default(),
+        jira: crate::config::JiraConfig::default(),
         ask_user: crate::config::AskUserConfig::default(),
         local_context: crate::config::schema::LocalContextConfig::default(),
     };

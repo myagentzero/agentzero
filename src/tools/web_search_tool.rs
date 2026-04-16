@@ -295,7 +295,11 @@ impl WebSearchTool {
             })
     }
 
-    async fn search_searxng(&self, query: &str, categories: Option<&str>) -> anyhow::Result<String> {
+    async fn search_searxng(
+        &self,
+        query: &str,
+        categories: Option<&str>,
+    ) -> anyhow::Result<String> {
         let instance_url = self.resolve_searxng_instance_url()?;
         let base_url = instance_url.trim_end_matches('/');
 
@@ -393,7 +397,9 @@ impl Tool for WebSearchTool {
     }
 
     fn prompt_hint(&self) -> Option<&str> {
-        Some("Search the web for information. Use when: current events, recent data, or external knowledge is needed. Don't use when: answer is in project files or memory.")
+        Some(
+            "Search the web for information. Use when: current events, recent data, or external knowledge is needed. Don't use when: answer is in project files or memory.",
+        )
     }
 
     fn prompt_hint_compact(&self) -> &str {
@@ -410,7 +416,7 @@ impl Tool for WebSearchTool {
                 },
                 "categories": {
                     "type": "string",
-                    "description": "SearXNG only. Optional search category to narrow results.",
+                    "description": "Optional search category to narrow results.",
                     "enum": ["general", "images", "videos", "news", "map", "music", "science", "files"]
                 }
             },
@@ -451,7 +457,9 @@ impl Tool for WebSearchTool {
         let result = match resolution.route {
             WebSearchProviderRoute::DuckDuckGo => self.search_duckduckgo(query).await?,
             WebSearchProviderRoute::Brave => self.search_brave(query).await?,
-            WebSearchProviderRoute::SearXNG => self.search_searxng(query, categories.as_deref()).await?,
+            WebSearchProviderRoute::SearXNG => {
+                self.search_searxng(query, categories.as_deref()).await?
+            }
         };
 
         Ok(ToolResult {

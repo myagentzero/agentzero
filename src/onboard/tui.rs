@@ -1,7 +1,6 @@
 use crate::config::schema::{CloudflareTunnelConfig, NgrokTunnelConfig};
 use crate::config::{
-    ChannelsConfig, Config, DiscordConfig, TunnelConfig,
-    default_model_fallback_for_provider,
+    ChannelsConfig, Config, DiscordConfig, TunnelConfig, default_model_fallback_for_provider,
 };
 use crate::onboard::wizard::run_quick_setup;
 use anyhow::{Context, Result, bail};

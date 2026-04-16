@@ -46,7 +46,9 @@ impl Tool for FileReadTool {
     }
 
     fn prompt_hint(&self) -> Option<&str> {
-        Some("Read file contents. Use when: inspecting project files, configs, logs. Don't use when: a targeted search is enough.")
+        Some(
+            "Read file contents. Use when: inspecting project files, configs, logs. Don't use when: a targeted search is enough.",
+        )
     }
 
     fn prompt_hint_compact(&self) -> &str {

@@ -471,7 +471,7 @@ mod tests {
         });
         obs.record_event(&ObserverEvent::TurnComplete);
         obs.record_event(&ObserverEvent::ChannelMessage {
-            channel: "telegram".into(),
+            channel: "slack".into(),
             direction: "inbound".into(),
         });
         obs.record_event(&ObserverEvent::HeartbeatTick);

@@ -397,7 +397,7 @@ mod tests {
             id: target_id.into(),
             timestamp: Utc::now().to_rfc3339(),
             event_type: "tool_call_result".into(),
-            channel: Some("telegram".into()),
+            channel: Some("slack".into()),
             provider: Some("openrouter".into()),
             model: Some("x".into()),
             turn_id: Some("turn-1".into()),

@@ -1,4 +1,4 @@
-//! Hardware board info tool — returns chip name, architecture, memory map for Telegram/agent.
+//! Hardware board info tool — returns chip name, architecture, memory map for agent.
 //!
 //! Use when user asks "what board do I have?", "board info", "connected hardware", etc.
 //! Uses probe-rs for Nucleo when available; otherwise static datasheet info.
@@ -41,7 +41,7 @@ const BOARD_INFO: &[(&str, &str, &str)] = &[
     ),
 ];
 
-/// Tool: return full board info (chip, architecture, memory map) for agent/Telegram.
+/// Tool: return full board info (chip, architecture, memory map) for agent.
 pub struct HardwareBoardInfoTool {
     boards: Vec<String>,
 }
@@ -75,7 +75,9 @@ impl Tool for HardwareBoardInfoTool {
     }
 
     fn prompt_hint(&self) -> Option<&str> {
-        Some("Return full board info (chip, architecture, memory map) for connected hardware. Use when: user asks for 'board info', 'what board do I have', 'connected hardware', 'chip info', or 'what hardware'.")
+        Some(
+            "Return full board info (chip, architecture, memory map) for connected hardware. Use when: user asks for 'board info', 'what board do I have', 'connected hardware', 'chip info', or 'what hardware'.",
+        )
     }
 
     fn prompt_hint_compact(&self) -> &str {

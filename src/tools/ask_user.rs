@@ -55,7 +55,9 @@ impl Tool for AskUserTool {
     }
 
     fn prompt_hint(&self) -> Option<&str> {
-        Some("Ask the user a question and wait for a reply. Use when: you need clarification, confirmation, or input from the user. Don't use when: the answer is already in context.")
+        Some(
+            "Ask the user a question and wait for a reply. Use when: you need clarification, confirmation, or input from the user. Don't use when: the answer is already in context.",
+        )
     }
 
     fn prompt_hint_compact(&self) -> &str {
@@ -164,7 +166,10 @@ impl Tool for AskUserTool {
                 (name.clone(), ch)
             } else {
                 // Prefer the configured default_channel if available.
-                let preferred = self.config.default_channel.as_deref()
+                let preferred = self
+                    .config
+                    .default_channel
+                    .as_deref()
                     .and_then(|name: &str| map.get(name).map(|ch| (name.to_string(), ch.clone())));
                 if let Some(pair) = preferred {
                     pair
@@ -559,15 +564,15 @@ mod tests {
     async fn successful_response_with_choices() {
         let _guard = REGISTRY_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         populate_registry(vec![(
-            "telegram",
-            Arc::new(RespondingChannel::new("telegram", "chat_42", "2")) as Arc<dyn Channel>,
+            "slack",
+            Arc::new(RespondingChannel::new("slack", "chat_42", "2")) as Arc<dyn Channel>,
         )]);
         let tool = AskUserTool::new(Arc::new(SecurityPolicy::default()), Default::default());
         let result = tool
             .execute(json!({
                 "question": "Pick an option",
                 "choices": ["Option A", "Option B"],
-                "channel": "telegram",
+                "channel": "slack",
                 "recipient": "chat_42",
                 "timeout_secs": 5
             }))
@@ -644,10 +649,7 @@ mod tests {
         };
         let tool = AskUserTool::new(Arc::new(SecurityPolicy::default()), config);
         // No explicit timeout_secs arg — should use config's 1s default and time out
-        let result = tool
-            .execute(json!({ "question": "Hello?" }))
-            .await
-            .unwrap();
+        let result = tool.execute(json!({ "question": "Hello?" })).await.unwrap();
         assert!(!result.success);
         assert_eq!(result.output, "TIMEOUT");
         assert!(result.error.as_deref().unwrap().contains("1 seconds"));
@@ -660,21 +662,22 @@ mod tests {
         populate_registry(vec![
             (
                 "slack",
-                Arc::new(RespondingChannel::new("slack", "C_SLACK", "from slack")) as Arc<dyn Channel>,
+                Arc::new(RespondingChannel::new("slack", "C_SLACK", "from slack"))
+                    as Arc<dyn Channel>,
             ),
             (
-                "telegram",
-                Arc::new(RespondingChannel::new("telegram", "T_TG", "from telegram"))
+                "slack",
+                Arc::new(RespondingChannel::new("slack", "T_TG", "from slack"))
                     as Arc<dyn Channel>,
             ),
         ]);
         let config = crate::config::AskUserConfig {
             enabled: true,
             default_timeout_secs: 300,
-            default_channel: Some("telegram".to_string()),
+            default_channel: Some("slack".to_string()),
         };
         let tool = AskUserTool::new(Arc::new(SecurityPolicy::default()), config);
-        // No explicit channel arg — should prefer "telegram" from config
+        // No explicit channel arg — should prefer "slack" from config
         let result = tool
             .execute(json!({
                 "question": "Which channel?",
@@ -683,7 +686,7 @@ mod tests {
             .await
             .unwrap();
         assert!(result.success, "error: {:?}", result.error);
-        assert_eq!(result.output, "from telegram");
+        assert_eq!(result.output, "from slack");
         clear_registry();
     }
 }

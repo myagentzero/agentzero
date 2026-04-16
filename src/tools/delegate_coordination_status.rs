@@ -38,6 +38,17 @@ impl Tool for DelegateCoordinationStatusTool {
         "Inspect delegate coordination runtime state (agent inbox backlog, context state transitions, and dead-letter events)."
     }
 
+    fn prompt_hint(&self) -> Option<&str> {
+        Some(
+            "Inspect delegate coordination state. Use when: debugging delegation issues, checking inbox backlogs, or reviewing dead-letter events. \
+             Don't use when: delegating tasks (use delegate) or managing sub-agents (use subagent_manage).",
+        )
+    }
+
+    fn prompt_hint_compact(&self) -> &str {
+        "Inspect delegate coordination runtime state."
+    }
+
     fn parameters_schema(&self) -> serde_json::Value {
         json!({
             "type": "object",

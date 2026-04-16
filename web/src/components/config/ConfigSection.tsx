@@ -7,6 +7,8 @@ import ToggleField from './fields/ToggleField';
 import SelectField from './fields/SelectField';
 import TagListField from './fields/TagListField';
 import BoardListField from './fields/BoardListField';
+import RouteListField from './fields/RouteListField';
+import ClassificationRuleListField from './fields/ClassificationRuleListField';
 
 interface Props {
   section: SectionDef;
@@ -37,6 +39,10 @@ function renderField(
       return <TagListField {...props} />;
     case 'board-list':
       return <BoardListField {...props} />;
+    case 'route-list':
+      return <RouteListField {...props} />;
+    case 'classification-rule-list':
+      return <ClassificationRuleListField {...props} />;
     default:
       return <TextField {...props} />;
   }
@@ -96,7 +102,7 @@ export default function ConfigSection({
           {fields.map((field) => {
             const value = getFieldValue(section.path, field.key);
             const masked = isFieldMasked(section.path, field.key);
-            const spanFull = field.type === 'tag-list' || field.type === 'board-list';
+            const spanFull = field.type === 'tag-list' || field.type === 'board-list' || field.type === 'route-list' || field.type === 'classification-rule-list';
 
             return (
               <div key={field.key} className={`flex flex-col${spanFull ? ' sm:col-span-2' : ''}`}>

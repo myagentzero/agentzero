@@ -48,7 +48,9 @@ fn parse_since(s: &str) -> anyhow::Result<DateTime<Utc>> {
         return Ok(dt.with_timezone(&Utc));
     }
 
-    anyhow::bail!("Unrecognized 'since' format: {s}. Use relative (e.g. '7d', '24h') or absolute (e.g. '2026-04-10' or RFC3339).")
+    anyhow::bail!(
+        "Unrecognized 'since' format: {s}. Use relative (e.g. '7d', '24h') or absolute (e.g. '2026-04-10' or RFC3339)."
+    )
 }
 
 /// Let the agent search its own memory
@@ -73,7 +75,9 @@ impl Tool for MemoryRecallTool {
     }
 
     fn prompt_hint(&self) -> Option<&str> {
-        Some("Search memory. Use when: retrieving prior decisions, user preferences, historical context. Don't use when: answer is already in current context.")
+        Some(
+            "Search memory. Use when: retrieving prior decisions, user preferences, historical context. Don't use when: answer is already in current context.",
+        )
     }
 
     fn prompt_hint_compact(&self) -> &str {
@@ -281,9 +285,14 @@ mod tests {
         mem.store("morning", "Had coffee meeting", MemoryCategory::Daily, None)
             .await
             .unwrap();
-        mem.store("chat", "Discussed Rust project", MemoryCategory::Conversation, None)
-            .await
-            .unwrap();
+        mem.store(
+            "chat",
+            "Discussed Rust project",
+            MemoryCategory::Conversation,
+            None,
+        )
+        .await
+        .unwrap();
 
         let tool = MemoryRecallTool::new(mem);
         let result = tool
@@ -326,10 +335,7 @@ mod tests {
             .unwrap();
 
         let tool = MemoryRecallTool::new(mem);
-        let result = tool
-            .execute(json!({"category": "core"}))
-            .await
-            .unwrap();
+        let result = tool.execute(json!({"category": "core"})).await.unwrap();
         assert!(result.success);
         assert!(result.output.contains("Found 2"));
         assert!(result.output.contains("[core]"));
@@ -342,15 +348,17 @@ mod tests {
         mem.store("lang", "User prefers Rust", MemoryCategory::Core, None)
             .await
             .unwrap();
-        mem.store("chat", "Discussed Rust project", MemoryCategory::Conversation, None)
-            .await
-            .unwrap();
+        mem.store(
+            "chat",
+            "Discussed Rust project",
+            MemoryCategory::Conversation,
+            None,
+        )
+        .await
+        .unwrap();
 
         let tool = MemoryRecallTool::new(mem);
-        let result = tool
-            .execute(json!({"query": "Rust"}))
-            .await
-            .unwrap();
+        let result = tool.execute(json!({"query": "Rust"})).await.unwrap();
         assert!(result.success);
         assert!(result.output.contains("Found 2"));
     }

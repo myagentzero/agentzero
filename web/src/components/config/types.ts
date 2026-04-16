@@ -7,7 +7,9 @@ export type FieldType =
   | 'toggle'
   | 'select'
   | 'tag-list'
-  | 'board-list';
+  | 'board-list'
+  | 'route-list'
+  | 'classification-rule-list';
 
 export interface FieldDef {
   key: string;

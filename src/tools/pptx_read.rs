@@ -315,6 +315,17 @@ impl Tool for PptxReadTool {
          Returns all readable text content from all slides. No formatting, images, or charts."
     }
 
+    fn prompt_hint(&self) -> Option<&str> {
+        Some(
+            "Read PowerPoint slide text. Use when: extracting text content from .pptx files. \
+             Don't use when: the file is a different document format (use docx_read, xlsx_read, or pdf_read).",
+        )
+    }
+
+    fn prompt_hint_compact(&self) -> &str {
+        "Extract text from PPTX files."
+    }
+
     fn parameters_schema(&self) -> serde_json::Value {
         json!({
             "type": "object",

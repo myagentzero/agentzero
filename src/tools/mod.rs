@@ -46,6 +46,7 @@ pub mod hardware_memory_map;
 pub mod hardware_memory_read;
 pub mod http_request;
 pub mod image_info;
+pub mod jira_tool;
 pub mod local_context;
 pub mod mcp_client;
 pub mod mcp_protocol;
@@ -63,7 +64,6 @@ pub mod pptx_read;
 pub mod provider_status;
 pub mod reaction;
 pub mod read_skill;
-pub mod schedule;
 pub mod schema;
 pub mod screenshot;
 pub mod shell;
@@ -107,6 +107,7 @@ pub use hardware_memory_map::HardwareMemoryMapTool;
 pub use hardware_memory_read::HardwareMemoryReadTool;
 pub use http_request::HttpRequestTool;
 pub use image_info::ImageInfoTool;
+pub use jira_tool::JiraTool;
 pub use local_context::LocalContextTool;
 pub use mcp_client::McpRegistry;
 pub use mcp_tool::McpToolWrapper;
@@ -120,7 +121,6 @@ pub use pptx_read::PptxReadTool;
 pub use provider_status::ProviderStatusTool;
 pub use reaction::ReactionTool;
 pub use read_skill::ReadSkillTool;
-pub use schedule::ScheduleTool;
 #[allow(unused_imports)]
 pub use schema::{CleaningStrategy, SchemaCleanr};
 pub use screenshot::ScreenshotTool;
@@ -370,7 +370,6 @@ pub fn all_tools_with_runtime(
         Arc::new(MemoryStoreTool::new(memory.clone(), security.clone())),
         Arc::new(MemoryRecallTool::new(memory.clone())),
         Arc::new(MemoryForgetTool::new(memory, security.clone())),
-        Arc::new(ScheduleTool::new(security.clone(), root_config.clone())),
         Arc::new(TaskPlanTool::new(security.clone())),
         Arc::new(ModelRoutingConfigTool::new(
             config.clone(),
@@ -507,6 +506,32 @@ pub fn all_tools_with_runtime(
             );
         } else {
             tool_arcs.push(Arc::new(NotionTool::new(notion_api_key, security.clone())));
+        }
+    }
+
+    // Jira API tool (conditionally registered)
+    if root_config.jira.enabled {
+        let base_url = root_config.jira.base_url.trim();
+        let email = root_config.jira.email.trim();
+        let token = if root_config.jira.api_token.trim().is_empty() {
+            std::env::var("JIRA_API_TOKEN").unwrap_or_default()
+        } else {
+            root_config.jira.api_token.trim().to_string()
+        };
+
+        if base_url.is_empty() || email.is_empty() || token.trim().is_empty() {
+            tracing::warn!(
+                "Jira tool enabled but missing required config (base_url, email, api_token or JIRA_API_TOKEN env var)"
+            );
+        } else {
+            tool_arcs.push(Arc::new(JiraTool::new(
+                base_url.to_string(),
+                email.to_string(),
+                token,
+                root_config.jira.allowed_actions.clone(),
+                security.clone(),
+                root_config.jira.timeout_secs,
+            )));
         }
     }
 
@@ -815,7 +840,6 @@ mod tests {
             &cfg,
         );
         let names: Vec<&str> = tools.iter().map(|t| t.name()).collect();
-        assert!(names.contains(&"schedule"));
         assert!(names.contains(&"model_routing_config"));
     }
 

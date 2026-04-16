@@ -29,7 +29,9 @@ impl Tool for HardwareCapabilitiesTool {
     }
 
     fn prompt_hint(&self) -> Option<&str> {
-        Some("Query connected hardware for reported GPIO pins and LED pin. Use when: user asks what pins are available.")
+        Some(
+            "Query connected hardware for reported GPIO pins and LED pin. Use when: user asks what pins are available.",
+        )
     }
 
     fn prompt_hint_compact(&self) -> &str {

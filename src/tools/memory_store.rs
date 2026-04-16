@@ -29,7 +29,9 @@ impl Tool for MemoryStoreTool {
     }
 
     fn prompt_hint(&self) -> Option<&str> {
-        Some("Save to memory. Use when: preserving durable preferences, decisions, key context. Don't use when: information is transient/noisy/sensitive without need.")
+        Some(
+            "Save to memory. Use when: preserving durable preferences, decisions, key context. Don't use when: information is transient/noisy/sensitive without need.",
+        )
     }
 
     fn prompt_hint_compact(&self) -> &str {

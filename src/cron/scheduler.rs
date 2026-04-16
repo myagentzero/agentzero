@@ -180,10 +180,17 @@ async fn run_agent_job(
     let prefixed_prompt = format!("[cron:{} {name}] {prompt}", job.id);
     let model_override = job.model.clone();
 
+    let mut run_config = config.clone();
+
+    if job.light_context {
+        run_config.agent.compact_context = true;
+        run_config.skip_bootstrap_files = true;
+    }
+
     let run_result = match job.session_target {
         SessionTarget::Main | SessionTarget::Isolated => {
             Box::pin(crate::agent::run(
-                config.clone(),
+                run_config,
                 Some(prefixed_prompt),
                 None,
                 model_override,
@@ -545,6 +552,7 @@ mod tests {
             enabled: true,
             delivery: DeliveryConfig::default(),
             delete_after_run: false,
+            light_context: false,
             created_at: Utc::now(),
             next_run: Utc::now(),
             last_run: None,
@@ -926,6 +934,7 @@ mod tests {
             None,
             None,
             true,
+            false,
         )
         .unwrap();
         let started = Utc::now();
@@ -951,6 +960,7 @@ mod tests {
             None,
             None,
             true,
+            false,
         )
         .unwrap();
         let started = Utc::now();
@@ -1017,6 +1027,7 @@ mod tests {
                 best_effort: false,
             }),
             false,
+            false,
         )
         .unwrap();
         let started = Utc::now();
@@ -1055,6 +1066,7 @@ mod tests {
                 best_effort: true,
             }),
             false,
+            false,
         )
         .unwrap();
         let started = Utc::now();
@@ -1085,6 +1097,7 @@ mod tests {
             SessionTarget::Isolated,
             None,
             None,
+            false,
             false,
         )
         .unwrap();
@@ -1144,5 +1157,4 @@ mod tests {
         assert!(!is_no_reply_sentinel("NO_REPLY please"));
         assert!(!is_no_reply_sentinel(""));
     }
-
 }

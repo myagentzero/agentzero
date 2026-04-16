@@ -84,6 +84,17 @@ impl Tool for DocxReadTool {
          Returns all readable text content. No formatting, images, or charts."
     }
 
+    fn prompt_hint(&self) -> Option<&str> {
+        Some(
+            "Read Word document text. Use when: extracting text content from .docx files. \
+             Don't use when: the file is a different document format (use xlsx_read, pptx_read, or pdf_read).",
+        )
+    }
+
+    fn prompt_hint_compact(&self) -> &str {
+        "Extract text from DOCX files."
+    }
+
     fn parameters_schema(&self) -> serde_json::Value {
         json!({
             "type": "object",

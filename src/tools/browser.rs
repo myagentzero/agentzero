@@ -245,8 +245,7 @@ impl BrowserTool {
         native_chrome_path: Option<String>,
         computer_use: ComputerUseConfig,
     ) -> Self {
-        let backend_kind =
-            BrowserBackendKind::parse(&backend).unwrap_or(BrowserBackendKind::Auto);
+        let backend_kind = BrowserBackendKind::parse(&backend).unwrap_or(BrowserBackendKind::Auto);
         Self {
             security,
             allowed_domains: normalize_domains(allowed_domains),
@@ -2341,10 +2340,7 @@ mod tests {
     fn browser_tool_default_backend_is_agent_browser() {
         let security = Arc::new(SecurityPolicy::default());
         let tool = BrowserTool::new(security, vec!["example.com".into()], None);
-        assert_eq!(
-            tool.configured_backend(),
-            BrowserBackendKind::AgentBrowser
-        );
+        assert_eq!(tool.configured_backend(), BrowserBackendKind::AgentBrowser);
     }
 
     #[test]
@@ -2376,10 +2372,7 @@ mod tests {
             None,
             ComputerUseConfig::default(),
         );
-        assert_eq!(
-            tool.configured_backend(),
-            BrowserBackendKind::ComputerUse
-        );
+        assert_eq!(tool.configured_backend(), BrowserBackendKind::ComputerUse);
     }
 
     #[test]

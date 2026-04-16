@@ -77,6 +77,7 @@ pub fn add_agent_job(
     model: Option<String>,
     delivery: Option<DeliveryConfig>,
     delete_after_run: bool,
+    light_context: bool,
 ) -> Result<CronJob> {
     let now = Utc::now();
     validate_schedule(&schedule, now)?;
@@ -90,8 +91,8 @@ pub fn add_agent_job(
         conn.execute(
             "INSERT INTO cron_jobs (
                 id, expression, command, schedule, job_type, prompt, name, session_target, model,
-                enabled, delivery, delete_after_run, created_at, next_run
-             ) VALUES (?1, ?2, '', ?3, 'agent', ?4, ?5, ?6, ?7, 1, ?8, ?9, ?10, ?11)",
+                enabled, delivery, delete_after_run, light_context, created_at, next_run
+             ) VALUES (?1, ?2, '', ?3, 'agent', ?4, ?5, ?6, ?7, 1, ?8, ?9, ?10, ?11, ?12)",
             params![
                 id,
                 expression,
@@ -102,6 +103,7 @@ pub fn add_agent_job(
                 model,
                 serde_json::to_string(&delivery)?,
                 if delete_after_run { 1 } else { 0 },
+                if light_context { 1 } else { 0 },
                 now.to_rfc3339(),
                 next_run.to_rfc3339(),
             ],
@@ -117,7 +119,7 @@ pub fn list_jobs(config: &Config) -> Result<Vec<CronJob>> {
     with_connection(config, |conn| {
         let mut stmt = conn.prepare(
             "SELECT id, expression, command, schedule, job_type, prompt, name, session_target, model,
-                    enabled, delivery, delete_after_run, created_at, next_run, last_run, last_status, last_output
+                    enabled, delivery, delete_after_run, light_context, created_at, next_run, last_run, last_status, last_output
              FROM cron_jobs ORDER BY next_run ASC",
         )?;
 
@@ -135,7 +137,7 @@ pub fn get_job(config: &Config, job_id: &str) -> Result<CronJob> {
     with_connection(config, |conn| {
         let mut stmt = conn.prepare(
             "SELECT id, expression, command, schedule, job_type, prompt, name, session_target, model,
-                    enabled, delivery, delete_after_run, created_at, next_run, last_run, last_status, last_output
+                    enabled, delivery, delete_after_run, light_context, created_at, next_run, last_run, last_status, last_output
              FROM cron_jobs WHERE id = ?1",
         )?;
 
@@ -168,7 +170,7 @@ pub fn due_jobs(config: &Config, now: DateTime<Utc>) -> Result<Vec<CronJob>> {
     with_connection(config, |conn| {
         let mut stmt = conn.prepare(
             "SELECT id, expression, command, schedule, job_type, prompt, name, session_target, model,
-                    enabled, delivery, delete_after_run, created_at, next_run, last_run, last_status, last_output
+                    enabled, delivery, delete_after_run, light_context, created_at, next_run, last_run, last_status, last_output
              FROM cron_jobs
              WHERE enabled = 1 AND next_run <= ?1
              ORDER BY next_run ASC
@@ -219,6 +221,9 @@ pub fn update_job(config: &Config, job_id: &str, patch: CronJobPatch) -> Result<
     if let Some(delete_after_run) = patch.delete_after_run {
         job.delete_after_run = delete_after_run;
     }
+    if let Some(light_context) = patch.light_context {
+        job.light_context = light_context;
+    }
 
     if schedule_changed {
         job.next_run = next_run_for_schedule(&job.schedule, Utc::now())?;
@@ -229,8 +234,8 @@ pub fn update_job(config: &Config, job_id: &str, patch: CronJobPatch) -> Result<
             "UPDATE cron_jobs
              SET expression = ?1, command = ?2, schedule = ?3, job_type = ?4, prompt = ?5, name = ?6,
                  session_target = ?7, model = ?8, enabled = ?9, delivery = ?10, delete_after_run = ?11,
-                 next_run = ?12
-             WHERE id = ?13",
+                 light_context = ?12, next_run = ?13
+             WHERE id = ?14",
             params![
                 job.expression,
                 job.command,
@@ -243,6 +248,7 @@ pub fn update_job(config: &Config, job_id: &str, patch: CronJobPatch) -> Result<
                 if job.enabled { 1 } else { 0 },
                 serde_json::to_string(&job.delivery)?,
                 if job.delete_after_run { 1 } else { 0 },
+                if job.light_context { 1 } else { 0 },
                 job.next_run.to_rfc3339(),
                 job.id,
             ],
@@ -425,9 +431,9 @@ fn map_cron_job_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CronJob> {
     let delivery_raw: Option<String> = row.get(10)?;
     let delivery = decode_delivery(delivery_raw.as_deref()).map_err(sql_conversion_error)?;
 
-    let next_run_raw: String = row.get(13)?;
-    let last_run_raw: Option<String> = row.get(14)?;
-    let created_at_raw: String = row.get(12)?;
+    let next_run_raw: String = row.get(14)?;
+    let last_run_raw: Option<String> = row.get(15)?;
+    let created_at_raw: String = row.get(13)?;
 
     Ok(CronJob {
         id: row.get(0)?,
@@ -442,14 +448,15 @@ fn map_cron_job_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CronJob> {
         enabled: row.get::<_, i64>(9)? != 0,
         delivery,
         delete_after_run: row.get::<_, i64>(11)? != 0,
+        light_context: row.get::<_, i64>(12)? != 0,
         created_at: parse_rfc3339(&created_at_raw).map_err(sql_conversion_error)?,
         next_run: parse_rfc3339(&next_run_raw).map_err(sql_conversion_error)?,
         last_run: match last_run_raw {
             Some(raw) => Some(parse_rfc3339(&raw).map_err(sql_conversion_error)?),
             None => None,
         },
-        last_status: row.get(15)?,
-        last_output: row.get(16)?,
+        last_status: row.get(16)?,
+        last_output: row.get(17)?,
     })
 }
 
@@ -571,6 +578,7 @@ fn with_connection<T>(config: &Config, f: impl FnOnce(&Connection) -> Result<T>)
     add_column_if_missing(&conn, "enabled", "INTEGER NOT NULL DEFAULT 1")?;
     add_column_if_missing(&conn, "delivery", "TEXT")?;
     add_column_if_missing(&conn, "delete_after_run", "INTEGER NOT NULL DEFAULT 0")?;
+    add_column_if_missing(&conn, "light_context", "INTEGER NOT NULL DEFAULT 0")?;
 
     f(&conn)
 }

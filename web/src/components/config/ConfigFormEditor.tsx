@@ -108,7 +108,7 @@ export default function ConfigFormEditor({
       ) : (
         filteredSections.map(({ section, fields }) => (
           <ConfigSection
-            key={section.path || '_root'}
+            key={`${section.path || '_root'}_${section.title.replace(/\s+/g, '_')}`}
             section={fields ? { ...section, defaultCollapsed: false } : section}
             getFieldValue={getFieldValue}
             setFieldValue={setFieldValue}

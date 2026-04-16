@@ -103,13 +103,6 @@ fn show_integration_info(config: &Config, name: &str) -> Result<()> {
 
     // Show setup hints based on integration
     match entry.name {
-        "Telegram" => {
-            println!("  Setup:");
-            println!("    1. Message @BotFather on Telegram");
-            println!("    2. Create a bot and copy the token");
-            println!("    3. Run: zeroclaw onboard --channels-only");
-            println!("    4. Start: zeroclaw channel start");
-        }
         "Discord" => {
             println!("  Setup:");
             println!("    1. Go to https://discord.com/developers/applications");
@@ -129,33 +122,10 @@ fn show_integration_info(config: &Config, name: &str) -> Result<()> {
             println!("    2. Run: zeroclaw onboard");
             println!("    Access 200+ models with one key.");
         }
-        "Ollama" => {
-            println!("  Setup:");
-            println!("    1. Install: brew install ollama");
-            println!("    2. Pull a model: ollama pull llama3");
-            println!("    3. Set provider to 'ollama' in config.toml");
-        }
         "GitHub" => {
             println!("  Setup:");
             println!("    1. Create a personal access token at https://github.com/settings/tokens");
             println!("    2. Add to config: [integrations.github] token = \"ghp_...\"");
-        }
-        "Browser" => {
-            println!("  Built-in:");
-            println!("    ZeroClaw can control Chrome/Chromium for web tasks.");
-            println!("    Uses headless browser automation.");
-        }
-        "Cron" => {
-            println!("  Built-in:");
-            println!("    Schedule tasks in ~/.zeroclaw/workspace/cron/");
-            println!("    Run: zeroclaw cron list");
-        }
-        "Weather" => {
-            println!("  Built-in:");
-            println!("    Fetches live conditions from wttr.in — no API key required.");
-            println!("    Supports city names, IATA airport codes, GPS coordinates,");
-            println!("    postal/zip codes, and Unicode location names.");
-            println!("    Ask the agent: \"What's the weather in Peoria, AZ?\"");
         }
         "Webhooks" => {
             println!("  Built-in:");

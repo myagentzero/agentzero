@@ -326,7 +326,9 @@ impl Tool for HttpRequestTool {
     }
 
     fn prompt_hint(&self) -> Option<&str> {
-        Some("Make HTTP requests to external APIs. Use when: fetching data from or interacting with REST APIs, webhooks, or web services. Don't use when: target domain is not on the allowlist, or a dedicated integration tool already covers the service.")
+        Some(
+            "Make HTTP requests to external APIs. Use when: fetching data from or interacting with REST APIs, webhooks, or web services. Don't use when: target domain is not on the allowlist, or a dedicated integration tool already covers the service.",
+        )
     }
 
     fn prompt_hint_compact(&self) -> &str {

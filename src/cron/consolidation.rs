@@ -75,6 +75,7 @@ pub fn create_consolidation_job_with_schedule(
         None,  // use default model
         None,  // no delivery config
         false, // recurring job — do not delete after run
+        false, // needs full workspace context
     )
 }
 

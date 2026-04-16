@@ -245,7 +245,6 @@ static DEFERRED_ACTION_WITHOUT_TOOL_CALL_REGEX: LazyLock<Regex> = LazyLock::new(
     .unwrap()
 });
 
-
 /// Scrub credentials from tool output to prevent accidental exfiltration.
 /// Replaces known credential patterns with a redacted placeholder while preserving
 /// a small prefix for context.
@@ -313,7 +312,7 @@ tokio::task_local! {
     static TOOL_LOOP_CANARY_TOKENS_ENABLED: bool;
 }
 
-const AUTO_CRON_DELIVERY_CHANNELS: &[&str] = &["telegram", "discord", "slack"];
+const AUTO_CRON_DELIVERY_CHANNELS: &[&str] = &["notion", "discord", "slack"];
 
 const NON_CLI_APPROVAL_WAIT_TIMEOUT_SECS: u64 = 300;
 const NON_CLI_APPROVAL_POLL_INTERVAL_MS: u64 = 250;
@@ -415,7 +414,7 @@ fn is_heartbeat_acknowledgment(text: &str) -> bool {
         return false;
     }
     let lower = trimmed.to_lowercase();
-    lower.contains("heartbeat acknowledged")
+    lower.contains("heartbeat acknowledged") || lower.contains("operating within bounds")
 }
 
 fn should_emit_verbose_progress(mode: ProgressMode) -> bool {
@@ -2712,13 +2711,12 @@ pub async fn run(
     } else {
         None
     };
-    let base_observer: Arc<dyn Observer> = Arc::from(
-        observability::create_observer_with_cost_tracking(
+    let base_observer: Arc<dyn Observer> =
+        Arc::from(observability::create_observer_with_cost_tracking(
             &config.observability,
             cost_tracker,
             &config.cost,
-        ),
-    );
+        ));
     let observer: Arc<dyn Observer> = Arc::new(
         crate::plugins::bridge::observer::ObserverBridge::new(base_observer),
     );
@@ -2855,6 +2853,7 @@ pub async fn run(
         None
     };
     let native_tools = provider.supports_native_tools();
+    let security_summary_str = security.prompt_summary();
     let mut system_prompt = crate::channels::build_system_prompt_with_mode(
         &config.workspace_dir,
         &model_name,
@@ -2864,6 +2863,9 @@ pub async fn run(
         bootstrap_max_chars,
         native_tools,
         config.skills.prompt_injection_mode,
+        config.skip_bootstrap_files,
+        config.local_context.timezone.as_deref(),
+        Some(&security_summary_str),
     );
 
     // Append structured tool-use instructions with schemas (only for non-native providers)
@@ -3178,7 +3180,10 @@ pub async fn run(
 
             if let Some(system_message) = history.first_mut() {
                 if system_message.role == "system" {
-                    crate::agent::prompt::refresh_prompt_datetime(&mut system_message.content, config.local_context.timezone.as_deref());
+                    crate::agent::prompt::refresh_prompt_datetime(
+                        &mut system_message.content,
+                        config.local_context.timezone.as_deref(),
+                    );
                 }
             }
 
@@ -3371,7 +3376,7 @@ pub async fn run(
 }
 
 /// Process a single message through the full agent (with tools, peripherals, memory).
-/// Used by channels (Telegram, Discord, etc.) to enable hardware and tool use.
+/// Used by channels (Notion, Discord, Slack, etc.) to enable hardware and tool use.
 pub async fn process_message(config: Config, message: &str) -> Result<String> {
     process_message_with_session(config, message, None, None).await
 }
@@ -3396,13 +3401,12 @@ pub async fn process_message_with_session(
             } else {
                 None
             };
-            let base_observer: Arc<dyn Observer> = Arc::from(
-                observability::create_observer_with_cost_tracking(
+            let base_observer: Arc<dyn Observer> =
+                Arc::from(observability::create_observer_with_cost_tracking(
                     &config.observability,
                     cost_tracker,
                     &config.cost,
-                ),
-            );
+                ));
             Arc::new(crate::plugins::bridge::observer::ObserverBridge::new(
                 base_observer,
             ))
@@ -3515,6 +3519,7 @@ pub async fn process_message_with_session(
         None
     };
     let native_tools = provider.supports_native_tools();
+    let security_summary_str = security.prompt_summary();
     let mut system_prompt = crate::channels::build_system_prompt_with_mode(
         &config.workspace_dir,
         &model_name,
@@ -3524,6 +3529,9 @@ pub async fn process_message_with_session(
         bootstrap_max_chars,
         native_tools,
         config.skills.prompt_injection_mode,
+        config.skip_bootstrap_files,
+        config.local_context.timezone.as_deref(),
+        Some(&security_summary_str),
     );
     if !native_tools {
         system_prompt.push_str(&build_tool_instructions(&tools_registry));
@@ -3640,14 +3648,14 @@ mod tests {
         maybe_inject_cron_add_delivery(
             "cron_add",
             &mut args,
-            "telegram",
+            "notion",
             Some("-10012345"),
             "custom:https://llm.example.com/v1",
             "gpt-oss:20b",
         );
 
         assert_eq!(args["delivery"]["mode"], "announce");
-        assert_eq!(args["delivery"]["channel"], "telegram");
+        assert_eq!(args["delivery"]["channel"], "notion");
         assert_eq!(args["delivery"]["to"], "-10012345");
         assert_eq!(args["model"], "gpt-oss:20b");
     }
@@ -3667,7 +3675,7 @@ mod tests {
         maybe_inject_cron_add_delivery(
             "cron_add",
             &mut args,
-            "telegram",
+            "slack",
             Some("-10012345"),
             "openrouter",
             "anthropic/claude-sonnet-4.6",
@@ -3687,7 +3695,7 @@ mod tests {
         maybe_inject_cron_add_delivery(
             "cron_add",
             &mut args,
-            "telegram",
+            "slack",
             Some("-10012345"),
             "openrouter",
             "anthropic/claude-sonnet-4.6",
@@ -4631,7 +4639,7 @@ mod tests {
             0.0,
             true,
             Some(&approval_mgr),
-            "telegram",
+            "slack",
             &crate::config::MultimodalConfig::default(),
             4,
             None,
@@ -4702,7 +4710,7 @@ mod tests {
             0.0,
             true,
             Some(&approval_mgr),
-            "telegram",
+            "slack",
             &crate::config::MultimodalConfig::default(),
             4,
             None,
@@ -4761,7 +4769,7 @@ mod tests {
             0.0,
             true,
             Some(&approval_mgr),
-            "telegram",
+            "slack",
             &crate::config::MultimodalConfig::default(),
             4,
             None,
@@ -4813,7 +4821,7 @@ mod tests {
                 .confirm_non_cli_pending_request(
                     &prompt.request_id,
                     "alice",
-                    "telegram",
+                    "slack",
                     "chat-approval",
                 )
                 .expect("pending approval should confirm");
@@ -4837,7 +4845,7 @@ mod tests {
             0.0,
             true,
             Some(approval_mgr.as_ref()),
-            "telegram",
+            "slack",
             Some(NonCliApprovalContext {
                 sender: "alice".to_string(),
                 reply_target: "chat-approval".to_string(),
@@ -4893,7 +4901,7 @@ mod tests {
                 .confirm_non_cli_pending_request(
                     &prompt.request_id,
                     "alice",
-                    "telegram",
+                    "slack",
                     "chat-approved-flag",
                 )
                 .expect("pending approval should confirm");
@@ -4917,7 +4925,7 @@ mod tests {
             0.0,
             true,
             Some(approval_mgr.as_ref()),
-            "telegram",
+            "slack",
             Some(NonCliApprovalContext {
                 sender: "alice".to_string(),
                 reply_target: "chat-approved-flag".to_string(),
@@ -4982,7 +4990,7 @@ mod tests {
             0.0,
             true,
             Some(&approval_mgr),
-            "telegram",
+            "slack",
             &crate::config::MultimodalConfig::default(),
             4,
             None,
@@ -5037,7 +5045,7 @@ mod tests {
             0.0,
             true,
             None,
-            "telegram",
+            "slack",
             &crate::config::MultimodalConfig::default(),
             4,
             None,
@@ -7296,6 +7304,9 @@ Let me check the result."#;
             None, // no bootstrap_max_chars
             true, // native_tools
             crate::config::SkillsPromptInjectionMode::Full,
+            false,
+            None,
+            None,
         );
 
         // Must contain zero XML protocol artifacts

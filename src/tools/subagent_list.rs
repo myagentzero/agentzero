@@ -34,6 +34,17 @@ impl Tool for SubAgentListTool {
          Filter by status: running, completed, failed, killed, or all (default)."
     }
 
+    fn prompt_hint(&self) -> Option<&str> {
+        Some(
+            "List background sub-agent sessions. Use when: checking which sub-agents are running or reviewing completed work. \
+             Don't use when: managing a specific session (use subagent_manage).",
+        )
+    }
+
+    fn prompt_hint_compact(&self) -> &str {
+        "List background sub-agent sessions."
+    }
+
     fn parameters_schema(&self) -> serde_json::Value {
         json!({
             "type": "object",

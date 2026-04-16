@@ -1112,16 +1112,16 @@ mod tests {
     #[test]
     fn create_and_confirm_pending_non_cli_approval_request() {
         let mgr = ApprovalManager::from_config(&supervised_config());
-        let req = mgr.create_non_cli_pending_request("shell", "alice", "telegram", "chat-1", None);
+        let req = mgr.create_non_cli_pending_request("shell", "alice", "notion", "chat-1", None);
         assert_eq!(req.tool_name, "shell");
         assert!(req.request_id.starts_with("apr-"));
 
         let confirmed = mgr
-            .confirm_non_cli_pending_request(&req.request_id, "alice", "telegram", "chat-1")
+            .confirm_non_cli_pending_request(&req.request_id, "alice", "notion", "chat-1")
             .expect("request should confirm");
         assert_eq!(confirmed.request_id, req.request_id);
         assert!(
-            mgr.confirm_non_cli_pending_request(&req.request_id, "alice", "telegram", "chat-1")
+            mgr.confirm_non_cli_pending_request(&req.request_id, "alice", "notion", "chat-1")
                 .is_err()
         );
     }
@@ -1129,10 +1129,10 @@ mod tests {
     #[test]
     fn create_and_reject_pending_non_cli_approval_request() {
         let mgr = ApprovalManager::from_config(&supervised_config());
-        let req = mgr.create_non_cli_pending_request("shell", "alice", "telegram", "chat-1", None);
+        let req = mgr.create_non_cli_pending_request("shell", "alice", "notion", "chat-1", None);
 
         let rejected = mgr
-            .reject_non_cli_pending_request(&req.request_id, "alice", "telegram", "chat-1")
+            .reject_non_cli_pending_request(&req.request_id, "alice", "notion", "chat-1")
             .expect("request should reject");
         assert_eq!(rejected.request_id, req.request_id);
         assert!(!mgr.has_non_cli_pending_request(&req.request_id));
@@ -1141,7 +1141,7 @@ mod tests {
     #[test]
     fn pending_non_cli_resolution_is_recorded_and_consumed() {
         let mgr = ApprovalManager::from_config(&supervised_config());
-        let req = mgr.create_non_cli_pending_request("shell", "alice", "telegram", "chat-1", None);
+        let req = mgr.create_non_cli_pending_request("shell", "alice", "notion", "chat-1", None);
 
         mgr.record_non_cli_pending_resolution(&req.request_id, ApprovalResponse::Yes);
         assert_eq!(
@@ -1154,16 +1154,16 @@ mod tests {
     #[test]
     fn pending_non_cli_approval_requires_same_sender_and_channel() {
         let mgr = ApprovalManager::from_config(&supervised_config());
-        let req = mgr.create_non_cli_pending_request("shell", "alice", "telegram", "chat-1", None);
+        let req = mgr.create_non_cli_pending_request("shell", "alice", "notion", "chat-1", None);
 
         let err = mgr
-            .confirm_non_cli_pending_request(&req.request_id, "bob", "telegram", "chat-1")
+            .confirm_non_cli_pending_request(&req.request_id, "bob", "notion", "chat-1")
             .expect_err("mismatched sender should fail");
         assert_eq!(err, PendingApprovalError::RequesterMismatch);
 
         // Request remains pending after mismatch.
         let pending =
-            mgr.list_non_cli_pending_requests(Some("alice"), Some("telegram"), Some("chat-1"));
+            mgr.list_non_cli_pending_requests(Some("alice"), Some("notion"), Some("chat-1"));
         assert_eq!(pending.len(), 1);
 
         let err = mgr
@@ -1172,7 +1172,7 @@ mod tests {
         assert_eq!(err, PendingApprovalError::RequesterMismatch);
 
         let err = mgr
-            .confirm_non_cli_pending_request(&req.request_id, "alice", "telegram", "chat-2")
+            .confirm_non_cli_pending_request(&req.request_id, "alice", "notion", "chat-2")
             .expect_err("mismatched reply target should fail");
         assert_eq!(err, PendingApprovalError::RequesterMismatch);
     }
@@ -1180,25 +1180,25 @@ mod tests {
     #[test]
     fn list_pending_non_cli_approvals_filters_scope() {
         let mgr = ApprovalManager::from_config(&supervised_config());
-        mgr.create_non_cli_pending_request("shell", "alice", "telegram", "chat-1", None);
-        mgr.create_non_cli_pending_request("file_write", "bob", "telegram", "chat-1", None);
+        mgr.create_non_cli_pending_request("shell", "alice", "slack", "chat-1", None);
+        mgr.create_non_cli_pending_request("file_write", "bob", "slack", "chat-1", None);
         mgr.create_non_cli_pending_request("browser", "alice", "discord", "chat-9", None);
-        mgr.create_non_cli_pending_request("schedule", "alice", "telegram", "chat-2", None);
+        mgr.create_non_cli_pending_request("schedule", "alice", "slack", "chat-2", None);
 
-        let alice_telegram =
-            mgr.list_non_cli_pending_requests(Some("alice"), Some("telegram"), Some("chat-1"));
-        assert_eq!(alice_telegram.len(), 1);
-        assert_eq!(alice_telegram[0].tool_name, "shell");
+        let alice_slack =
+            mgr.list_non_cli_pending_requests(Some("alice"), Some("slack"), Some("chat-1"));
+        assert_eq!(alice_slack.len(), 1);
+        assert_eq!(alice_slack[0].tool_name, "shell");
 
-        let telegram_chat1 =
-            mgr.list_non_cli_pending_requests(None, Some("telegram"), Some("chat-1"));
-        assert_eq!(telegram_chat1.len(), 2);
+        let slack_chat1 =
+            mgr.list_non_cli_pending_requests(None, Some("slack"), Some("chat-1"));
+        assert_eq!(slack_chat1.len(), 2);
     }
 
     #[test]
     fn pending_non_cli_approval_expiry_is_pruned() {
         let mgr = ApprovalManager::from_config(&supervised_config());
-        let req = mgr.create_non_cli_pending_request("shell", "alice", "telegram", "chat-1", None);
+        let req = mgr.create_non_cli_pending_request("shell", "alice", "slack", "chat-1", None);
 
         {
             let mut pending = mgr.pending_non_cli_requests.lock();
@@ -1209,7 +1209,7 @@ mod tests {
         let rows = mgr.list_non_cli_pending_requests(None, None, None);
         assert!(rows.is_empty());
         let err = mgr
-            .confirm_non_cli_pending_request(&req.request_id, "alice", "telegram", "chat-1")
+            .confirm_non_cli_pending_request(&req.request_id, "alice", "slack", "chat-1")
             .expect_err("expired request should not confirm");
         assert_eq!(err, PendingApprovalError::NotFound);
     }
@@ -1217,7 +1217,7 @@ mod tests {
     #[test]
     fn non_cli_approval_actor_defaults_to_allow_when_not_configured() {
         let mgr = ApprovalManager::from_config(&supervised_config());
-        assert!(mgr.is_non_cli_approval_actor_allowed("telegram", "alice"));
+        assert!(mgr.is_non_cli_approval_actor_allowed("slack", "alice"));
         assert!(mgr.is_non_cli_approval_actor_allowed("discord", "bob"));
     }
 
@@ -1235,17 +1235,17 @@ mod tests {
         let mut cfg = supervised_config();
         cfg.non_cli_approval_approvers = vec![
             "alice".to_string(),
-            "telegram:bob".to_string(),
+            "slack:bob".to_string(),
             "discord:*".to_string(),
             "*:carol".to_string(),
         ];
         let mgr = ApprovalManager::from_config(&cfg);
 
-        assert!(mgr.is_non_cli_approval_actor_allowed("telegram", "alice"));
-        assert!(mgr.is_non_cli_approval_actor_allowed("telegram", "bob"));
+        assert!(mgr.is_non_cli_approval_actor_allowed("slack", "alice"));
+        assert!(mgr.is_non_cli_approval_actor_allowed("slack", "bob"));
         assert!(mgr.is_non_cli_approval_actor_allowed("discord", "anyone"));
 
-        assert!(!mgr.is_non_cli_approval_actor_allowed("telegram", "mallory"));
+        assert!(!mgr.is_non_cli_approval_actor_allowed("slack", "mallory"));
     }
 
     #[test]
@@ -1272,7 +1272,7 @@ mod tests {
         let mgr = ApprovalManager::from_config(&cfg);
 
         assert_eq!(
-            mgr.non_cli_natural_language_approval_mode_for_channel("telegram"),
+            mgr.non_cli_natural_language_approval_mode_for_channel("slack"),
             NonCliNaturalLanguageApprovalMode::Direct
         );
         assert_eq!(
@@ -1288,7 +1288,7 @@ mod tests {
 
         let mut mode_overrides = HashMap::new();
         mode_overrides.insert(
-            "telegram".to_string(),
+            "slack".to_string(),
             NonCliNaturalLanguageApprovalMode::Disabled,
         );
         mode_overrides.insert(
@@ -1309,17 +1309,17 @@ mod tests {
             &["mock_price".to_string()],
             &["shell".to_string()],
             &command_context_rules,
-            &["telegram:alice".to_string()],
+            &["slack:alice".to_string()],
             NonCliNaturalLanguageApprovalMode::Direct,
             &mode_overrides,
         );
 
         assert!(!mgr.needs_approval("mock_price"));
         assert!(mgr.needs_approval("shell"));
-        assert!(mgr.is_non_cli_approval_actor_allowed("telegram", "alice"));
-        assert!(!mgr.is_non_cli_approval_actor_allowed("telegram", "bob"));
+        assert!(mgr.is_non_cli_approval_actor_allowed("slack", "alice"));
+        assert!(!mgr.is_non_cli_approval_actor_allowed("slack", "bob"));
         assert_eq!(
-            mgr.non_cli_natural_language_approval_mode_for_channel("telegram"),
+            mgr.non_cli_natural_language_approval_mode_for_channel("slack"),
             NonCliNaturalLanguageApprovalMode::Disabled
         );
         assert_eq!(
@@ -1327,7 +1327,7 @@ mod tests {
             NonCliNaturalLanguageApprovalMode::RequestConfirm
         );
         assert_eq!(
-            mgr.non_cli_natural_language_approval_mode_for_channel("slack"),
+            mgr.non_cli_natural_language_approval_mode_for_channel("notion"),
             NonCliNaturalLanguageApprovalMode::Direct
         );
         assert!(
@@ -1372,13 +1372,13 @@ mod tests {
             "shell",
             &serde_json::json!({"command": "ls"}),
             ApprovalResponse::Yes,
-            "telegram",
+            "slack",
         );
 
         let log = mgr.audit_log();
         assert_eq!(log.len(), 1);
         assert!(!log[0].timestamp.is_empty());
-        assert_eq!(log[0].channel, "telegram");
+        assert_eq!(log[0].channel, "slack");
     }
 
     // ── summarize_args ───────────────────────────────────────

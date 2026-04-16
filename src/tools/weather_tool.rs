@@ -240,7 +240,9 @@ impl Tool for WeatherTool {
     }
 
     fn prompt_hint(&self) -> Option<&str> {
-        Some("Get weather forecast for US locations. Use when: user asks about weather. Requires lat/lon coordinates; US-only coverage.")
+        Some(
+            "Get weather forecast for US locations. Use when: user asks about weather. Requires lat/lon coordinates; US-only coverage.",
+        )
     }
 
     fn prompt_hint_compact(&self) -> &str {

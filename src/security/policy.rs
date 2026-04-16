@@ -387,10 +387,7 @@ fn extract_heredoc_delimiter(line: &str) -> Option<String> {
                     } else {
                         // Delimiter may be followed by more text on the same
                         // line (rare but legal).  Take only the first word.
-                        rest.split_whitespace()
-                            .next()
-                            .unwrap_or("")
-                            .to_string()
+                        rest.split_whitespace().next().unwrap_or("").to_string()
                     };
 
                     if delim.is_empty() {
@@ -1135,7 +1132,8 @@ impl SecurityPolicy {
         for segment in &segments {
             let cmd_part = skip_env_assignments(segment);
             let tokens = split_shell_tokens(cmd_part);
-            let executable = strip_wrapping_quotes(tokens.first().map_or("", |s| s.as_str())).trim();
+            let executable =
+                strip_wrapping_quotes(tokens.first().map_or("", |s| s.as_str())).trim();
             let base_cmd = executable.rsplit('/').next().unwrap_or("").trim();
 
             if base_cmd.is_empty() {
@@ -3583,7 +3581,8 @@ mod tests {
         p.allowed_commands.push("python3".into());
         p.block_high_risk_commands = false;
 
-        let cmd = "python3 << 'PYEOF'\nimport feedparser, json\nfrom datetime import datetime\nPYEOF";
+        let cmd =
+            "python3 << 'PYEOF'\nimport feedparser, json\nfrom datetime import datetime\nPYEOF";
         assert!(
             p.is_command_allowed(cmd),
             "python3 heredoc should be allowed when python3 is in allowlist"

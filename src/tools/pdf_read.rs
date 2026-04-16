@@ -36,8 +36,18 @@ impl Tool for PdfReadTool {
 
     fn description(&self) -> &str {
         "Extract plain text from a PDF file in the workspace. \
-         Returns all readable text. Image-only or encrypted PDFs return an empty result. \
-         Requires the 'rag-pdf' build feature."
+         Returns all readable text. Image-only or encrypted PDFs return an empty result."
+    }
+
+    fn prompt_hint(&self) -> Option<&str> {
+        Some(
+            "Read PDF document text. Use when: extracting text content from .pdf files. \
+             Don't use when: the file is a different document format (use docx_read, xlsx_read, or pptx_read).",
+        )
+    }
+
+    fn prompt_hint_compact(&self) -> &str {
+        "Extract text from PDF files."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {

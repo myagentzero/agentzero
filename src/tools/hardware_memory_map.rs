@@ -61,7 +61,9 @@ impl Tool for HardwareMemoryMapTool {
     }
 
     fn prompt_hint(&self) -> Option<&str> {
-        Some("Return flash and RAM address ranges for connected hardware. Use when: user asks for 'upper and lower memory addresses', 'memory map', or 'readable addresses'.")
+        Some(
+            "Return flash and RAM address ranges for connected hardware. Use when: user asks for 'upper and lower memory addresses', 'memory map', or 'readable addresses'.",
+        )
     }
 
     fn prompt_hint_compact(&self) -> &str {

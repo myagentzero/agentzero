@@ -612,7 +612,9 @@ impl Tool for ComposioTool {
     }
 
     fn prompt_hint(&self) -> Option<&str> {
-        Some("Execute actions on 1000+ apps via Composio (Gmail, Notion, GitHub, Slack, etc.). Use action='list' to discover, 'execute' to run (optionally with connected_account_id), 'connect' to OAuth.")
+        Some(
+            "Execute actions on 1000+ apps via Composio (Gmail, Notion, GitHub, Slack, etc.). Use action='list' to discover, 'execute' to run (optionally with connected_account_id), 'connect' to OAuth.",
+        )
     }
 
     fn prompt_hint_compact(&self) -> &str {

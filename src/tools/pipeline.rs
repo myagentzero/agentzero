@@ -152,7 +152,12 @@ impl PipelineTool {
     ) -> std::result::Result<Vec<StepResult>, PipelineError> {
         use tokio::task::JoinSet;
 
-        tracing::info!(steps = steps.len(), "⚙️  Pipeline launching {} parallel step{}", steps.len(), if steps.len() == 1 { "" } else { "s" });
+        tracing::info!(
+            steps = steps.len(),
+            "⚙️  Pipeline launching {} parallel step{}",
+            steps.len(),
+            if steps.len() == 1 { "" } else { "s" }
+        );
 
         let mut join_set = JoinSet::new();
 

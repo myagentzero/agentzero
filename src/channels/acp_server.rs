@@ -265,12 +265,11 @@ impl AcpServer {
         let session_id = Uuid::new_v4().to_string();
 
         // Build agent from global config
-        let agent = Agent::from_config(&self.config)
-            .map_err(|e| RpcError {
-                code: INTERNAL_ERROR,
-                message: format!("Failed to create agent: {e}"),
-                data: None,
-            })?;
+        let agent = Agent::from_config(&self.config).map_err(|e| RpcError {
+            code: INTERNAL_ERROR,
+            message: format!("Failed to create agent: {e}"),
+            data: None,
+        })?;
 
         let now = Instant::now();
         sessions.insert(

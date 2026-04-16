@@ -40,7 +40,14 @@ impl TokenUsage {
         input_price_per_million: f64,
         output_price_per_million: f64,
     ) -> Self {
-        Self::with_cached(model, input_tokens, output_tokens, 0, input_price_per_million, output_price_per_million)
+        Self::with_cached(
+            model,
+            input_tokens,
+            output_tokens,
+            0,
+            input_price_per_million,
+            output_price_per_million,
+        )
     }
 
     /// Create a new token usage record with cached token count.

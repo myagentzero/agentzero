@@ -1097,7 +1097,9 @@ impl Tool for ModelRoutingConfigTool {
     }
 
     fn prompt_hint(&self) -> Option<&str> {
-        Some("Configure default model, scenario routing, and delegate agents. Use for natural-language requests like: 'set conversation to kimi and coding to gpt-5.3-codex'.")
+        Some(
+            "Configure default model, scenario routing, and delegate agents. Use for natural-language requests like: 'set conversation to kimi and coding to gpt-5.3-codex'.",
+        )
     }
 
     fn prompt_hint_compact(&self) -> &str {

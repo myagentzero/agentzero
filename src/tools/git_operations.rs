@@ -625,7 +625,9 @@ impl Tool for GitOperationsTool {
     }
 
     fn prompt_hint(&self) -> Option<&str> {
-        Some("Perform Git operations (status, diff, log, branch, commit, etc.). Use when: version control tasks. Prefer over shelling out to git.")
+        Some(
+            "Perform Git operations (status, diff, log, branch, commit, etc.). Use when: version control tasks. Prefer over shelling out to git.",
+        )
     }
 
     fn prompt_hint_compact(&self) -> &str {

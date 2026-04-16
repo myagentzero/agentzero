@@ -184,6 +184,17 @@ impl Tool for ManageAuthProfileTool {
          tokens, or when you encounter expired/rate-limited credentials."
     }
 
+    fn prompt_hint(&self) -> Option<&str> {
+        Some(
+            "Manage auth profiles and tokens. Use when: user asks about accounts, switching providers, or refreshing expired tokens. \
+             Don't use when: diagnosing non-auth API errors (use provider_status).",
+        )
+    }
+
+    fn prompt_hint_compact(&self) -> &str {
+        "Manage auth profiles and tokens."
+    }
+
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",

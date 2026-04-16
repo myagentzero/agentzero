@@ -133,13 +133,13 @@ impl PromptSection for IdentitySection {
             "IDENTITY.md",
             "USER.md",
             "HEARTBEAT.md",
-            "BOOTSTRAP.md",
         ] {
-            inject_workspace_file(&mut prompt, ctx.workspace_dir, file);
+            inject_workspace_file(&mut prompt, ctx.workspace_dir, file, BOOTSTRAP_MAX_CHARS);
         }
-        let memory_path = ctx.workspace_dir.join("MEMORY.md");
-        if memory_path.exists() {
-            inject_workspace_file(&mut prompt, ctx.workspace_dir, "MEMORY.md");
+        for file in ["BOOTSTRAP.md", "MEMORY.md"] {
+            if ctx.workspace_dir.join(file).exists() {
+                inject_workspace_file(&mut prompt, ctx.workspace_dir, file, BOOTSTRAP_MAX_CHARS);
+            }
         }
 
         let extra_files = ctx
@@ -147,7 +147,7 @@ impl PromptSection for IdentitySection {
             .map_or(&[][..], |cfg| cfg.extra_files.as_slice());
         for file in extra_files {
             if let Some(safe_relative) = normalize_openclaw_identity_extra_file(file) {
-                inject_workspace_file(&mut prompt, ctx.workspace_dir, safe_relative);
+                inject_workspace_file(&mut prompt, ctx.workspace_dir, safe_relative, BOOTSTRAP_MAX_CHARS);
             }
         }
 
@@ -264,7 +264,7 @@ impl PromptSection for DateTimeSection {
 
 /// Format the current datetime using the configured timezone override,
 /// falling back to the system local timezone.
-fn format_datetime(timezone_override: Option<&str>) -> String {
+pub(crate) fn format_datetime(timezone_override: Option<&str>) -> String {
     if let Some(tz_name) = timezone_override {
         if let Ok(tz) = tz_name.parse::<chrono_tz::Tz>() {
             let now = Utc::now().with_timezone(&tz);
@@ -290,7 +290,12 @@ impl PromptSection for ChannelMediaSection {
     }
 }
 
-fn inject_workspace_file(prompt: &mut String, workspace_dir: &Path, filename: &str) {
+pub(crate) fn inject_workspace_file(
+    prompt: &mut String,
+    workspace_dir: &Path,
+    filename: &str,
+    max_chars: usize,
+) {
     let path = workspace_dir.join(filename);
     match std::fs::read_to_string(&path) {
         Ok(content) => {
@@ -299,22 +304,23 @@ fn inject_workspace_file(prompt: &mut String, workspace_dir: &Path, filename: &s
                 return;
             }
             let _ = writeln!(prompt, "### {filename}\n");
-            let truncated = if trimmed.chars().count() > BOOTSTRAP_MAX_CHARS {
+            let truncated = if trimmed.chars().count() > max_chars {
                 trimmed
                     .char_indices()
-                    .nth(BOOTSTRAP_MAX_CHARS)
+                    .nth(max_chars)
                     .map(|(idx, _)| &trimmed[..idx])
                     .unwrap_or(trimmed)
             } else {
                 trimmed
             };
-            prompt.push_str(truncated);
             if truncated.len() < trimmed.len() {
+                prompt.push_str(truncated);
                 let _ = writeln!(
                     prompt,
-                    "\n\n[... truncated at {BOOTSTRAP_MAX_CHARS} chars — use `read` for full file]\n"
+                    "\n\n[... truncated at {max_chars} chars — use `read` for full file]\n"
                 );
             } else {
+                prompt.push_str(trimmed);
                 prompt.push_str("\n\n");
             }
         }
@@ -324,7 +330,7 @@ fn inject_workspace_file(prompt: &mut String, workspace_dir: &Path, filename: &s
     }
 }
 
-fn normalize_openclaw_identity_extra_file(raw: &str) -> Option<&str> {
+pub(crate) fn normalize_openclaw_identity_extra_file(raw: &str) -> Option<&str> {
     use std::path::{Component, Path};
 
     let trimmed = raw.trim();
@@ -696,7 +702,8 @@ mod tests {
 
     #[test]
     fn refresh_prompt_datetime_with_timezone_override() {
-        let mut prompt = "## Current Date & Time\n\n2000-01-01 00:00:00 (UTC)\n\n## Next".to_string();
+        let mut prompt =
+            "## Current Date & Time\n\n2000-01-01 00:00:00 (UTC)\n\n## Next".to_string();
         super::refresh_prompt_datetime(&mut prompt, Some("America/Denver"));
         assert!(!prompt.contains("2000-01-01 00:00:00 (UTC)"));
         assert!(prompt.contains("America/Denver"));
@@ -704,7 +711,8 @@ mod tests {
 
     #[test]
     fn refresh_prompt_datetime_invalid_timezone_falls_back_to_local() {
-        let mut prompt = "## Current Date & Time\n\n2000-01-01 00:00:00 (UTC)\n\n## Next".to_string();
+        let mut prompt =
+            "## Current Date & Time\n\n2000-01-01 00:00:00 (UTC)\n\n## Next".to_string();
         super::refresh_prompt_datetime(&mut prompt, Some("Invalid/Timezone"));
         assert!(!prompt.contains("2000-01-01 00:00:00 (UTC)"));
         // Falls back to local — should not contain the invalid timezone name

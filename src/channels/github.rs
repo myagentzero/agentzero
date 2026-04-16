@@ -1,5 +1,6 @@
 use super::traits::{Channel, ChannelMessage, SendMessage};
 use async_trait::async_trait;
+use crate::config::schema::DEFAULT_USER_AGENT;
 use hmac::{Hmac, Mac};
 use reqwest::{StatusCode, header::HeaderMap};
 use sha2::Sha256;
@@ -156,7 +157,7 @@ impl GitHubChannel {
                 .bearer_auth(&self.access_token)
                 .header("Accept", "application/vnd.github+json")
                 .header("X-GitHub-Api-Version", GITHUB_API_VERSION)
-                .header("User-Agent", "ZeroClaw-GitHub-Channel")
+                .header("User-Agent", DEFAULT_USER_AGENT)
                 .json(&payload)
                 .send()
                 .await?;
@@ -460,8 +461,7 @@ impl Channel for GitHubChannel {
 
     async fn listen(&self, _tx: tokio::sync::mpsc::Sender<ChannelMessage>) -> anyhow::Result<()> {
         tracing::info!(
-            "GitHub channel active (webhook mode). \
-            Configure GitHub webhook to POST to your gateway's /github endpoint."
+            "GitHub channel active (webhook mode)."
         );
 
         loop {
@@ -476,7 +476,7 @@ impl Channel for GitHubChannel {
             .bearer_auth(&self.access_token)
             .header("Accept", "application/vnd.github+json")
             .header("X-GitHub-Api-Version", GITHUB_API_VERSION)
-            .header("User-Agent", "ZeroClaw-GitHub-Channel")
+            .header("User-Agent", DEFAULT_USER_AGENT)
             .send()
             .await
             .map(|resp| resp.status().is_success())

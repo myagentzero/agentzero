@@ -179,7 +179,6 @@ fn resolve_storage_path(workspace_dir: &Path) -> Result<PathBuf> {
     Ok(storage_path)
 }
 
-
 /// Persistent storage for cost records.
 struct CostStorage {
     path: PathBuf,
@@ -337,9 +336,7 @@ impl CostStorage {
     ///
     /// Returns `(by_model, total_tokens, request_count)` covering every
     /// record from the last 24 hours, regardless of which session created it.
-    fn build_daily_model_stats(
-        &self,
-        ) -> Result<(HashMap<String, ModelStats>, u64, usize)> {
+    fn build_daily_model_stats(&self) -> Result<(HashMap<String, ModelStats>, u64, usize)> {
         let cutoff = Utc::now() - chrono::Duration::hours(24);
         let mut by_model: HashMap<String, ModelStats> = HashMap::new();
         let mut total_tokens: u64 = 0;

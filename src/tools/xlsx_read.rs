@@ -500,6 +500,17 @@ impl Tool for XlsxReadTool {
          No formulas, charts, styles, or merged-cell awareness."
     }
 
+    fn prompt_hint(&self) -> Option<&str> {
+        Some(
+            "Read Excel spreadsheet data. Use when: extracting tabular data from .xlsx files. \
+             Don't use when: the file is CSV or another plain-text format (use file_read).",
+        )
+    }
+
+    fn prompt_hint_compact(&self) -> &str {
+        "Extract text and data from XLSX files."
+    }
+
     fn parameters_schema(&self) -> serde_json::Value {
         json!({
             "type": "object",

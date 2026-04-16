@@ -324,6 +324,9 @@ fn build_ws_system_prompt(
         bootstrap_max_chars,
         native_tools,
         config.skills.prompt_injection_mode,
+        false,
+        config.local_context.timezone.as_deref(),
+        None,
     );
     if !native_tools {
         prompt.push_str(&build_tool_instructions_from_specs(&tool_specs));
@@ -333,10 +336,16 @@ fn build_ws_system_prompt(
     prompt
 }
 
-fn refresh_ws_history_system_prompt_datetime(history: &mut [ChatMessage], timezone_override: Option<&str>) {
+fn refresh_ws_history_system_prompt_datetime(
+    history: &mut [ChatMessage],
+    timezone_override: Option<&str>,
+) {
     if let Some(system_message) = history.first_mut() {
         if system_message.role == "system" {
-            crate::agent::prompt::refresh_prompt_datetime(&mut system_message.content, timezone_override);
+            crate::agent::prompt::refresh_prompt_datetime(
+                &mut system_message.content,
+                timezone_override,
+            );
         }
     }
 }

@@ -253,8 +253,7 @@ pub async fn handle_api_skills(
     }
 
     let config_guard = state.config.lock();
-    let skills =
-        crate::skills::load_skills_with_config(&config_guard.workspace_dir, &config_guard);
+    let skills = crate::skills::load_skills_with_config(&config_guard.workspace_dir, &config_guard);
 
     let skills_json: Vec<serde_json::Value> = skills
         .into_iter()
@@ -483,9 +482,9 @@ pub async fn handle_api_integrations_credentials_put(
     // Apply credential updates based on integration
     match provider_key {
         "openrouter" | "anthropic" | "openai" | "google" | "deepseek" | "xai" | "mistral"
-        | "perplexity" | "bedrock" | "groq" | "together" | "cohere" | "fireworks"
-        | "venice" | "moonshot" | "stepfun" | "synthetic" | "opencode" | "zai" | "glm"
-        | "minimax" | "qwen" | "qianfan" | "doubao" | "volcengine" | "ark" | "siliconflow" => {
+        | "perplexity" | "bedrock" | "groq" | "together" | "cohere" | "fireworks" | "venice"
+        | "moonshot" | "stepfun" | "synthetic" | "opencode" | "zai" | "glm" | "minimax"
+        | "qwen" | "qianfan" | "doubao" | "volcengine" | "ark" | "siliconflow" => {
             if let Some(api_key) = fields.get("api_key").and_then(|v| v.as_str()) {
                 if !api_key.is_empty() && api_key != MASKED_SECRET {
                     config.api_key = Some(api_key.to_string());
@@ -519,6 +518,29 @@ pub async fn handle_api_integrations_credentials_put(
             }
             if !config.notion.api_key.is_empty() && !config.notion.database_id.is_empty() {
                 config.notion.enabled = true;
+            }
+        }
+        "jira" => {
+            if let Some(base_url) = fields.get("base_url").and_then(|v| v.as_str()) {
+                if !base_url.is_empty() && base_url != MASKED_SECRET {
+                    config.jira.base_url = base_url.to_string();
+                }
+            }
+            if let Some(email) = fields.get("email").and_then(|v| v.as_str()) {
+                if !email.is_empty() && email != MASKED_SECRET {
+                    config.jira.email = email.to_string();
+                }
+            }
+            if let Some(api_token) = fields.get("api_token").and_then(|v| v.as_str()) {
+                if !api_token.is_empty() && api_token != MASKED_SECRET {
+                    config.jira.api_token = api_token.to_string();
+                }
+            }
+            if !config.jira.base_url.is_empty()
+                && !config.jira.email.is_empty()
+                && !config.jira.api_token.is_empty()
+            {
+                config.jira.enabled = true;
             }
         }
         _ => {
@@ -587,6 +609,7 @@ fn provider_key_from_integration_id(id: &str) -> Option<&'static str> {
         "siliconflow" => Some("siliconflow"),
         "ollama" => Some("ollama"),
         "notion" => Some("notion"),
+        "jira" => Some("jira"),
         _ => None,
     }
 }
@@ -763,6 +786,42 @@ fn integration_settings_fields(
                     "input_type": "text",
                     "options": [],
                     "current_value": if has_db { &config.notion.database_id } else { "" },
+                }),
+            ];
+            (configured, fields)
+        }
+        "Jira" => {
+            let has_token = !config.jira.api_token.is_empty();
+            let has_url = !config.jira.base_url.is_empty();
+            let has_email = !config.jira.email.is_empty();
+            let configured = has_token && has_url && has_email;
+            let fields = vec![
+                serde_json::json!({
+                    "key": "base_url",
+                    "label": "Base URL",
+                    "required": true,
+                    "has_value": has_url,
+                    "input_type": "secret",
+                    "options": [],
+                    "masked_value": if has_url { Some(MASKED_SECRET) } else { None::<&str> },
+                }),
+                serde_json::json!({
+                    "key": "email",
+                    "label": "Email",
+                    "required": true,
+                    "has_value": has_email,
+                    "input_type": "secret",
+                    "options": [],
+                    "masked_value": if has_email { Some(MASKED_SECRET) } else { None::<&str> },
+                }),
+                serde_json::json!({
+                    "key": "api_token",
+                    "label": "API Token",
+                    "required": true,
+                    "has_value": has_token,
+                    "input_type": "secret",
+                    "options": [],
+                    "masked_value": if has_token { Some(MASKED_SECRET) } else { None::<&str> },
                 }),
             ];
             (configured, fields)
@@ -1128,6 +1187,9 @@ fn mask_sensitive_fields(config: &crate::config::Config) -> crate::config::Confi
     }
     mask_vec_secrets(&mut masked.gateway.paired_tokens);
     mask_required_secret(&mut masked.notion.api_key);
+    mask_required_secret(&mut masked.jira.api_token);
+    mask_required_secret(&mut masked.jira.email);
+    mask_required_secret(&mut masked.jira.base_url);
 
     if let Some(discord) = masked.channels_config.discord.as_mut() {
         mask_required_secret(&mut discord.bot_token);
@@ -1216,6 +1278,9 @@ fn restore_masked_sensitive_fields(
         &current.gateway.paired_tokens,
     );
     restore_required_secret(&mut incoming.notion.api_key, &current.notion.api_key);
+    restore_required_secret(&mut incoming.jira.api_token, &current.jira.api_token);
+    restore_required_secret(&mut incoming.jira.email, &current.jira.email);
+    restore_required_secret(&mut incoming.jira.base_url, &current.jira.base_url);
 
     if let (Some(incoming_ch), Some(current_ch)) = (
         incoming.channels_config.discord.as_mut(),
@@ -1279,7 +1344,6 @@ fn hydrate_config_for_save(
 #[cfg(test)]
 mod tests {
     use super::*;
-
 
     #[test]
     fn masking_keeps_toml_valid_and_preserves_api_keys_type() {

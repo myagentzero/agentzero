@@ -115,6 +115,8 @@ pub struct CronJob {
     pub enabled: bool,
     pub delivery: DeliveryConfig,
     pub delete_after_run: bool,
+    #[serde(default)]
+    pub light_context: bool,
     pub created_at: DateTime<Utc>,
     pub next_run: DateTime<Utc>,
     pub last_run: Option<DateTime<Utc>>,
@@ -144,6 +146,7 @@ pub struct CronJobPatch {
     pub model: Option<String>,
     pub session_target: Option<SessionTarget>,
     pub delete_after_run: Option<bool>,
+    pub light_context: Option<bool>,
 }
 
 #[cfg(test)]

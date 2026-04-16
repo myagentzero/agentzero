@@ -308,7 +308,9 @@ impl Tool for ScreenshotTool {
     }
 
     fn prompt_hint(&self) -> Option<&str> {
-        Some("Capture a screenshot of the current screen. Returns file path and base64-encoded PNG. Use when: visual verification, UI inspection, debugging displays.")
+        Some(
+            "Capture a screenshot of the current screen. Returns file path and base64-encoded PNG. Use when: visual verification, UI inspection, debugging displays.",
+        )
     }
 
     fn prompt_hint_compact(&self) -> &str {

@@ -292,14 +292,14 @@ mod tests {
     #[test]
     fn audit_event_with_actor() {
         let event = AuditEvent::new(AuditEventType::CommandExecution).with_actor(
-            "telegram".to_string(),
+            "slack".to_string(),
             Some("123".to_string()),
             Some("@alice".to_string()),
         );
 
         assert!(event.actor.is_some());
         let actor = event.actor.as_ref().unwrap();
-        assert_eq!(actor.channel, "telegram");
+        assert_eq!(actor.channel, "slack");
         assert_eq!(actor.user_id, Some("123".to_string()));
         assert_eq!(actor.username, Some("@alice".to_string()));
     }
@@ -322,7 +322,7 @@ mod tests {
     #[test]
     fn audit_event_serializes_to_json() {
         let event = AuditEvent::new(AuditEventType::CommandExecution)
-            .with_actor("telegram".to_string(), None, None)
+            .with_actor("slack".to_string(), None, None)
             .with_action("ls".to_string(), "low".to_string(), false, true)
             .with_result(true, Some(0), 15, None);
 
@@ -424,7 +424,7 @@ mod tests {
         let logger = AuditLogger::new(config, tmp.path().to_path_buf())?;
 
         logger.log_command_event(CommandExecutionLog {
-            channel: "telegram",
+            channel: "slack",
             command: "echo test",
             risk_level: "low",
             approved: false,

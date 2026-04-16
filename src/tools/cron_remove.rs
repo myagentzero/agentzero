@@ -58,7 +58,16 @@ impl Tool for CronRemoveTool {
     }
 
     fn prompt_hint(&self) -> Option<&str> {
-        Some("Remove a cron job by job_id.")
+        Some(
+            "Delete a cron job by job_id. \
+             Use when: user wants to cancel or replace a scheduled job. \
+             Use cron_list first if the job_id is unknown. \
+             Don't use when: user hasn't confirmed which job to remove.",
+        )
+    }
+
+    fn prompt_hint_compact(&self) -> &str {
+        "Delete a cron job by job_id."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {

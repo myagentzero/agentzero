@@ -30,8 +30,20 @@ impl Tool for ReactionTool {
 
     fn description(&self) -> &str {
         "Add or remove an emoji reaction on a message in any active channel. \
-         Provide the channel name (e.g. 'discord', 'slack'), the platform channel ID, \
+         Provide the channel name, the platform channel ID, \
          the platform message ID, and the emoji (Unicode character or platform shortcode)."
+    }
+
+    fn prompt_hint(&self) -> Option<&str> {
+        Some(
+            "Add or remove emoji reactions on messages in active channels (Slack, Discord, GitHub). \
+             Use when: acknowledging a message non-verbally, marking status (✅ done, 👀 reviewing, ⏳ in progress), \
+             showing quick feedback without sending a full reply."
+        )
+    }
+
+    fn prompt_hint_compact(&self) -> &str {
+        "Add or remove emoji reactions on messages in active channels."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {
@@ -40,11 +52,11 @@ impl Tool for ReactionTool {
             "properties": {
                 "channel": {
                     "type": "string",
-                    "description": "Name of the channel to react in (e.g. 'discord', 'slack', 'telegram')"
+                    "description": "Name of the channel to react in (e.g. 'slack')"
                 },
                 "channel_id": {
                     "type": "string",
-                    "description": "Platform-specific channel/conversation identifier (e.g. Discord channel snowflake, Slack channel ID)"
+                    "description": "Platform-specific channel/conversation identifier (e.g. Slack channel ID)"
                 },
                 "message_id": {
                     "type": "string",

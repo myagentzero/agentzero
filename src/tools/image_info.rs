@@ -155,7 +155,9 @@ impl Tool for ImageInfoTool {
     }
 
     fn prompt_hint(&self) -> Option<&str> {
-        Some("Read image file metadata (format, dimensions, size) and optionally base64-encode it. Use when: inspecting images, preparing visual data for analysis.")
+        Some(
+            "Read image file metadata (format, dimensions, size) and optionally base64-encode it. Use when: inspecting images, preparing visual data for analysis.",
+        )
     }
 
     fn prompt_hint_compact(&self) -> &str {

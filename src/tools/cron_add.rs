@@ -56,21 +56,25 @@ impl Tool for CronAddTool {
     }
 
     fn description(&self) -> &str {
-        "Create a scheduled cron job (shell or agent) with cron/at/every schedules. \
-         Use job_type='agent' with a prompt to run the AI agent on schedule. \
-         Use schedule.kind='at' for one-time reminders/delayed sends (recommended). \
-         Agent jobs with schedule.kind='cron' or schedule.kind='every' are recurring and require explicit recurring confirmation. \
-         To deliver output to a channel (Discord, Telegram, Slack, Email), set \
-         delivery={\"mode\":\"announce\",\"channel\":\"discord\",\"to\":\"<channel_id_or_chat_id>\"}. \
-         This is the preferred tool for sending scheduled/delayed messages to users via channels."
+        "Create a scheduled job. job_type='shell' runs a command; job_type='agent' runs the AI \
+         with a prompt. schedule.kind: 'at' (one-time, preferred for reminders/delayed sends), \
+         'cron' (recurring cron expr), 'every' (recurring interval ms). \
+         Recurring agent jobs (cron/every) require recurring_confirmed=true. \
+         Set delivery to route output to a channel (notion/slack/email). \
+         Set light_context=true for simple tasks that don't need workspace bootstrap files."
     }
 
     fn prompt_hint(&self) -> Option<&str> {
-        Some("Create a cron job. Supports schedule kinds: cron, at, every; and job types: shell or agent.")
+        Some(
+            "Create a scheduled job (shell command or agent prompt). \
+             Use when: user wants reminders, scheduled tasks, delayed messages, or recurring automation. \
+             Prefer schedule.kind='at' for one-time tasks. Set light_context=true for simple self-contained jobs. \
+             Don't use when: the task should run immediately (just do it inline).",
+        )
     }
 
     fn prompt_hint_compact(&self) -> &str {
-        "Create a cron job."
+        "Create a scheduled job (shell or agent)."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {
@@ -97,13 +101,18 @@ impl Tool for CronAddTool {
                 },
                 "delivery": {
                     "type": "object",
-                    "description": "Delivery config to send job output to a channel. Example: {\"mode\":\"announce\",\"channel\":\"discord\",\"to\":\"<channel_id>\"}",
+                    "description": "Delivery config to send job output to a channel. Example: {\"mode\":\"announce\",\"channel\":\"slack\",\"to\":\"<channel_id>\"}",
                     "properties": {
                         "mode": { "type": "string", "enum": ["none", "announce"], "description": "Set to 'announce' to deliver output to a channel" },
-                        "channel": { "type": "string", "enum": ["telegram", "discord", "slack", "email"], "description": "Channel type to deliver to" },
-                        "to": { "type": "string", "description": "Target: Discord channel ID, Telegram chat ID, Slack channel, etc." },
+                        "channel": { "type": "string", "enum": ["notion", "slack", "email"], "description": "Channel type to deliver to" },
+                        "to": { "type": "string", "description": "Target: Notion page ID, Slack channel, Email address, etc." },
                         "best_effort": { "type": "boolean", "description": "If true, delivery failure does not fail the job" }
                     }
+                },
+                "light_context": {
+                    "type": "boolean",
+                    "description": "Set true for a scheduled job that doesn't need full identity/persona/project context (e.g., a weather check, a log sweep, a simple reminder). Saves tokens for simple, self-contained tasks.",
+                    "default": false
                 },
                 "delete_after_run": { "type": "boolean" },
                 "approved": {
@@ -272,6 +281,11 @@ For one-time reminders, use schedule.kind='at' with an RFC3339 timestamp."
                     Schedule::At { .. } => {}
                 }
 
+                let light_context = args
+                    .get("light_context")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(false);
+
                 let delivery = match args.get("delivery") {
                     Some(v) => match serde_json::from_value::<DeliveryConfig>(v.clone()) {
                         Ok(cfg) => Some(cfg),
@@ -299,6 +313,7 @@ For one-time reminders, use schedule.kind='at' with an RFC3339 timestamp."
                     model,
                     delivery,
                     delete_after_run,
+                    light_context,
                 )
             }
         };
@@ -637,5 +652,30 @@ mod tests {
 
         assert!(result.success, "{:?}", result.error);
         assert!(result.output.contains("next_run"));
+    }
+
+    #[tokio::test]
+    async fn agent_at_job_with_light_context_stores_flag() {
+        let tmp = TempDir::new().unwrap();
+        let cfg = test_config(&tmp).await;
+        let tool = CronAddTool::new(cfg.clone(), test_security(&cfg));
+
+        let at = (chrono::Utc::now() + chrono::Duration::hours(1)).to_rfc3339();
+        let result = tool
+            .execute(json!({
+                "schedule": { "kind": "at", "at": at },
+                "job_type": "agent",
+                "prompt": "Quick weather check",
+                "light_context": true
+            }))
+            .await
+            .unwrap();
+
+        assert!(result.success, "{:?}", result.error);
+        let output: serde_json::Value = serde_json::from_str(&result.output).unwrap();
+        let job_id = output["id"].as_str().unwrap();
+
+        let job = crate::cron::get_job(&cfg, job_id).unwrap();
+        assert!(job.light_context);
     }
 }

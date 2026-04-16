@@ -149,9 +149,11 @@ fn load_skills_with_open_skills_config(
     let mut skills = Vec::new();
     let allow_scripts = config_allow_scripts.unwrap_or(false);
 
-    if let Some(open_skills_dir) =
-        ensure_open_skills_repo(config_open_skills_enabled, config_open_skills_dir, workspace_dir)
-    {
+    if let Some(open_skills_dir) = ensure_open_skills_repo(
+        config_open_skills_enabled,
+        config_open_skills_dir,
+        workspace_dir,
+    ) {
         skills.extend(load_open_skills(&open_skills_dir, allow_scripts));
     }
 
@@ -858,7 +860,6 @@ pub fn skills_to_prompt_with_mode(
     prompt
 }
 
-
 /// Get the skills directory path
 pub fn skills_dir(workspace_dir: &Path) -> PathBuf {
     workspace_dir.join("skills")
@@ -1258,9 +1259,8 @@ pub fn handle_command(command: crate::SkillCommands, config: &crate::config::Con
                 name
             );
             Ok(())
-        }
-        // TODO: Enable when SkillCommands::Test variant is added to the CLI.
-        // crate::SkillCommands::Test { name, verbose } => { ... }
+        } // TODO: Enable when SkillCommands::Test variant is added to the CLI.
+          // crate::SkillCommands::Test { name, verbose } => { ... }
     }
 }
 

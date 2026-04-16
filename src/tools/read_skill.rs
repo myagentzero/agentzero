@@ -35,7 +35,9 @@ impl Tool for ReadSkillTool {
     }
 
     fn prompt_hint(&self) -> Option<&str> {
-        Some("Load the full source for an available skill by name. Use when: compact mode only shows a summary and you need the complete skill instructions.")
+        Some(
+            "Load the full source for an available skill by name. Use when: compact mode only shows a summary and you need the complete skill instructions.",
+        )
     }
 
     fn prompt_hint_compact(&self) -> &str {

@@ -918,7 +918,7 @@ mod tests {
     #[test]
     fn heartbeat_delivery_target_requires_to_field() {
         let mut config = Config::default();
-        config.heartbeat.target = Some("telegram".into());
+        config.heartbeat.target = Some("slack".into());
         let err = heartbeat_delivery_target(&config).unwrap_err();
         assert!(
             err.to_string()

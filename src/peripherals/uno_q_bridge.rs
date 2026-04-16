@@ -44,7 +44,9 @@ impl Tool for UnoQGpioReadTool {
     }
 
     fn prompt_hint(&self) -> Option<&str> {
-        Some("Read GPIO pin value (0 or 1) on connected hardware (STM32, Arduino). Use when: checking sensor/button state, LED status.")
+        Some(
+            "Read GPIO pin value (0 or 1) on connected hardware (STM32, Arduino). Use when: checking sensor/button state, LED status.",
+        )
     }
 
     fn prompt_hint_compact(&self) -> &str {
@@ -108,7 +110,9 @@ impl Tool for UnoQGpioWriteTool {
     }
 
     fn prompt_hint(&self) -> Option<&str> {
-        Some("Set GPIO pin high (1) or low (0) on connected hardware. Use when: turning LED on/off, controlling actuators.")
+        Some(
+            "Set GPIO pin high (1) or low (0) on connected hardware. Use when: turning LED on/off, controlling actuators.",
+        )
     }
 
     fn prompt_hint_compact(&self) -> &str {

@@ -29,7 +29,9 @@ impl Tool for MemoryForgetTool {
     }
 
     fn prompt_hint(&self) -> Option<&str> {
-        Some("Delete a memory entry. Use when: memory is incorrect/stale or explicitly requested for removal. Don't use when: impact is uncertain.")
+        Some(
+            "Delete a memory entry. Use when: memory is incorrect/stale or explicitly requested for removal. Don't use when: impact is uncertain.",
+        )
     }
 
     fn prompt_hint_compact(&self) -> &str {

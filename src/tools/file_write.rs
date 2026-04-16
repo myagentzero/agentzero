@@ -44,7 +44,9 @@ impl Tool for FileWriteTool {
     }
 
     fn prompt_hint(&self) -> Option<&str> {
-        Some("Write file contents. Use when: applying focused edits, scaffolding files, updating docs/code. Don't use when: side effects are unclear or file ownership is uncertain.")
+        Some(
+            "Write file contents. Use when: applying focused edits, scaffolding files, updating docs/code. Don't use when: side effects are unclear or file ownership is uncertain.",
+        )
     }
 
     fn prompt_hint_compact(&self) -> &str {

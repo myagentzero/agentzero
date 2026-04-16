@@ -9,7 +9,7 @@ use super::traits::{Tool, ToolResult};
 use crate::config::schema::LocalContextConfig;
 use async_trait::async_trait;
 use chrono::{Local, Utc};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 pub struct LocalContextTool {
     city: Option<String>,

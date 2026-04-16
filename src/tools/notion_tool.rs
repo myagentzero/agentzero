@@ -176,7 +176,9 @@ impl Tool for NotionTool {
     }
 
     fn prompt_hint(&self) -> Option<&str> {
-        Some("Interact with Notion: query databases, read/create/update pages, and search. Use when: user references Notion content or wants to manage Notion pages.")
+        Some(
+            "Interact with Notion: query databases, read/create/update pages, and search. Use when: user references Notion content or wants to manage Notion pages.",
+        )
     }
 
     fn prompt_hint_compact(&self) -> &str {

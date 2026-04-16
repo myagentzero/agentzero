@@ -138,6 +138,17 @@ impl Tool for ProviderStatusTool {
          No parameters required."
     }
 
+    fn prompt_hint(&self) -> Option<&str> {
+        Some(
+            "Check API key spend and budget. Use when: user asks about remaining budget, spend, or key expiry. \
+             Don't use when: diagnosing connectivity or model availability issues.",
+        )
+    }
+
+    fn prompt_hint_compact(&self) -> &str {
+        "Check API key spend and budget."
+    }
+
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",

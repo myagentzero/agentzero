@@ -32,7 +32,9 @@ impl Tool for ArduinoUploadTool {
     }
 
     fn prompt_hint(&self) -> Option<&str> {
-        Some("Upload agent-generated Arduino sketch. Use when: user asks for 'make a heart', 'blink pattern', or custom LED behavior on Arduino. You write the full .ino code; ZeroClaw compiles and uploads it. Pin 13 = built-in LED on Uno.")
+        Some(
+            "Upload agent-generated Arduino sketch. Use when: user asks for 'make a heart', 'blink pattern', or custom LED behavior on Arduino. You write the full .ino code; ZeroClaw compiles and uploads it. Pin 13 = built-in LED on Uno.",
+        )
     }
 
     fn prompt_hint_compact(&self) -> &str {

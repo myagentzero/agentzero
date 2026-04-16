@@ -31,7 +31,9 @@ impl Tool for CalculatorTool {
     }
 
     fn prompt_hint(&self) -> Option<&str> {
-        Some("Perform arithmetic and statistical calculations. Use when: any numeric computation is needed. Don't use when: the answer is trivially obvious.")
+        Some(
+            "Perform arithmetic and statistical calculations. Use when: any numeric computation is needed. Don't use when: the answer is trivially obvious.",
+        )
     }
 
     fn prompt_hint_compact(&self) -> &str {

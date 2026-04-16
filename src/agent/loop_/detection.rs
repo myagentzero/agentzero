@@ -365,13 +365,34 @@ mod tests {
     #[test]
     fn failure_streak_triggers_warning() {
         let mut det = LoopDetector::new(default_config());
-        det.record_call("shell", r#"{"cmd":"bad1"}"#, "error: not found 1", false, Some("not found 1"));
-        det.record_call("shell", r#"{"cmd":"bad2"}"#, "error: not found 2", false, Some("not found 2"));
-        det.record_call("shell", r#"{"cmd":"bad3"}"#, "error: not found 3", false, Some("not found 3"));
+        det.record_call(
+            "shell",
+            r#"{"cmd":"bad1"}"#,
+            "error: not found 1",
+            false,
+            Some("not found 1"),
+        );
+        det.record_call(
+            "shell",
+            r#"{"cmd":"bad2"}"#,
+            "error: not found 2",
+            false,
+            Some("not found 2"),
+        );
+        det.record_call(
+            "shell",
+            r#"{"cmd":"bad3"}"#,
+            "error: not found 3",
+            false,
+            Some("not found 3"),
+        );
         match det.check() {
             DetectionVerdict::InjectWarning(msg) => {
                 assert!(msg.contains("failed 3 consecutive"), "msg: {msg}");
-                assert!(msg.contains("last error: not found 3"), "msg should contain last error: {msg}");
+                assert!(
+                    msg.contains("last error: not found 3"),
+                    "msg should contain last error: {msg}"
+                );
             }
             other => panic!("expected InjectWarning, got {other:?}"),
         }

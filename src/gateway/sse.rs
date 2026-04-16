@@ -88,11 +88,27 @@ fn runtime_trace_event_to_sse_json(event: &RuntimeTraceEvent) -> Option<serde_js
             "timestamp": event.timestamp,
         })),
         "llm_response" => {
-            let tokens_used = event.payload.get("tokens_used").and_then(|v| v.as_u64()).or_else(|| {
-                let input = event.payload.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
-                let output = event.payload.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
-                if input > 0 || output > 0 { Some(input + output) } else { None }
-            });
+            let tokens_used = event
+                .payload
+                .get("tokens_used")
+                .and_then(|v| v.as_u64())
+                .or_else(|| {
+                    let input = event
+                        .payload
+                        .get("input_tokens")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0);
+                    let output = event
+                        .payload
+                        .get("output_tokens")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0);
+                    if input > 0 || output > 0 {
+                        Some(input + output)
+                    } else {
+                        None
+                    }
+                });
             Some(serde_json::json!({
                 "type": "llm_response",
                 "provider": event.provider,

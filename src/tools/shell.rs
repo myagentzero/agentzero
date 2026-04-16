@@ -119,7 +119,9 @@ impl Tool for ShellTool {
     }
 
     fn prompt_hint(&self) -> Option<&str> {
-        Some("Execute terminal commands. Use when: running local checks, build/test commands, diagnostics. Don't use when: a safer dedicated tool exists, or command is destructive without approval.")
+        Some(
+            "Execute terminal commands. Use when: running local checks, build/test commands, diagnostics. Don't use when: a safer dedicated tool exists, or command is destructive without approval.",
+        )
     }
 
     fn prompt_hint_compact(&self) -> &str {

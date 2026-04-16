@@ -385,7 +385,7 @@ Examples:
 Start the long-running autonomous daemon.
 
 Launches the full ZeroClaw runtime: gateway server, all configured \
-channels (Telegram, Discord, Slack, etc.), heartbeat monitor, and \
+channels (Notion, Discord, Slack, etc.), heartbeat monitor, and \
 the cron scheduler. This is the recommended way to run ZeroClaw in \
 production or as an always-on assistant.
 
@@ -527,20 +527,19 @@ Examples:
         #[arg(long, value_enum, default_value_t = QuotaFormat::Text)]
         format: QuotaFormat,
     },
-    /// Manage channels (telegram, discord, slack, and more)
+    /// Manage channels (notion, discord, slack, and more)
     #[command(long_about = "\
 Manage communication channels.
 
 Add, remove, list, and health-check channels that connect ZeroClaw \
-to messaging platforms. Supported channel types: telegram, discord, \
-slack, whatsapp, signal, github, nextcloud, irc, email.
+to messaging platforms. Supported channel types: notion, discord, \
+slack, github, email.
 
 Examples:
   zeroclaw channel list
   zeroclaw channel doctor
-  zeroclaw channel add telegram '{\"bot_token\":\"...\",\"name\":\"my-bot\"}'
-  zeroclaw channel remove my-bot
-  zeroclaw channel bind-telegram zeroclaw_user")]
+  zeroclaw channel add notion '{\"bot_token\":\"...\",\"name\":\"my-bot\"}'
+  zeroclaw channel remove my-bot")]
     Channel {
         #[command(subcommand)]
         channel_command: ChannelCommands,
@@ -933,14 +932,30 @@ async fn main() -> Result<()> {
     }
 
     // Initialize logging - respects RUST_LOG env var, defaults to INFO
-    let subscriber = fmt::Subscriber::builder()
-        .with_timer(tracing_subscriber::fmt::time::ChronoLocal::rfc_3339())
-        .with_env_filter(
-            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
-        )
-        .finish();
+    // Detect if running under systemd (which adds its own timestamps)
+    let under_systemd =
+        std::env::var("INVOCATION_ID").is_ok() || std::env::var("JOURNAL_STREAM").is_ok();
 
-    tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
+    // Only add timestamps if not running under systemd to avoid duplication
+    if under_systemd {
+        let subscriber = fmt::Subscriber::builder()
+            .without_time()
+            .with_env_filter(
+                EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
+            )
+            .finish();
+        tracing::subscriber::set_global_default(subscriber)
+            .expect("setting default subscriber failed");
+    } else {
+        let subscriber = fmt::Subscriber::builder()
+            .with_timer(tracing_subscriber::fmt::time::ChronoLocal::rfc_3339())
+            .with_env_filter(
+                EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
+            )
+            .finish();
+        tracing::subscriber::set_global_default(subscriber)
+            .expect("setting default subscriber failed");
+    }
 
     // Onboard runs quick setup by default, interactive wizard with --interactive,
     // or full-screen TUI with --interactive-ui.

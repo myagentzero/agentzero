@@ -157,7 +157,10 @@ impl SlackChannel {
     }
 
     /// Configure ACK reaction policy for incoming messages.
-    pub fn with_ack_reaction(mut self, ack_reaction: Option<crate::config::AckReactionConfig>) -> Self {
+    pub fn with_ack_reaction(
+        mut self,
+        ack_reaction: Option<crate::config::AckReactionConfig>,
+    ) -> Self {
         self.ack_reaction = ack_reaction;
         self
     }

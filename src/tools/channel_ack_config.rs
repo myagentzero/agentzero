@@ -578,6 +578,17 @@ impl Tool for ChannelAckConfigTool {
         "Inspect and update configurable ACK emoji reaction policies for Discord/Slack under [channels_config.ack_reaction]. Supports enabling/disabling reactions, setting emoji pools, and rule-based conditions."
     }
 
+    fn prompt_hint(&self) -> Option<&str> {
+        Some(
+            "Manage ACK emoji reaction policies. Use when: user wants to configure, inspect, or test emoji reaction settings for Discord/Slack. \
+             Don't use when: sending messages or performing other channel operations.",
+        )
+    }
+
+    fn prompt_hint_compact(&self) -> &str {
+        "Manage ACK emoji reaction policies."
+    }
+
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",

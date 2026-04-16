@@ -40,7 +40,9 @@ impl Tool for HardwareMemoryReadTool {
     }
 
     fn prompt_hint(&self) -> Option<&str> {
-        Some("Read actual memory/register values from Nucleo via USB. Use when: user asks to 'read register values', 'read memory', 'dump lower memory 0-126', 'give address and value'. Params: address (hex, default 0x20000000), length (bytes, default 128).")
+        Some(
+            "Read actual memory/register values from Nucleo via USB. Use when: user asks to 'read register values', 'read memory', 'dump lower memory 0-126', 'give address and value'. Params: address (hex, default 0x20000000), length (bytes, default 128).",
+        )
     }
 
     fn prompt_hint_compact(&self) -> &str {

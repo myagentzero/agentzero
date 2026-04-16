@@ -41,6 +41,7 @@ import {
   Github,
   MapPin,
   Monitor,
+  Ticket,
 } from 'lucide-react';
 import type { SectionDef } from './types';
 
@@ -68,6 +69,33 @@ export const CONFIG_SECTIONS: SectionDef[] = [
       { key: 'default_model', label: 'Default Model', type: 'text', description: 'e.g. anthropic/claude-sonnet-4.6', defaultValue: 'anthropic/claude-sonnet-4.6' },
       { key: 'default_temperature', label: 'Temperature', type: 'number', min: 0, max: 2, step: 0.1, defaultValue: 0.7, description: 'Default: 0.7 (range 0.0–2.0)' },
       { key: 'model_support_vision', label: 'Model Supports Vision', type: 'toggle', description: 'Whether the model supports image inputs' },
+    ],
+  },
+
+  // ── Model Routing ────────────────────────────────────────────────
+  {
+    path: '',
+    category: 'general',
+    title: 'Model Routing',
+    description: 'Route requests to specialized models by task type',
+    icon: Router,
+    defaultCollapsed: true,
+    fields: [
+      { key: 'model_routes', label: 'Model Routes', type: 'route-list', description: 'Map hint names to provider + model combos' },
+    ],
+  },
+
+  // ── Query Classification ────────────────────────────────────────
+  {
+    path: 'query_classification',
+    category: 'general',
+    title: 'Query Classification',
+    description: 'Auto-classify messages to route to the right model',
+    icon: Filter,
+    defaultCollapsed: true,
+    fields: [
+      { key: 'enabled', label: 'Enabled', type: 'toggle', defaultValue: false, description: 'Enable automatic query classification' },
+      { key: 'rules', label: 'Classification Rules', type: 'classification-rule-list', description: 'Rules evaluated by priority (highest first). First match wins.' },
     ],
   },
 
@@ -804,6 +832,24 @@ export const CONFIG_SECTIONS: SectionDef[] = [
       { key: 'enabled', label: 'Enabled', type: 'toggle', defaultValue: true },
       { key: 'default_timeout_secs', label: 'Default Timeout (s)', type: 'number', min: 1, defaultValue: 300, description: 'Default: 300 (5 minutes)' },
       { key: 'default_channel', label: 'Default Channel', type: 'text', description: 'Preferred channel when none specified (e.g. slack, discord). Leave empty to use first available.' },
+    ],
+  },
+
+  // ── Jira ──────────────────────────────────────────────────────────
+  {
+    path: 'jira',
+    category: 'tools',
+    title: 'Jira',
+    description: 'Jira issue tracker integration',
+    icon: Ticket,
+    defaultCollapsed: true,
+    fields: [
+      { key: 'enabled', label: 'Enabled', type: 'toggle', defaultValue: false },
+      { key: 'base_url', label: 'Base URL', type: 'password', sensitive: true, description: 'e.g. https://yourcompany.atlassian.net' },
+      { key: 'email', label: 'Email', type: 'password', sensitive: true, description: 'Jira account email for API authentication' },
+      { key: 'api_token', label: 'API Token', type: 'password', sensitive: true, description: 'Jira API token (generate at id.atlassian.net)' },
+      { key: 'allowed_actions', label: 'Allowed Actions', type: 'tag-list', tagPlaceholder: 'e.g. search_tickets', description: 'Default: get_ticket. Options: get_ticket, search_tickets, comment_ticket, list_projects, myself' },
+      { key: 'timeout_secs', label: 'Timeout (s)', type: 'number', min: 1, defaultValue: 30, description: 'Default: 30' },
     ],
   },
 
