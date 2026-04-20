@@ -248,21 +248,8 @@ impl Tool for BgRunTool {
     }
 
     fn description(&self) -> &str {
-        "Execute a tool in the background and return a job ID immediately. \
-         Use this for long-running operations where you don't want to block. \
-         Check results with bg_status or wait for auto-injection in the next turn. \
-         Background tools have a 600-second maximum timeout."
-    }
-
-    fn prompt_hint(&self) -> Option<&str> {
-        Some(
-            "Run a tool in the background. Use when: the operation is long-running and you can continue other work. \
-             Check results with bg_status.",
-        )
-    }
-
-    fn prompt_hint_compact(&self) -> &str {
-        "Run a tool in the background."
+        "Run a tool in the background. Background tools have a 600-second maximum timeout. Check results with bg_status. \
+         Use when: the operation is long-running and you can continue other work. Don't use for getting around security rules."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {

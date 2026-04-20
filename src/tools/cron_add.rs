@@ -56,10 +56,7 @@ impl Tool for CronAddTool {
     }
 
     fn description(&self) -> &str {
-        "Create a scheduled job. job_type='shell' runs a command; job_type='agent' runs the AI \
-         with a prompt. schedule.kind: 'at' (one-time, preferred for reminders/delayed sends), \
-         'cron' (recurring cron expr), 'every' (recurring interval ms). \
-         Recurring agent jobs (cron/every) require recurring_confirmed=true. \
+        "Create a scheduled job. job_type='shell' runs a command; job_type='agent' runs the agent prompt \
          Set delivery to route output to a channel (notion/slack/email). \
          Set light_context=true for simple tasks that don't need workspace bootstrap files."
     }

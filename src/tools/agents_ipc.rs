@@ -166,18 +166,8 @@ impl Tool for AgentsListTool {
     }
 
     fn description(&self) -> &str {
-        "List online IPC agents on this host. Returns agent IDs, roles, and last-seen timestamps for agents within the staleness window."
-    }
-
-    fn prompt_hint(&self) -> Option<&str> {
-        Some(
-            "List online IPC agents. Use when: discovering peer agents on the host or checking agent liveness. \
-             Don't use when: sending messages to agents (use agents_send).",
-        )
-    }
-
-    fn prompt_hint_compact(&self) -> &str {
-        "List online IPC agents on this host."
+         "List online IPC agents. Use when: discovering peer agents on the host or checking agent liveness. \
+          Don't use when: sending messages to agents (use agents_send)."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {

@@ -37,11 +37,7 @@ impl Tool for ContentSearchTool {
     }
 
     fn description(&self) -> &str {
-        "Search file contents by regex pattern within the workspace. \
-         Supports ripgrep (rg) with grep fallback. \
-         Output modes: 'content' (matching lines with context), \
-         'files_with_matches' (file paths only), 'count' (match counts per file). \
-         Example: pattern='fn main', include='*.rs', output_mode='content'."
+        "Search file contents by regex pattern within the workspace."
     }
 
     fn prompt_hint(&self) -> Option<&str> {

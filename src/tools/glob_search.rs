@@ -24,20 +24,8 @@ impl Tool for GlobSearchTool {
     }
 
     fn description(&self) -> &str {
-        "Search for files matching a glob pattern within the workspace. \
-         Returns a sorted list of matching file paths relative to the workspace root. \
-         Examples: '**/*.rs' (all Rust files), 'src/**/mod.rs' (all mod.rs in src)."
-    }
-
-    fn prompt_hint(&self) -> Option<&str> {
-        Some(
-            "Find files by glob pattern. Use when: locating files by name or extension. \
-             Don't use when: searching file contents (use content_search).",
-        )
-    }
-
-    fn prompt_hint_compact(&self) -> &str {
-        "Find files by glob pattern."
+        "Find files by glob pattern. Use when: locating files by name or extension. \
+         Don't use when: searching file contents (use content_search)."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {

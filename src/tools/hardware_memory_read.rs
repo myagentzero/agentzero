@@ -36,16 +36,6 @@ impl Tool for HardwareMemoryReadTool {
     }
 
     fn description(&self) -> &str {
-        "Read actual memory/register values from Nucleo via USB. Use when: user asks to 'read register values', 'read memory at address', 'dump memory', 'lower memory 0-126', or 'give address and value'. Returns hex dump. Requires Nucleo connected via USB and probe feature. Params: address (hex, e.g. 0x20000000 for RAM start), length (bytes, default 128)."
-    }
-
-    fn prompt_hint(&self) -> Option<&str> {
-        Some(
-            "Read actual memory/register values from Nucleo via USB. Use when: user asks to 'read register values', 'read memory', 'dump lower memory 0-126', 'give address and value'. Params: address (hex, default 0x20000000), length (bytes, default 128).",
-        )
-    }
-
-    fn prompt_hint_compact(&self) -> &str {
         "Read actual memory/register values from Nucleo. Use when user asks to read registers, read memory, dump lower memory 0-126, or give address and value."
     }
 

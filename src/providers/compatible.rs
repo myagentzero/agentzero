@@ -435,16 +435,21 @@ impl OpenAiCompatibleProvider {
         }
     }
 
-    fn tool_specs_to_openai_format(tools: &[crate::tools::ToolSpec]) -> Vec<serde_json::Value> {
+    fn tool_specs_to_openai_format(tools: &[crate::tools::ToolSpec], model: &str) -> Vec<serde_json::Value> {
+        let strategy = Self::select_cleaning_strategy(model);
         tools
             .iter()
             .map(|tool| {
+                let cleaned_params = crate::tools::SchemaCleanr::clean(
+                    tool.parameters.clone(),
+                    strategy,
+                );
                 serde_json::json!({
                     "type": "function",
                     "function": {
                         "name": tool.name,
                         "description": tool.description,
-                        "parameters": tool.parameters
+                        "parameters": cleaned_params
                     }
                 })
             })
@@ -1675,19 +1680,39 @@ impl OpenAiCompatibleProvider {
         Ok(parsed)
     }
 
+    fn select_cleaning_strategy(model: &str) -> crate::tools::CleaningStrategy {
+        let model_lower = model.to_lowercase();
+
+        if model_lower.starts_with("gpt-") || model_lower.starts_with("o1-") || model_lower.starts_with("o3-") {
+            crate::tools::CleaningStrategy::OpenAI
+        } else if model_lower.starts_with("gemini-") || model_lower.contains("gemini") {
+            crate::tools::CleaningStrategy::Gemini
+        } else if model_lower.starts_with("claude-") || model_lower.contains("claude") {
+            crate::tools::CleaningStrategy::Anthropic
+        } else {
+            crate::tools::CleaningStrategy::OpenAI
+        }
+    }
+
     fn convert_tool_specs(
         tools: Option<&[crate::tools::ToolSpec]>,
+        model: &str,
     ) -> Option<Vec<serde_json::Value>> {
         tools.map(|items| {
+            let strategy = Self::select_cleaning_strategy(model);
             items
                 .iter()
                 .map(|tool| {
+                    let cleaned_params = crate::tools::SchemaCleanr::clean(
+                        tool.parameters.clone(),
+                        strategy,
+                    );
                     serde_json::json!({
                         "type": "function",
                         "function": {
                             "name": tool.name,
                             "description": tool.description,
-                            "parameters": tool.parameters,
+                            "parameters": cleaned_params,
                         }
                     })
                 })
@@ -2442,7 +2467,7 @@ impl Provider for OpenAiCompatibleProvider {
             )
         })?;
 
-        let tools = Self::convert_tool_specs(request.tools);
+        let tools = Self::convert_tool_specs(request.tools, model);
         let response_tools = tools.clone();
         let effective_messages = if self.merge_system_into_user {
             Self::flatten_system_messages(request.messages)
@@ -3993,7 +4018,7 @@ mod tests {
             }),
         }];
 
-        let tools = OpenAiCompatibleProvider::tool_specs_to_openai_format(&specs);
+        let tools = OpenAiCompatibleProvider::tool_specs_to_openai_format(&specs, "gpt-4");
         assert_eq!(tools.len(), 1);
         assert_eq!(tools[0]["type"], "function");
         assert_eq!(tools[0]["function"]["name"], "shell");

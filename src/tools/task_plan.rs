@@ -229,19 +229,8 @@ impl Tool for TaskPlanTool {
     }
 
     fn description(&self) -> &str {
-        "Manage a task checklist for the current session. Use to break complex work into steps and track progress.\n\
-         Actions: create (batch), add (single), update (change status), list (view all), delete (clear all)."
-    }
-
-    fn prompt_hint(&self) -> Option<&str> {
-        Some(
-            "Track progress with a task checklist. Use when: breaking complex work into steps. \
-             Don't use when: the task is simple enough to complete in one action.",
-        )
-    }
-
-    fn prompt_hint_compact(&self) -> &str {
-        "Track progress with a task checklist."
+        "Track progress with a task checklist. Use when: breaking complex work into steps. \
+         Don't use when: the task is simple enough to complete in one action."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {

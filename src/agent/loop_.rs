@@ -2676,6 +2676,35 @@ pub(crate) fn build_shell_policy_instructions(autonomy: &crate::config::Autonomy
     instructions
 }
 
+fn classify_model_route(
+    classification_config: &crate::config::QueryClassificationConfig,
+    available_hints: &[String],
+    route_model_by_hint: &std::collections::HashMap<String, String>,
+    default_model: &str,
+    user_message: &str,
+) -> String {
+    if let Some(decision) =
+        super::classifier::classify_with_decision(classification_config, user_message)
+    {
+        if available_hints.contains(&decision.hint) {
+            let resolved_model = route_model_by_hint
+                .get(&decision.hint)
+                .map(String::as_str)
+                .unwrap_or("unknown");
+            tracing::info!(
+                target: "query_classification",
+                hint = decision.hint.as_str(),
+                model = resolved_model,
+                rule_priority = decision.priority,
+                message_length = user_message.len(),
+                "Classified message route"
+            );
+            return format!("hint:{}", decision.hint);
+        }
+    }
+    default_model.to_string()
+}
+
 // ── CLI Entrypoint ───────────────────────────────────────────────────────
 // Wires up all subsystems (observer, runtime, security, memory, tools,
 // provider, hardware RAG, peripherals) and enters either single-shot or
@@ -2885,6 +2914,14 @@ pub async fn run(
     };
     let channel_name = if interactive { "cli" } else { "daemon" };
 
+    // ── Query classification ────────────────────────────────────
+    let route_model_by_hint: std::collections::HashMap<String, String> = config
+        .model_routes
+        .iter()
+        .map(|route| (route.hint.clone(), route.model.clone()))
+        .collect();
+    let available_hints: Vec<String> = route_model_by_hint.keys().cloned().collect();
+
     // ── Execute ──────────────────────────────────────────────────
     let start = Instant::now();
     let cost_enforcement_context =
@@ -2901,6 +2938,49 @@ pub async fn run(
                 .await;
         }
 
+        // ── Research phase ──────────────────────────────────────
+        let research_context =
+            if crate::agent::research::should_trigger(&config.research, &msg) {
+                if config.research.show_progress {
+                    println!("[Research] Gathering information...");
+                }
+                match crate::agent::research::run_research_phase(
+                    &config.research,
+                    provider.as_ref(),
+                    &tools_registry,
+                    &msg,
+                    &model_name,
+                    temperature,
+                    observer.clone(),
+                )
+                .await
+                {
+                    Ok(result) => {
+                        if config.research.show_progress {
+                            println!(
+                                "[Research] Complete: {} tool calls, {} chars context",
+                                result.tool_call_count,
+                                result.context.len()
+                            );
+                            for summary in &result.tool_summaries {
+                                println!("  - {}: {}", summary.tool_name, summary.result_preview);
+                            }
+                        }
+                        if result.context.is_empty() {
+                            None
+                        } else {
+                            Some(result.context)
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!("Research phase failed: {}", e);
+                        None
+                    }
+                }
+            } else {
+                None
+            };
+
         // Inject memory + hardware RAG context into user message
         let mem_context =
             build_context(mem.as_ref(), &msg, config.memory.min_relevance_score, None).await;
@@ -2911,11 +2991,22 @@ pub async fn run(
             .unwrap_or_default();
         let context = format!("{mem_context}{hw_context}");
         let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S %Z");
-        let enriched = if context.is_empty() {
-            format!("[{now}] {msg}")
-        } else {
-            format!("{context}[{now}] {msg}")
+        let stamped_msg = format!("[{now}] {msg}");
+        let enriched = match (&context, &research_context) {
+            (c, Some(r)) if !c.is_empty() => format!("{c}\n\n{r}\n\n{stamped_msg}"),
+            (_, Some(r)) => format!("{r}\n\n{stamped_msg}"),
+            (c, None) if !c.is_empty() => format!("{c}{stamped_msg}"),
+            _ => stamped_msg,
         };
+
+        // ── Classify model route ────────────────────────────────
+        let effective_model = classify_model_route(
+            &config.query_classification,
+            &available_hints,
+            &route_model_by_hint,
+            &model_name,
+            &msg,
+        );
 
         let mut history = vec![
             ChatMessage::system(&system_prompt),
@@ -2949,7 +3040,7 @@ pub async fn run(
                             &tools_registry,
                             observer.as_ref(),
                             provider_name,
-                            &model_name,
+                            &effective_model,
                             temperature,
                             false,
                             approval_manager.as_ref(),
@@ -3538,6 +3629,27 @@ pub async fn process_message_with_session(
     }
     system_prompt.push_str(&build_shell_policy_instructions(&config.autonomy));
 
+    // ── Research phase ──────────────────────────────────────────
+    let research_context =
+        if crate::agent::research::should_trigger(&config.research, message) {
+            match crate::agent::research::run_research_phase(
+                &config.research,
+                provider.as_ref(),
+                &tools_registry,
+                message,
+                &model_name,
+                config.default_temperature,
+                observer.clone(),
+            )
+            .await
+            {
+                Ok(result) if !result.context.is_empty() => Some(result.context),
+                _ => None,
+            }
+        } else {
+            None
+        };
+
     let mem_context = build_context(
         mem.as_ref(),
         message,
@@ -3552,11 +3664,28 @@ pub async fn process_message_with_session(
         .unwrap_or_default();
     let context = format!("{mem_context}{hw_context}");
     let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S %Z");
-    let enriched = if context.is_empty() {
-        format!("[{now}] {message}")
-    } else {
-        format!("{context}[{now}] {message}")
+    let stamped_msg = format!("[{now}] {message}");
+    let enriched = match (&context, &research_context) {
+        (c, Some(r)) if !c.is_empty() => format!("{c}\n\n{r}\n\n{stamped_msg}"),
+        (_, Some(r)) => format!("{r}\n\n{stamped_msg}"),
+        (c, None) if !c.is_empty() => format!("{c}{stamped_msg}"),
+        _ => stamped_msg,
     };
+
+    // ── Classify model route ────────────────────────────────────
+    let route_model_by_hint: std::collections::HashMap<String, String> = config
+        .model_routes
+        .iter()
+        .map(|route| (route.hint.clone(), route.model.clone()))
+        .collect();
+    let available_hints: Vec<String> = route_model_by_hint.keys().cloned().collect();
+    let effective_model = classify_model_route(
+        &config.query_classification,
+        &available_hints,
+        &route_model_by_hint,
+        &model_name,
+        message,
+    );
 
     let mut history = vec![
         ChatMessage::system(&system_prompt),
@@ -3583,7 +3712,7 @@ pub async fn process_message_with_session(
                 &tools_registry,
                 observer.as_ref(),
                 provider_name,
-                &model_name,
+                &effective_model,
                 config.default_temperature,
                 true,
                 &config.multimodal,

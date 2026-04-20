@@ -23,7 +23,6 @@ pub mod auth_profile;
 pub mod bg_run;
 pub mod browser;
 pub mod calculator;
-pub mod channel_ack_config;
 pub mod cli_discovery;
 pub mod composio;
 pub mod content_search;
@@ -32,9 +31,9 @@ pub mod cron_list;
 pub mod cron_remove;
 pub mod delegate;
 pub mod delegate_coordination_status;
-pub mod docx_read;
 pub mod file_edit;
 pub mod file_read;
+pub mod file_remove;
 pub mod file_write;
 pub mod git_operations;
 pub mod glob_search;
@@ -58,9 +57,7 @@ pub mod memory_store;
 pub mod model_routing_config;
 pub mod notion_tool;
 pub mod orchestration_settings;
-pub mod pdf_read;
 pub mod pipeline;
-pub mod pptx_read;
 pub mod provider_status;
 pub mod reaction;
 pub mod read_skill;
@@ -78,14 +75,11 @@ pub mod weather_tool;
 pub mod web_fetch;
 mod web_search_provider_routing;
 pub mod web_search_tool;
-pub mod xlsx_read;
-
 pub use agent_load_tracker::AgentLoadTracker;
 pub use ask_user::AskUserTool;
 pub use bg_run::{BgJobStore, BgRunTool, BgStatusTool};
 pub use browser::{BrowserTool, ComputerUseConfig};
 pub use calculator::CalculatorTool;
-pub use channel_ack_config::ChannelAckConfigTool;
 pub use composio::ComposioTool;
 pub use content_search::ContentSearchTool;
 pub use cron_add::CronAddTool;
@@ -93,9 +87,9 @@ pub use cron_list::CronListTool;
 pub use cron_remove::CronRemoveTool;
 pub use delegate::DelegateTool;
 pub use delegate_coordination_status::DelegateCoordinationStatusTool;
-pub use docx_read::DocxReadTool;
 pub use file_edit::FileEditTool;
 pub use file_read::FileReadTool;
+pub use file_remove::FileRemoveTool;
 pub use file_write::FileWriteTool;
 pub use git_operations::GitOperationsTool;
 pub use glob_search::GlobSearchTool;
@@ -116,8 +110,6 @@ pub use memory_recall::MemoryRecallTool;
 pub use memory_store::MemoryStoreTool;
 pub use model_routing_config::ModelRoutingConfigTool;
 pub use notion_tool::NotionTool;
-pub use pdf_read::PdfReadTool;
-pub use pptx_read::PptxReadTool;
 pub use provider_status::ProviderStatusTool;
 pub use reaction::ReactionTool;
 pub use read_skill::ReadSkillTool;
@@ -136,8 +128,6 @@ pub use traits::{ToolResult, ToolSpec};
 pub use weather_tool::WeatherTool;
 pub use web_fetch::WebFetchTool;
 pub use web_search_tool::WebSearchTool;
-pub use xlsx_read::XlsxReadTool;
-
 pub use auth_profile::ManageAuthProfileTool;
 
 use crate::config::{Config, DelegateAgentConfig};
@@ -303,6 +293,7 @@ pub fn default_tools_with_runtime(
         tools.push(Box::new(FileReadTool::new(security.clone())));
         tools.push(Box::new(FileWriteTool::new(security.clone())));
         tools.push(Box::new(FileEditTool::new(security.clone())));
+        tools.push(Box::new(FileRemoveTool::new(security.clone())));
         tools.push(Box::new(GlobSearchTool::new(security.clone())));
         tools.push(Box::new(ContentSearchTool::new(security.clone())));
     }
@@ -375,7 +366,6 @@ pub fn all_tools_with_runtime(
             config.clone(),
             security.clone(),
         )),
-        Arc::new(ChannelAckConfigTool::new(config.clone(), security.clone())),
         Arc::new(ManageAuthProfileTool::new(config.clone())),
         Arc::new(CalculatorTool::new()),
         Arc::new(WeatherTool::new()),
@@ -420,6 +410,7 @@ pub fn all_tools_with_runtime(
         tool_arcs.push(Arc::new(FileReadTool::new(security.clone())));
         tool_arcs.push(Arc::new(FileWriteTool::new(security.clone())));
         tool_arcs.push(Arc::new(FileEditTool::new(security.clone())));
+        tool_arcs.push(Arc::new(FileRemoveTool::new(security.clone())));
         tool_arcs.push(Arc::new(GlobSearchTool::new(security.clone())));
         tool_arcs.push(Arc::new(ContentSearchTool::new(security.clone())));
     }
@@ -534,18 +525,6 @@ pub fn all_tools_with_runtime(
             )));
         }
     }
-
-    // PDF extraction (feature-gated at compile time via rag-pdf)
-    tool_arcs.push(Arc::new(PdfReadTool::new(security.clone())));
-
-    // DOCX text extraction
-    tool_arcs.push(Arc::new(DocxReadTool::new(security.clone())));
-
-    // PPTX text extraction
-    tool_arcs.push(Arc::new(PptxReadTool::new(security.clone())));
-
-    // XLSX text extraction
-    tool_arcs.push(Arc::new(XlsxReadTool::new(security.clone())));
 
     // Vision tools are always available
     tool_arcs.push(Arc::new(ScreenshotTool::new(security.clone())));
@@ -880,43 +859,6 @@ mod tests {
         let names: Vec<&str> = tools.iter().map(|t| t.name()).collect();
         assert!(names.contains(&"content_search"));
         assert!(names.contains(&"model_routing_config"));
-    }
-
-    #[test]
-    fn all_tools_includes_docx_read_tool() {
-        let tmp = TempDir::new().unwrap();
-        let security = Arc::new(SecurityPolicy::default());
-        let mem_cfg = MemoryConfig {
-            backend: "markdown".into(),
-            ..MemoryConfig::default()
-        };
-        let mem: Arc<dyn Memory> =
-            Arc::from(crate::memory::create_memory(&mem_cfg, tmp.path(), None).unwrap());
-
-        let browser = BrowserConfig {
-            enabled: false,
-            ..BrowserConfig::default()
-        };
-        let http = crate::config::HttpRequestConfig::default();
-        let cfg = test_config(&tmp);
-
-        let tools = all_tools(
-            Arc::new(Config::default()),
-            &security,
-            mem,
-            None,
-            None,
-            &browser,
-            &http,
-            &crate::config::WebFetchConfig::default(),
-            tmp.path(),
-            &HashMap::new(),
-            None,
-            &cfg,
-        );
-        let names: Vec<&str> = tools.iter().map(|t| t.name()).collect();
-        assert!(names.contains(&"docx_read"));
-        assert!(names.contains(&"pdf_read"));
     }
 
     #[test]

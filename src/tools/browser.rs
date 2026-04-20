@@ -170,8 +170,8 @@ pub enum BrowserAction {
     Fill { selector: String, value: String },
     /// Type text into focused element
     Type { selector: String, text: String },
-    /// Get text content of element
-    GetText { selector: String },
+    /// Get text content of element (defaults to body if no selector)
+    GetText { selector: Option<String> },
     /// Get page title
     GetTitle,
     /// Get current URL
@@ -568,7 +568,8 @@ impl BrowserTool {
             }
 
             BrowserAction::GetText { selector } => {
-                let resp = self.run_command(&["get", "text", &selector]).await?;
+                let sel = selector.as_deref().unwrap_or("body");
+                let resp = self.run_command(&["get", "text", sel]).await?;
                 self.to_result(resp)
             }
 
@@ -902,84 +903,19 @@ impl Tool for BrowserTool {
     }
 
     fn description(&self) -> &str {
-        match self.backend_kind {
-            BrowserBackendKind::AgentBrowser => concat!(
-                "Browser automation via the agent-browser CLI. ",
-                "Actions: open, snapshot, click, fill, type, get_text, get_title, get_url, ",
-                "screenshot, wait, press, hover, scroll, is_visible, close, find. ",
-                "Use 'snapshot' to get an accessibility tree with element refs (@e1, @e2, ...) ",
-                "that can be passed as selectors to click/fill/type. Use 'find' for semantic ",
-                "locators (role, text, label, placeholder, testid). All 'open' URLs are checked ",
-                "against browser.allowed_domains; private/local hosts and file:// URLs are blocked.",
-            ),
-            BrowserBackendKind::RustNative => concat!(
-                "Browser automation via a Rust-native WebDriver backend. ",
-                "Actions: open, snapshot, click, fill, type, get_text, get_title, get_url, ",
-                "screenshot, wait, press, hover, scroll, is_visible, close, find. ",
-                "Use 'snapshot' to get an accessibility tree with element refs (@e1, @e2, ...) ",
-                "that can be passed as selectors to click/fill/type. Use 'find' for semantic ",
-                "locators (role, text, label, placeholder, testid). All 'open' URLs are checked ",
-                "against browser.allowed_domains; private/local hosts and file:// URLs are blocked.",
-            ),
-            BrowserBackendKind::ComputerUse => concat!(
-                "Browser automation via a computer-use sidecar. ",
-                "Actions: open, snapshot, click, fill, type, get_text, get_title, get_url, ",
-                "screenshot, wait, press, hover, scroll, is_visible, close, find. ",
-                "Use 'snapshot' to get an accessibility tree with element refs (@e1, @e2, ...) ",
-                "that can be passed as selectors to click/fill/type. Use 'find' for semantic ",
-                "locators (role, text, label, placeholder, testid). All 'open' URLs are checked ",
-                "against browser.allowed_domains; private/local hosts and file:// URLs are blocked.",
-            ),
-            BrowserBackendKind::Auto => concat!(
-                "Browser automation with auto-detected backend. ",
-                "Actions: open, snapshot, click, fill, type, get_text, get_title, get_url, ",
-                "screenshot, wait, press, hover, scroll, is_visible, close, find. ",
-                "Use 'snapshot' to get an accessibility tree with element refs (@e1, @e2, ...) ",
-                "that can be passed as selectors to click/fill/type. Use 'find' for semantic ",
-                "locators (role, text, label, placeholder, testid). All 'open' URLs are checked ",
-                "against browser.allowed_domains; private/local hosts and file:// URLs are blocked.",
-            ),
-        }
+        "Web Browser automation for rendering web pages and interacting with dynamic content."
     }
 
     fn prompt_hint(&self) -> Option<&str> {
-        match self.backend_kind {
-            BrowserBackendKind::AgentBrowser | BrowserBackendKind::RustNative => Some(concat!(
-                "Automate web pages via DOM actions: open, snapshot, click, fill, type, ",
-                "screenshot, scroll, press, hover, wait, find. Start with 'open' to navigate, ",
-                "then 'snapshot' to discover interactive element refs. Only URLs matching ",
-                "browser.allowed_domains are permitted; local/private hosts are blocked.",
-            )),
-            BrowserBackendKind::ComputerUse => Some(concat!(
-                "Automate web pages via DOM actions: open, snapshot, click, fill, type, ",
-                "screenshot, scroll, press, hover, wait, find. Start with 'open' to navigate, ",
-                "then 'snapshot' to discover interactive element refs. Only URLs matching ",
-                "browser.allowed_domains are permitted; local/private hosts are blocked.",
-            )),
-            BrowserBackendKind::Auto => Some(concat!(
-                "Automate web pages via DOM actions: open, snapshot, click, fill, type, ",
-                "screenshot, scroll, press, hover, wait, find. Start with 'open' to navigate, ",
-                "then 'snapshot' to discover interactive element refs. Only URLs matching ",
-                "browser.allowed_domains are permitted; local/private hosts are blocked.",
-            )),
-        }
+        Some(
+            "Automate browsers via webdriver: open, snapshot, click/fill/type, screenshot. \
+             Use when you need browser automation to load a website, interact with dynamic content, or take screenshots. \
+             Don't use for tasks like calling an API (use http_request) or searching for web content (use web_search)."
+        )
     }
 
     fn prompt_hint_compact(&self) -> &str {
-        match self.backend_kind {
-            BrowserBackendKind::AgentBrowser => {
-                "Automate browsers via agent-browser CLI: open, snapshot, click/fill/type, screenshot."
-            }
-            BrowserBackendKind::RustNative => {
-                "Automate browsers via WebDriver: open, snapshot, click/fill/type, screenshot."
-            }
-            BrowserBackendKind::ComputerUse => {
-                "Automate browsers via computer-use sidecar: open, snapshot, click/fill/type, screenshot."
-            }
-            BrowserBackendKind::Auto => {
-                "Automate browsers with auto-detected backend: open, snapshot, click/fill/type, screenshot."
-            }
-        }
+        "Automate browsers: open, snapshot, click/fill/type, screenshot."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -1239,12 +1175,13 @@ mod native_backend {
                 }
                 BrowserAction::GetText { selector } => {
                     let client = self.active_client()?;
-                    let text = find_element(client, &selector).await?.text().await?;
+                    let sel = selector.as_deref().unwrap_or("body");
+                    let text = find_element(client, sel).await?.text().await?;
 
                     Ok(json!({
                         "backend": "rust_native",
                         "action": "get_text",
-                        "selector": selector,
+                        "selector": sel,
                         "text": text,
                     }))
                 }
@@ -1880,10 +1817,8 @@ fn parse_browser_action(action_str: &str, args: &Value) -> anyhow::Result<Browse
             let selector = args
                 .get("selector")
                 .and_then(|v| v.as_str())
-                .ok_or_else(|| anyhow::anyhow!("Missing 'selector' for get_text"))?;
-            Ok(BrowserAction::GetText {
-                selector: selector.into(),
-            })
+                .map(String::from);
+            Ok(BrowserAction::GetText { selector })
         }
         "get_title" => Ok(BrowserAction::GetTitle),
         "get_url" => Ok(BrowserAction::GetUrl),

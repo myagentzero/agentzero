@@ -5059,6 +5059,7 @@ fn collect_configured_channels(
                     sl.group_reply_allowed_sender_ids(),
                 )
                 .with_ack_reaction(config.channels_config.ack_reaction.slack.clone())
+                .with_transcription(config.transcription.clone())
                 .with_workspace_dir(config.workspace_dir.clone()),
             ),
         });

@@ -307,16 +307,6 @@ impl Tool for ScreenshotTool {
         "Capture a screenshot of the current screen. Returns the file path and base64-encoded PNG data."
     }
 
-    fn prompt_hint(&self) -> Option<&str> {
-        Some(
-            "Capture a screenshot of the current screen. Returns file path and base64-encoded PNG. Use when: visual verification, UI inspection, debugging displays.",
-        )
-    }
-
-    fn prompt_hint_compact(&self) -> &str {
-        "Capture a screenshot."
-    }
-
     fn parameters_schema(&self) -> serde_json::Value {
         json!({
             "type": "object",

@@ -31,7 +31,7 @@ impl Tool for ReadSkillTool {
     }
 
     fn description(&self) -> &str {
-        "Read the full source file for an available skill by name. Use this in compact skills mode when you need the complete skill instructions without remembering file paths."
+        "Read the full source file for an available skill by name."
     }
 
     fn prompt_hint(&self) -> Option<&str> {

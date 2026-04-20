@@ -95,7 +95,6 @@ non_cli_excluded_tools = [
     "memory_forget",
     "web_search_config",
     "model_routing_config",
-    "channel_ack_config",
     "pushover",
     "composio",
     "delegate",

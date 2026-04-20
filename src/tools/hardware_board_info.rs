@@ -71,17 +71,7 @@ impl Tool for HardwareBoardInfoTool {
     }
 
     fn description(&self) -> &str {
-        "Return full board info (chip, architecture, memory map) for connected hardware. Use when: user asks for 'board info', 'what board do I have', 'connected hardware', 'chip info', 'what hardware', or 'memory map'."
-    }
-
-    fn prompt_hint(&self) -> Option<&str> {
-        Some(
-            "Return full board info (chip, architecture, memory map) for connected hardware. Use when: user asks for 'board info', 'what board do I have', 'connected hardware', 'chip info', or 'what hardware'.",
-        )
-    }
-
-    fn prompt_hint_compact(&self) -> &str {
-        "Return full board info (chip, architecture, memory map). Use when user asks for board info, what board, connected hardware, or chip info."
+        "Return full board info (chip, architecture, memory map) for connected hardware. Use when: user asks for 'board info', 'what board do I have', 'connected hardware', 'chip info', or 'what hardware'."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {

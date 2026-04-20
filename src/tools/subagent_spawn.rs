@@ -151,20 +151,8 @@ impl Tool for SubAgentSpawnTool {
     }
 
     fn description(&self) -> &str {
-        "Spawn a delegate agent in the background. Returns immediately with a session_id. \
-         `agent` can be omitted or set to `auto` when subagent auto-activation is enabled. \
-         Use subagent_list to check progress and subagent_manage to steer or kill."
-    }
-
-    fn prompt_hint(&self) -> Option<&str> {
-        Some(
-            "Spawn a background delegate agent. Use when: parallelizing independent tasks or offloading long-running work. \
-             Don't use when: the task is quick or needs immediate results.",
-        )
-    }
-
-    fn prompt_hint_compact(&self) -> &str {
-        "Spawn a background delegate agent."
+        "Spawn a background delegate agent. Use when: parallelizing independent tasks or offloading long-running work. \
+         Don't use when: the task is quick or needs immediate results."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {

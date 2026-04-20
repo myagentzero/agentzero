@@ -4,7 +4,6 @@ use crate::agent::dispatcher::{
 use crate::agent::loop_::detection::{DetectionVerdict, LoopDetectionConfig, LoopDetector};
 use crate::agent::loop_::history::{TurnBuffer, extract_facts_from_turns};
 use crate::agent::memory_loader::{DefaultMemoryLoader, MemoryLoader};
-use crate::agent::prompt::{PromptContext, SystemPromptBuilder};
 use crate::agent::research;
 use crate::config::{Config, ResearchPhaseConfig};
 use crate::cost::CostTracker;
@@ -44,7 +43,6 @@ pub struct Agent {
     tool_specs: Vec<ToolSpec>,
     memory: Arc<dyn Memory>,
     observer: Arc<dyn Observer>,
-    prompt_builder: SystemPromptBuilder,
     tool_dispatcher: Box<dyn ToolDispatcher>,
     memory_loader: Box<dyn MemoryLoader>,
     config: crate::config::AgentConfig,
@@ -67,6 +65,8 @@ pub struct Agent {
     security_summary: Option<String>,
     /// IANA timezone override from `local_context.timezone`.
     timezone_override: Option<String>,
+    /// Autonomy config for shell policy instructions.
+    autonomy_config: crate::config::AutonomyConfig,
 }
 
 pub struct AgentBuilder {
@@ -74,7 +74,6 @@ pub struct AgentBuilder {
     tools: Option<Vec<Box<dyn Tool>>>,
     memory: Option<Arc<dyn Memory>>,
     observer: Option<Arc<dyn Observer>>,
-    prompt_builder: Option<SystemPromptBuilder>,
     tool_dispatcher: Option<Box<dyn ToolDispatcher>>,
     memory_loader: Option<Box<dyn MemoryLoader>>,
     config: Option<crate::config::AgentConfig>,
@@ -92,6 +91,7 @@ pub struct AgentBuilder {
     research_config: Option<ResearchPhaseConfig>,
     security_summary: Option<String>,
     timezone_override: Option<String>,
+    autonomy_config: Option<crate::config::AutonomyConfig>,
 }
 
 impl AgentBuilder {
@@ -101,7 +101,6 @@ impl AgentBuilder {
             tools: None,
             memory: None,
             observer: None,
-            prompt_builder: None,
             tool_dispatcher: None,
             memory_loader: None,
             config: None,
@@ -119,6 +118,7 @@ impl AgentBuilder {
             research_config: None,
             security_summary: None,
             timezone_override: None,
+            autonomy_config: None,
         }
     }
 
@@ -142,8 +142,8 @@ impl AgentBuilder {
         self
     }
 
-    pub fn prompt_builder(mut self, prompt_builder: SystemPromptBuilder) -> Self {
-        self.prompt_builder = Some(prompt_builder);
+    pub fn autonomy_config(mut self, autonomy_config: crate::config::AutonomyConfig) -> Self {
+        self.autonomy_config = Some(autonomy_config);
         self
     }
 
@@ -257,9 +257,6 @@ impl AgentBuilder {
             observer: self
                 .observer
                 .ok_or_else(|| anyhow::anyhow!("observer is required"))?,
-            prompt_builder: self
-                .prompt_builder
-                .unwrap_or_else(SystemPromptBuilder::with_defaults),
             tool_dispatcher: self
                 .tool_dispatcher
                 .ok_or_else(|| anyhow::anyhow!("tool_dispatcher is required"))?,
@@ -285,6 +282,7 @@ impl AgentBuilder {
             research_config: self.research_config.unwrap_or_default(),
             security_summary: self.security_summary,
             timezone_override: self.timezone_override,
+            autonomy_config: self.autonomy_config.unwrap_or_default(),
         })
     }
 }
@@ -437,8 +435,8 @@ impl Agent {
                 5,
                 config.memory.min_relevance_score,
             )))
-            .prompt_builder(SystemPromptBuilder::with_defaults())
             .config(config.agent.clone())
+            .autonomy_config(config.autonomy.clone())
             .model_name(model_name)
             .temperature(config.default_temperature)
             .workspace_dir(config.workspace_dir.clone())
@@ -486,19 +484,32 @@ impl Agent {
     }
 
     fn build_system_prompt(&self) -> Result<String> {
-        let instructions = self.tool_dispatcher.prompt_instructions(&self.tools);
-        let ctx = PromptContext {
-            workspace_dir: &self.workspace_dir,
-            model_name: &self.model_name,
-            tools: &self.tools,
-            skills: &self.skills,
-            skills_prompt_mode: self.skills_prompt_mode,
-            identity_config: Some(&self.identity_config),
-            dispatcher_instructions: &instructions,
-            security_summary: self.security_summary.clone(),
-            timezone_override: self.timezone_override.as_deref(),
-        };
-        self.prompt_builder.build(&ctx)
+        let tool_descs: Vec<(&str, &str)> = self
+            .tools
+            .iter()
+            .filter_map(|t| t.prompt_hint().map(|h| (t.name(), h)))
+            .collect();
+        let native_tools = self.provider.supports_native_tools();
+        let mut prompt = crate::channels::build_system_prompt_with_mode(
+            &self.workspace_dir,
+            &self.model_name,
+            &tool_descs,
+            &self.skills,
+            Some(&self.identity_config),
+            None,
+            native_tools,
+            self.skills_prompt_mode,
+            false,
+            self.timezone_override.as_deref(),
+            self.security_summary.as_deref(),
+        );
+        if !native_tools {
+            prompt.push_str(&crate::agent::loop_::build_tool_instructions(&self.tools));
+        }
+        prompt.push_str(&crate::agent::loop_::build_shell_policy_instructions(
+            &self.autonomy_config,
+        ));
+        Ok(prompt)
     }
 
     async fn execute_tool_call(&self, call: &ParsedToolCall) -> ToolExecutionResult {
@@ -895,64 +906,6 @@ impl Agent {
         self.flush_turn_buffer().await;
         Ok(())
     }
-}
-
-pub async fn run(
-    config: Config,
-    message: Option<String>,
-    provider_override: Option<String>,
-    model_override: Option<String>,
-    temperature: f64,
-) -> Result<()> {
-    let start = Instant::now();
-
-    let mut effective_config = config;
-    if let Some(p) = provider_override {
-        effective_config.default_provider = Some(p);
-    }
-    if let Some(m) = model_override {
-        effective_config.default_model = Some(m);
-    }
-    effective_config.default_temperature = temperature;
-
-    let mut agent = Agent::from_config(&effective_config)?;
-
-    let provider_name = effective_config
-        .default_provider
-        .as_deref()
-        .unwrap_or("openrouter")
-        .to_string();
-    let model_name = effective_config
-        .default_model
-        .as_deref()
-        .map(str::trim)
-        .filter(|m| !m.is_empty())
-        .map(str::to_string)
-        .unwrap_or_else(|| {
-            crate::config::default_model_fallback_for_provider(Some(&provider_name)).to_string()
-        });
-
-    agent.observer.record_event(&ObserverEvent::AgentStart {
-        provider: provider_name.clone(),
-        model: model_name.clone(),
-    });
-
-    if let Some(msg) = message {
-        let response = agent.run_single(&msg).await?;
-        println!("{response}");
-    } else {
-        agent.run_interactive().await?;
-    }
-
-    agent.observer.record_event(&ObserverEvent::AgentEnd {
-        provider: provider_name,
-        model: model_name,
-        duration: start.elapsed(),
-        tokens_used: None,
-        cost_usd: None,
-    });
-
-    Ok(())
 }
 
 #[cfg(test)]

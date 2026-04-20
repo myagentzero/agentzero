@@ -71,17 +71,7 @@ impl Tool for MemoryRecallTool {
     }
 
     fn description(&self) -> &str {
-        "Search long-term memory for relevant facts, preferences, or context. Returns scored results ranked by relevance."
-    }
-
-    fn prompt_hint(&self) -> Option<&str> {
-        Some(
-            "Search memory. Use when: retrieving prior decisions, user preferences, historical context. Don't use when: answer is already in current context.",
-        )
-    }
-
-    fn prompt_hint_compact(&self) -> &str {
-        "Search memory."
+        "Search memory. Use when: retrieving prior decisions, user preferences, historical context. Don't use when: answer is already in current context."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {

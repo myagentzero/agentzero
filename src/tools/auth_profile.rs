@@ -179,20 +179,8 @@ impl Tool for ManageAuthProfileTool {
     }
 
     fn description(&self) -> &str {
-        "Manage auth profiles: list all profiles with token status, switch active profile \
-         for a provider, or refresh expired OAuth tokens. Use when user asks about accounts, \
-         tokens, or when you encounter expired/rate-limited credentials."
-    }
-
-    fn prompt_hint(&self) -> Option<&str> {
-        Some(
-            "Manage auth profiles and tokens. Use when: user asks about accounts, switching providers, or refreshing expired tokens. \
-             Don't use when: diagnosing non-auth API errors (use provider_status).",
-        )
-    }
-
-    fn prompt_hint_compact(&self) -> &str {
-        "Manage auth profiles and tokens."
+        "Manage auth profiles and tokens. Use when: user asks about accounts, switching providers, or refreshing expired tokens. \
+         Don't use when: diagnosing non-auth API errors (use provider_status)."
     }
 
     fn parameters_schema(&self) -> Value {

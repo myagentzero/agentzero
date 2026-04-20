@@ -32,6 +32,7 @@ pub struct SlackChannel {
     /// Maps channel_id -> thread_ts for active assistant threads (used for status indicators).
     active_assistant_thread: Mutex<HashMap<String, String>>,
     ack_reaction: Option<crate::config::AckReactionConfig>,
+    transcription: Option<crate::config::TranscriptionConfig>,
 }
 
 const SLACK_HISTORY_MAX_RETRIES: u32 = 3;
@@ -45,12 +46,16 @@ const SLACK_USER_CACHE_TTL_SECS: u64 = 6 * 60 * 60;
 const SLACK_ATTACHMENT_IMAGE_MAX_BYTES: usize = 5 * 1024 * 1024;
 const SLACK_ATTACHMENT_IMAGE_INLINE_FALLBACK_MAX_BYTES: usize = 512 * 1024;
 const SLACK_ATTACHMENT_TEXT_DOWNLOAD_MAX_BYTES: usize = 256 * 1024;
+const SLACK_ATTACHMENT_DOCUMENT_MAX_BYTES: usize = 20 * 1024 * 1024;
 const SLACK_ATTACHMENT_TEXT_INLINE_MAX_CHARS: usize = 12_000;
 const SLACK_MARKDOWN_BLOCK_MAX_CHARS: usize = 12_000;
 const SLACK_ATTACHMENT_FILENAME_MAX_CHARS: usize = 128;
 const SLACK_USER_CACHE_MAX_ENTRIES: usize = 1000;
 const SLACK_ATTACHMENT_SAVE_SUBDIR: &str = "slack_files";
 const SLACK_ATTACHMENT_MAX_FILES_PER_MESSAGE: usize = 8;
+const SLACK_AUDIO_EXTENSIONS: &[&str] = &[
+    "flac", "mp3", "mpeg", "mpga", "mp4", "m4a", "ogg", "oga", "opus", "wav", "webm",
+];
 const SLACK_PERMALINK_MAX_LINKS_PER_MESSAGE: usize = 3;
 const SLACK_PERMALINK_THREAD_MAX_REPLIES: usize = 20;
 const SLACK_PERMALINK_TEXT_MAX_CHARS: usize = 8_000;
@@ -141,6 +146,7 @@ impl SlackChannel {
             workspace_dir: None,
             active_assistant_thread: Mutex::new(HashMap::new()),
             ack_reaction: None,
+            transcription: None,
         }
     }
 
@@ -162,6 +168,14 @@ impl SlackChannel {
         ack_reaction: Option<crate::config::AckReactionConfig>,
     ) -> Self {
         self.ack_reaction = ack_reaction;
+        self
+    }
+
+    /// Configure voice/audio transcription.
+    pub fn with_transcription(mut self, config: crate::config::TranscriptionConfig) -> Self {
+        if config.enabled {
+            self.transcription = Some(config);
+        }
         self
     }
 
@@ -938,9 +952,30 @@ impl SlackChannel {
             .await
             .unwrap_or_else(|| raw_file.clone());
 
+        if Self::is_audio_file(&file) {
+            if let Some(transcribed) = self.try_transcribe_audio_file(&file).await {
+                return Some(transcribed);
+            }
+        }
+
         if Self::is_image_file(&file) {
             if let Some(marker) = self.fetch_image_marker(&file).await {
                 return Some(marker);
+            }
+        }
+
+        if Self::is_document_file(&file) {
+            if let Some(marker) = self.fetch_document_marker(&file).await {
+                return Some(marker);
+            }
+            // Download may fail when the event URL is stale (Slack returns HTML
+            // login page). Refresh file info for a fresh URL and retry once.
+            if let Some(file_id) = Self::slack_file_id(&file) {
+                if let Some(refreshed) = self.fetch_file_info(file_id).await {
+                    if let Some(marker) = self.fetch_document_marker(&refreshed).await {
+                        return Some(marker);
+                    }
+                }
             }
         }
 
@@ -965,7 +1000,6 @@ impl SlackChannel {
             .and_then(|value| value.as_str())
             .unwrap_or_default();
         let mode = Self::slack_file_mode(file).unwrap_or_default();
-
         let requires_lookup = file_access.eq_ignore_ascii_case("check_file_info")
             || Self::slack_file_download_url(file).is_none()
             || (Self::is_probably_text_file(file) && Self::file_text_preview(file).is_none())
@@ -1226,7 +1260,10 @@ impl SlackChannel {
         for redirect_hop in 0..=SLACK_MEDIA_REDIRECT_MAX_HOPS {
             let redacted_current = Self::redact_slack_url(&current_url);
             let mut req = client.get(current_url.clone());
-            if redirect_hop == 0 {
+            let is_slack_host = current_url
+                .host_str()
+                .is_some_and(Self::is_allowed_slack_media_hostname);
+            if redirect_hop == 0 || is_slack_host {
                 req = req.bearer_auth(&self.bot_token);
             }
             let response = match req.send().await {
@@ -1385,6 +1422,152 @@ impl SlackChannel {
 
         let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
         Some(format!("[IMAGE:data:{mime};base64,{encoded}]"))
+    }
+
+    async fn try_transcribe_audio_file(&self, file: &serde_json::Value) -> Option<String> {
+        let config = self.transcription.as_ref()?;
+
+        let url = Self::slack_file_download_url(file)?;
+        let file_name = Self::slack_file_name(file);
+        let redacted_url = Self::redact_raw_slack_url(url);
+
+        if let Some(duration_ms) = file.get("duration_ms").and_then(|v| v.as_u64()) {
+            let duration_secs = duration_ms / 1000;
+            if duration_secs > config.max_duration_secs {
+                tracing::warn!(
+                    "Slack audio transcription skipped for {}: duration {}s exceeds limit {}s",
+                    redacted_url,
+                    duration_secs,
+                    config.max_duration_secs
+                );
+                return Some(Self::format_attachment_summary(file));
+            }
+        }
+
+        let resp = self.fetch_slack_private_file(url).await?;
+        let status = resp.status();
+        if !status.is_success() {
+            tracing::warn!(
+                "Slack voice file download failed for {} ({status})",
+                redacted_url
+            );
+            return None;
+        }
+
+        let audio_data = match resp.bytes().await {
+            Ok(bytes) => bytes.to_vec(),
+            Err(e) => {
+                tracing::warn!("Slack voice file read failed for {}: {e}", redacted_url);
+                return None;
+            }
+        };
+
+        let transcription_filename = if Self::file_extension(&file_name).is_some() {
+            file_name.clone()
+        } else {
+            let mime_ext = Self::slack_file_mime(file)
+                .and_then(|mime| mime.rsplit('/').next().map(|s| s.to_string()))
+                .unwrap_or_else(|| "ogg".to_string());
+            format!("voice.{mime_ext}")
+        };
+
+        match super::transcription::transcribe_audio(audio_data, &transcription_filename, config)
+            .await
+        {
+            Ok(text) => {
+                let trimmed = text.trim();
+                if trimmed.is_empty() {
+                    tracing::info!("Slack voice transcription returned empty text, skipping");
+                    None
+                } else {
+                    tracing::info!(
+                        "Slack: transcribed voice file {} ({} chars)",
+                        file_name,
+                        trimmed.len()
+                    );
+                    Some(format!("[Voice] {trimmed}"))
+                }
+            }
+            Err(e) => {
+                tracing::warn!("Slack voice transcription failed for {}: {e}", file_name);
+                Some(Self::format_attachment_summary(file))
+            }
+        }
+    }
+
+    async fn fetch_document_marker(&self, file: &serde_json::Value) -> Option<String> {
+        let url = Self::slack_file_download_url(file)?;
+        let redacted_url = Self::redact_raw_slack_url(url);
+        let resp = self.fetch_slack_private_file(url).await?;
+
+        let status = resp.status();
+        if !status.is_success() {
+            let body = resp
+                .text()
+                .await
+                .unwrap_or_else(|e| format!("<failed to read response body: {e}>"));
+            let sanitized = crate::providers::sanitize_api_error(&body);
+            tracing::warn!(
+                "Slack document fetch failed for {} ({status}): {sanitized}",
+                redacted_url
+            );
+            return None;
+        }
+
+        if let Some(ct) = resp
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+        {
+            let ct_lower = ct.to_ascii_lowercase();
+            if ct_lower.contains("text/html") || ct_lower.contains("application/xhtml") {
+                tracing::warn!(
+                    "Slack document fetch returned HTML for {} (likely auth redirect): content-type={ct}",
+                    redacted_url
+                );
+                return None;
+            }
+        }
+
+        if let Some(content_length) = resp.content_length() {
+            let content_length = usize::try_from(content_length).unwrap_or(usize::MAX);
+            if content_length > SLACK_ATTACHMENT_DOCUMENT_MAX_BYTES {
+                tracing::warn!(
+                    "Slack document fetch skipped for {}: content-length {} exceeds {} bytes",
+                    redacted_url,
+                    content_length,
+                    SLACK_ATTACHMENT_DOCUMENT_MAX_BYTES
+                );
+                return None;
+            }
+        }
+
+        let bytes = match resp.bytes().await {
+            Ok(bytes) => bytes,
+            Err(err) => {
+                tracing::warn!("Slack document body read failed for {}: {err}", redacted_url);
+                return None;
+            }
+        };
+        if bytes.is_empty() {
+            tracing::warn!("Slack document body is empty for {}", redacted_url);
+            return None;
+        }
+        if bytes.len() > SLACK_ATTACHMENT_DOCUMENT_MAX_BYTES {
+            tracing::warn!(
+                "Slack document body too large for {}: {} bytes exceeds {} bytes",
+                redacted_url,
+                bytes.len(),
+                SLACK_ATTACHMENT_DOCUMENT_MAX_BYTES
+            );
+            return None;
+        }
+
+        let file_name = Self::slack_file_name(file);
+        let saved_path = self
+            .persist_document_attachment(file, &file_name, bytes.as_ref())
+            .await?;
+        Some(format!("[Document: {}] {}", file_name, saved_path.display()))
     }
 
     fn detect_image_mime(
@@ -1588,6 +1771,117 @@ impl SlackChannel {
         if let Err(err) = tokio::fs::rename(&temp_path, &output_path).await {
             tracing::warn!(
                 "Slack image attachment finalize failed for {}: {err}",
+                output_path.display()
+            );
+            let _ = tokio::fs::remove_file(&temp_path).await;
+            return None;
+        }
+
+        Some(output_path)
+    }
+
+    async fn persist_document_attachment(
+        &self,
+        file: &serde_json::Value,
+        file_name: &str,
+        bytes: &[u8],
+    ) -> Option<PathBuf> {
+        let workspace = self.workspace_dir.as_ref()?;
+        let safe_name = Self::sanitize_attachment_filename(file_name)
+            .unwrap_or_else(|| "document".to_string());
+        let file_id = Self::slack_file_id(file)
+            .map(Self::sanitize_file_id)
+            .unwrap_or_else(|| "file".to_string());
+        let generated_name = format!(
+            "slack_{}_{}_{}",
+            Utc::now().timestamp_millis(),
+            file_id,
+            safe_name
+        );
+
+        let output_path = match Self::resolve_workspace_attachment_output_path(
+            workspace,
+            &generated_name,
+        )
+        .await
+        {
+            Ok(path) => path,
+            Err(err) => {
+                tracing::warn!(
+                    "Slack document attachment path resolution failed for {}: {err}",
+                    file_name
+                );
+                return None;
+            }
+        };
+
+        let Some(parent_dir) = output_path.parent() else {
+            tracing::warn!(
+                "Slack document attachment write failed for {}: missing parent directory",
+                output_path.display()
+            );
+            return None;
+        };
+
+        let file_tail = output_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("document");
+        let temp_name = format!(
+            ".{file_tail}.{}.part",
+            Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        );
+        let temp_path = parent_dir.join(temp_name);
+
+        let mut temp_file = match tokio::fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&temp_path)
+            .await
+        {
+            Ok(file) => file,
+            Err(err) => {
+                tracing::warn!(
+                    "Slack document attachment temp open failed for {}: {err}",
+                    temp_path.display()
+                );
+                return None;
+            }
+        };
+
+        if let Err(err) = temp_file.write_all(bytes).await {
+            tracing::warn!(
+                "Slack document attachment temp write failed for {}: {err}",
+                temp_path.display()
+            );
+            let _ = tokio::fs::remove_file(&temp_path).await;
+            return None;
+        }
+        if let Err(err) = temp_file.sync_all().await {
+            tracing::warn!(
+                "Slack document attachment temp sync failed for {}: {err}",
+                temp_path.display()
+            );
+            let _ = tokio::fs::remove_file(&temp_path).await;
+            return None;
+        }
+        drop(temp_file);
+
+        match tokio::fs::symlink_metadata(&output_path).await {
+            Ok(meta) if meta.file_type().is_symlink() => {
+                tracing::warn!(
+                    "Slack document attachment refused: output path is a symlink: {}",
+                    output_path.display()
+                );
+                let _ = tokio::fs::remove_file(&temp_path).await;
+                return None;
+            }
+            _ => {}
+        }
+
+        if let Err(err) = tokio::fs::rename(&temp_path, &output_path).await {
+            tracing::warn!(
+                "Slack document attachment finalize failed for {}: {err}",
                 output_path.display()
             );
             let _ = tokio::fs::remove_file(&temp_path).await;
@@ -1801,6 +2095,47 @@ impl SlackChannel {
         )
     }
 
+    fn is_document_file(file: &serde_json::Value) -> bool {
+        if Self::slack_file_mime(file)
+            .as_deref()
+            .is_some_and(Self::is_document_mime)
+        {
+            return true;
+        }
+
+        if file
+            .get("filetype")
+            .and_then(|value| value.as_str())
+            .map(|value| value.to_ascii_lowercase())
+            .as_deref()
+            .is_some_and(Self::is_document_filetype)
+        {
+            return true;
+        }
+
+        Self::file_extension(&Self::slack_file_name(file))
+            .as_deref()
+            .is_some_and(Self::is_document_filetype)
+    }
+
+    fn is_document_filetype(filetype: &str) -> bool {
+        matches!(
+            filetype,
+            "pdf" | "docx" | "doc" | "pptx" | "ppt" | "xlsx" | "xls" | "epub" | "rtf" | "odt"
+                | "ods" | "odp"
+        )
+    }
+
+    fn is_document_mime(mime: &str) -> bool {
+        mime == "application/pdf"
+            || mime.starts_with("application/vnd.openxmlformats-officedocument.")
+            || mime.starts_with("application/vnd.ms-")
+            || mime == "application/msword"
+            || mime == "application/rtf"
+            || mime == "application/epub+zip"
+            || mime.starts_with("application/vnd.oasis.opendocument.")
+    }
+
     fn is_image_file(file: &serde_json::Value) -> bool {
         if Self::slack_file_mime(file)
             .as_deref()
@@ -1822,6 +2157,37 @@ impl SlackChannel {
         Self::file_extension(&Self::slack_file_name(file))
             .as_deref()
             .is_some_and(|ext| Self::mime_from_extension(ext).is_some())
+    }
+
+    fn is_audio_file(file: &serde_json::Value) -> bool {
+        if file
+            .get("subtype")
+            .and_then(|v| v.as_str())
+            .is_some_and(|s| s == "slack_audio")
+        {
+            return true;
+        }
+
+        if Self::slack_file_mime(file)
+            .as_deref()
+            .is_some_and(|mime| mime.starts_with("audio/"))
+        {
+            return true;
+        }
+
+        if file
+            .get("filetype")
+            .and_then(|v| v.as_str())
+            .map(|v| v.to_ascii_lowercase())
+            .as_deref()
+            .is_some_and(|ft| SLACK_AUDIO_EXTENSIONS.contains(&ft))
+        {
+            return true;
+        }
+
+        Self::file_extension(&Self::slack_file_name(file))
+            .as_deref()
+            .is_some_and(|ext| SLACK_AUDIO_EXTENSIONS.contains(&ext.as_ref()))
     }
 
     async fn download_text_snippet(&self, file: &serde_json::Value) -> Option<String> {
@@ -3555,6 +3921,83 @@ mod tests {
                 "unexpected temp artifact left behind: {name}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn persist_document_attachment_writes_bytes_without_part_leftovers() {
+        let workspace = tempfile::tempdir().unwrap();
+        let channel = SlackChannel::new("xoxb-fake".into(), None, None, vec![], vec![])
+            .with_workspace_dir(workspace.path().to_path_buf());
+        let file = serde_json::json!({"id":"F2","name":"report.docx"});
+        let docx_bytes = vec![0x50, 0x4B, 0x03, 0x04, 0x00, 0x01, 0x02, 0x03];
+
+        let output = channel
+            .persist_document_attachment(&file, "report.docx", &docx_bytes)
+            .await
+            .expect("attachment path");
+        let stored = tokio::fs::read(&output).await.expect("stored bytes");
+        assert_eq!(stored, docx_bytes);
+        assert!(
+            output.to_string_lossy().contains("report.docx"),
+            "output path should contain original filename"
+        );
+
+        let save_dir = output.parent().unwrap();
+        let mut entries = tokio::fs::read_dir(save_dir).await.unwrap();
+        while let Some(entry) = entries.next_entry().await.unwrap() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            assert!(
+                !name.ends_with(".part"),
+                "unexpected temp artifact left behind: {name}"
+            );
+        }
+    }
+
+    #[test]
+    fn is_audio_file_detects_slack_audio_subtype() {
+        let voice = serde_json::json!({"subtype": "slack_audio", "name": "voice"});
+        assert!(SlackChannel::is_audio_file(&voice));
+    }
+
+    #[test]
+    fn is_audio_file_detects_audio_mime() {
+        let from_mime = serde_json::json!({"mimetype": "audio/ogg"});
+        assert!(SlackChannel::is_audio_file(&from_mime));
+    }
+
+    #[test]
+    fn is_audio_file_detects_audio_extension() {
+        let from_ext = serde_json::json!({"name": "clip.mp3"});
+        assert!(SlackChannel::is_audio_file(&from_ext));
+    }
+
+    #[test]
+    fn is_audio_file_rejects_non_audio() {
+        let text = serde_json::json!({"name": "notes.txt", "mimetype": "text/plain"});
+        assert!(!SlackChannel::is_audio_file(&text));
+    }
+
+    #[test]
+    fn is_audio_file_detects_filetype_field() {
+        let from_ft = serde_json::json!({"filetype": "ogg"});
+        assert!(SlackChannel::is_audio_file(&from_ft));
+    }
+
+    #[test]
+    fn with_transcription_sets_config_when_enabled() {
+        let mut tc = crate::config::TranscriptionConfig::default();
+        tc.enabled = true;
+        let channel = SlackChannel::new("xoxb-fake".into(), None, None, vec![], vec![])
+            .with_transcription(tc);
+        assert!(channel.transcription.is_some());
+    }
+
+    #[test]
+    fn with_transcription_skips_when_disabled() {
+        let tc = crate::config::TranscriptionConfig::default();
+        let channel = SlackChannel::new("xoxb-fake".into(), None, None, vec![], vec![])
+            .with_transcription(tc);
+        assert!(channel.transcription.is_none());
     }
 
     #[test]

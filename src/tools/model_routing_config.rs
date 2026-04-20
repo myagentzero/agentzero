@@ -1093,17 +1093,7 @@ impl Tool for ModelRoutingConfigTool {
     }
 
     fn description(&self) -> &str {
-        "Manage default model settings, scenario routes, classification rules, delegate profiles, and agent team/subagent orchestration controls. Designed for natural-language runtime reconfiguration (enable/disable, strategy, and capacity tuning)."
-    }
-
-    fn prompt_hint(&self) -> Option<&str> {
-        Some(
-            "Configure default model, scenario routing, and delegate agents. Use for natural-language requests like: 'set conversation to kimi and coding to gpt-5.3-codex'.",
-        )
-    }
-
-    fn prompt_hint_compact(&self) -> &str {
-        "Configure default model, scenario routing, and delegate agents."
+        "Configure default model settings, scenario routes, classification rules, delegate profiles, and agent team/subagent orchestration controls. Designed for natural-language runtime reconfiguration (enable/disable, strategy, and capacity tuning)."
     }
 
     fn parameters_schema(&self) -> Value {

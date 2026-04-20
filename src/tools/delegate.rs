@@ -242,20 +242,11 @@ impl Tool for DelegateTool {
     }
 
     fn description(&self) -> &str {
-        "Delegate a subtask to a specialized agent. Use when: a task benefits from a different model \
+        "Delegate a sub-task to a specialized agent. \
+         Use when: task needs different model/capability, or to parallelize work \
          (e.g. fast summarization, deep reasoning, code generation). The sub-agent runs a single \
          prompt by default; with agentic=true it can iterate with a filtered tool-call loop. \
          `agent` may be omitted or set to `auto` when team auto-activation is enabled."
-    }
-
-    fn prompt_hint(&self) -> Option<&str> {
-        Some(
-            "Delegate a sub-task to a specialized agent. Use when: task needs different model/capability, or to parallelize work.",
-        )
-    }
-
-    fn prompt_hint_compact(&self) -> &str {
-        "Delegate a sub-task to a specialized agent."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {

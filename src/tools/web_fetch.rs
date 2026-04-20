@@ -266,23 +266,9 @@ impl Tool for WebFetchTool {
     }
 
     fn description(&self) -> &str {
-        "Fetch a web page and return its content as clean plain text. \
-         HTML pages are automatically converted to readable text. \
-         JSON and plain text responses are returned as-is. \
-         Only GET requests; follows redirects. \
-         Falls back to Firecrawl for JS-heavy/bot-blocked sites (if enabled). \
-         Security: allowlist-only domains, no local/private hosts."
-    }
-
-    fn prompt_hint(&self) -> Option<&str> {
-        Some(
-            "Fetch a web page as plain text. Use when: reading documentation, APIs, or public web content. \
-             Don't use when: making POST/PUT requests (use http_request) or browsing interactive pages (use browser).",
-        )
-    }
-
-    fn prompt_hint_compact(&self) -> &str {
-        "Fetch a web page as plain text."
+        "Fetch a web page and return its content as clean plain text. HTML pages are automatically converted to readable text. \
+         JSON and plain text responses are returned as-is. Only GET requests; follows redirects. Use when: reading documentation, APIs, or public web content. \
+         Don't use when: making POST/PUT requests (use http_request) or browsing interactive pages (use browser)."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {
