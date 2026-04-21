@@ -174,12 +174,12 @@ export default function Dashboard() {
       <section className="hero-panel motion-rise">
         <div className="relative z-10 flex flex-wrap items-start justify-between gap-4">
           <div>
-            <p className="text-xs uppercase tracking-[0.22em] text-[#8fb8ff]">ZeroClaw Command Deck</p>
+            <p className="text-xs uppercase tracking-[0.22em] text-[#8fb8ff]">AgentZero Command Center</p>
             <h1 className="mt-2 text-2xl font-semibold tracking-[0.03em] text-white md:text-3xl">
-              Agent Runtime Dashboard
+              Runtime Dashboard
             </h1>
             <p className="mt-2 max-w-2xl text-sm text-[#b3cbf8] md:text-base">
-              Real-time telemetry, cost pulse, and operations status in a single collapsible surface.
+              Real-time telemetry, cost pulse, and operations status.
             </p>
             <p className="mt-2 text-xs text-[#6e94d4]">v{status.version}</p>
           </div>

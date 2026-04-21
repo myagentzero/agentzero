@@ -18,7 +18,7 @@ stored in long-term memory.
 Follow these steps exactly:
 
 1. Use `memory_recall` with category 'daily' and since '24h' to retrieve today's \
-   session memories. Also recall category 'system' for any automated observations. \
+   session memories. Also recall category 'conversation' for any chat observations. \
    Look for patterns, discoveries, and progress toward goals.
 
 2. Identify and classify findings:
@@ -30,7 +30,7 @@ Follow these steps exactly:
 3. Synthesize a concise summary (max 500 words) of actionable learnings. \
    Focus on what should change going forward, not just what happened.
 
-4. Store the summary using `memory_store` with category \"core\" and \
+4. Store the summary using `memory_store` with category \"system\" and \
    key format \"consolidation_YYYY-MM-DD\" (use today's date).
 
 5. If the workspace file `MEMORY.md` exists, use `file_read` to read it, \

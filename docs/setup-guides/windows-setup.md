@@ -69,7 +69,7 @@ ZeroClaw uses Cargo feature flags to control which integrations are compiled in:
 | `channel-matrix` | Matrix protocol | No |
 | `browser-native` | Headless browser | No |
 | `hardware` | USB device support | No |
-| `rag-pdf` | PDF extraction for RAG | No |
+| `rag-pdf` | PDF datasheet indexing for hardware RAG | No |
 | `observability-otel` | OpenTelemetry | No |
 
 To build with specific features:

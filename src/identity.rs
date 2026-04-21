@@ -22,7 +22,7 @@ const IDENTITY_BACKENDS: [IdentityBackendProfile; 2] = [
     IdentityBackendProfile {
         key: "openclaw",
         label: "OpenClaw (Markdown workspace identity files)",
-        description: "Classic ZeroClaw layout with IDENTITY.md, SOUL.md, USER.md, and friends.",
+        description: "Classic layout with IDENTITY.md, SOUL.md, USER.md, and friends.",
     },
     IdentityBackendProfile {
         key: "aieos",

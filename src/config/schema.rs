@@ -390,9 +390,11 @@ pub struct Config {
     #[serde(default)]
     pub notion: NotionConfig,
 
-    /// Jira integration configuration (`[jira]`).
+    /// Atlassian Cloud authentication (`[atlassian]`).
+    /// Shared credentials for Jira and Confluence tools.
     #[serde(default)]
-    pub jira: JiraConfig,
+    pub atlassian: AtlassianConfig,
+
 }
 
 /// Named provider profile definition compatible with Codex app-server style config.
@@ -3543,7 +3545,6 @@ fn default_auto_approve() -> Vec<String> {
         "calculator".into(),
         "glob_search".into(),
         "content_search".into(),
-        "image_info".into(),
         "schedule".into(),
         "weather".into(),
         "reaction".into(),
@@ -5552,45 +5553,56 @@ impl Default for AuditConfig {
     }
 }
 
-// -- Jira --
+// -- Atlassian (Shared) --
 
-/// Jira integration configuration (`[jira]`).
+/// Atlassian Cloud authentication configuration (`[atlassian]`).
 ///
-/// When `enabled = true`, the agent exposes a `jira` tool for reading tickets,
-/// searching with JQL, listing projects, and adding comments.
-/// Requires `base_url`, `email`, and `api_token` (or the `JIRA_API_TOKEN` env var).
+/// Shared credentials for Jira and Confluence tools, both of which use
+/// Atlassian Cloud authentication (HTTP Basic Auth with email + API token).
+/// Requires `base_url`, `email`, and `api_token` (or the `ATLASSIAN_API_TOKEN` env var).
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct JiraConfig {
-    #[serde(default)]
-    pub enabled: bool,
+pub struct AtlassianConfig {
     #[serde(default)]
     pub base_url: String,
     #[serde(default)]
     pub email: String,
     #[serde(default)]
     pub api_token: String,
-    #[serde(default = "default_jira_allowed_actions")]
-    pub allowed_actions: Vec<String>,
-    #[serde(default = "default_jira_timeout")]
+    #[serde(default)]
+    pub jira_enabled: bool,
+    #[serde(default)]
+    pub confluence_enabled: bool,
+    #[serde(default = "default_atlassian_jira_allowed_actions")]
+    pub jira_allowed_actions: Vec<String>,
+    #[serde(default = "default_atlassian_confluence_allowed_actions")]
+    pub confluence_allowed_actions: Vec<String>,
+    #[serde(default = "default_atlassian_timeout")]
     pub timeout_secs: u64,
 }
 
-fn default_jira_allowed_actions() -> Vec<String> {
+fn default_atlassian_jira_allowed_actions() -> Vec<String> {
     vec!["get_ticket".into()]
 }
-fn default_jira_timeout() -> u64 {
+
+fn default_atlassian_confluence_allowed_actions() -> Vec<String> {
+    vec!["get_page".into(), "search_pages".into()]
+}
+
+fn default_atlassian_timeout() -> u64 {
     30
 }
 
-impl Default for JiraConfig {
+impl Default for AtlassianConfig {
     fn default() -> Self {
         Self {
-            enabled: false,
             base_url: String::new(),
             email: String::new(),
             api_token: String::new(),
-            allowed_actions: default_jira_allowed_actions(),
-            timeout_secs: default_jira_timeout(),
+            jira_enabled: false,
+            confluence_enabled: false,
+            jira_allowed_actions: default_atlassian_jira_allowed_actions(),
+            confluence_allowed_actions: default_atlassian_confluence_allowed_actions(),
+            timeout_secs: default_atlassian_timeout(),
         }
     }
 }
@@ -5722,7 +5734,7 @@ impl Default for Config {
             mcp: McpConfig::default(),
             model_support_vision: None,
             notion: NotionConfig::default(),
-            jira: JiraConfig::default(),
+            atlassian: AtlassianConfig::default(),
             ask_user: AskUserConfig::default(),
             local_context: LocalContextConfig::default(),
         }
@@ -6562,15 +6574,15 @@ impl Config {
                 decrypt_secret(&store, &mut config.notion.api_key, "config.notion.api_key")?;
             }
 
-            // Jira secrets (top-level, not in ChannelsConfig)
-            if !config.jira.base_url.is_empty() {
-                decrypt_secret(&store, &mut config.jira.base_url, "config.jira.base_url")?;
+            // Atlassian secrets (shared by Jira and Confluence)
+            if !config.atlassian.base_url.is_empty() {
+                decrypt_secret(&store, &mut config.atlassian.base_url, "config.atlassian.base_url")?;
             }
-            if !config.jira.email.is_empty() {
-                decrypt_secret(&store, &mut config.jira.email, "config.jira.email")?;
+            if !config.atlassian.email.is_empty() {
+                decrypt_secret(&store, &mut config.atlassian.email, "config.atlassian.email")?;
             }
-            if !config.jira.api_token.is_empty() {
-                decrypt_secret(&store, &mut config.jira.api_token, "config.jira.api_token")?;
+            if !config.atlassian.api_token.is_empty() {
+                decrypt_secret(&store, &mut config.atlassian.api_token, "config.atlassian.api_token")?;
             }
 
             config.apply_env_overrides();
@@ -8235,21 +8247,22 @@ impl Config {
         }
 
         // Jira secrets (top-level, not in ChannelsConfig)
-        if !config_to_save.jira.base_url.is_empty() {
+        // Atlassian secrets (shared by Jira and Confluence)
+        if !config_to_save.atlassian.base_url.is_empty() {
             encrypt_secret(
                 &store,
-                &mut config_to_save.jira.base_url,
-                "config.jira.base_url",
+                &mut config_to_save.atlassian.base_url,
+                "config.atlassian.base_url",
             )?;
         }
-        if !config_to_save.jira.email.is_empty() {
-            encrypt_secret(&store, &mut config_to_save.jira.email, "config.jira.email")?;
+        if !config_to_save.atlassian.email.is_empty() {
+            encrypt_secret(&store, &mut config_to_save.atlassian.email, "config.atlassian.email")?;
         }
-        if !config_to_save.jira.api_token.is_empty() {
+        if !config_to_save.atlassian.api_token.is_empty() {
             encrypt_secret(
                 &store,
-                &mut config_to_save.jira.api_token,
-                "config.jira.api_token",
+                &mut config_to_save.atlassian.api_token,
+                "config.atlassian.api_token",
             )?;
         }
 
@@ -8891,7 +8904,7 @@ default_temperature = 0.7
             mcp: McpConfig::default(),
             model_support_vision: None,
             notion: NotionConfig::default(),
-            jira: JiraConfig::default(),
+            atlassian: AtlassianConfig::default(),
             ask_user: AskUserConfig::default(),
             local_context: LocalContextConfig::default(),
         };
@@ -9176,7 +9189,7 @@ denied_tools = ["shell"]
             mcp: McpConfig::default(),
             model_support_vision: None,
             notion: NotionConfig::default(),
-            jira: JiraConfig::default(),
+            atlassian: AtlassianConfig::default(),
             ask_user: AskUserConfig::default(),
             local_context: LocalContextConfig::default(),
         };
@@ -9227,9 +9240,9 @@ denied_tools = ["shell"]
             "fallback-a-credential".into(),
         );
         config.gateway.paired_tokens = vec!["zc_0123456789abcdef".into()];
-        config.jira.base_url = "https://mycompany.atlassian.net".into();
-        config.jira.email = "user@example.com".into();
-        config.jira.api_token = "jira-api-token-secret".into();
+        config.atlassian.base_url = "https://mycompany.atlassian.net".into();
+        config.atlassian.email = "user@example.com".into();
+        config.atlassian.api_token = "jira-api-token-secret".into();
 
         config.agents.insert(
             "worker".into(),
@@ -9352,24 +9365,24 @@ denied_tools = ["shell"]
         assert_eq!(store.decrypt(paired_token).unwrap(), "zc_0123456789abcdef");
 
         assert!(crate::security::SecretStore::is_encrypted(
-            &stored.jira.base_url
+            &stored.atlassian.base_url
         ));
         assert_eq!(
-            store.decrypt(&stored.jira.base_url).unwrap(),
+            store.decrypt(&stored.atlassian.base_url).unwrap(),
             "https://mycompany.atlassian.net"
         );
         assert!(crate::security::SecretStore::is_encrypted(
-            &stored.jira.email
+            &stored.atlassian.email
         ));
         assert_eq!(
-            store.decrypt(&stored.jira.email).unwrap(),
+            store.decrypt(&stored.atlassian.email).unwrap(),
             "user@example.com"
         );
         assert!(crate::security::SecretStore::is_encrypted(
-            &stored.jira.api_token
+            &stored.atlassian.api_token
         ));
         assert_eq!(
-            store.decrypt(&stored.jira.api_token).unwrap(),
+            store.decrypt(&stored.atlassian.api_token).unwrap(),
             "jira-api-token-secret"
         );
 

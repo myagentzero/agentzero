@@ -98,8 +98,6 @@ non_cli_excluded_tools = [
     "pushover",
     "composio",
     "delegate",
-    "screenshot",
-    "image_info",
 ]
 non_cli_approval_approvers = []
 non_cli_natural_language_approval_mode = "direct"

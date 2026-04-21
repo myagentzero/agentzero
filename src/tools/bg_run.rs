@@ -248,8 +248,18 @@ impl Tool for BgRunTool {
     }
 
     fn description(&self) -> &str {
-        "Run a tool in the background. Background tools have a 600-second maximum timeout. Check results with bg_status. \
-         Use when: the operation is long-running and you can continue other work. Don't use for getting around security rules."
+        "Run a tool in the background such as long running shell commands. Don't use for getting around security rules. \
+         Check results with bg_status. Background tasks have a 600-second maximum timeout."
+    }
+
+    fn prompt_hint(&self) -> Option<&str> {
+        Some(
+            "Run a tool in the background. Use when: the operation is long-running and you can continue other work. Don't use when: the operation is short or trivial.",
+        )
+    }
+
+    fn prompt_hint_compact(&self) -> &str {
+        "Run a tool in the background."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {
@@ -282,6 +292,7 @@ impl Tool for BgRunTool {
 
         // Validate arguments is an object (matches schema declaration)
         if !arguments.is_object() {
+            tracing::warn!(tool_name, "⚠️ bg_run called with non-object arguments");
             return Ok(ToolResult {
                 success: false,
                 output: String::new(),
@@ -293,6 +304,7 @@ impl Tool for BgRunTool {
         let tool = match self.find_tool(tool_name) {
             Some(t) => t,
             None => {
+                tracing::warn!(tool_name, "⚠️ bg_run called for unknown tool");
                 return Ok(ToolResult {
                     success: false,
                     output: String::new(),
@@ -303,6 +315,7 @@ impl Tool for BgRunTool {
 
         // Don't allow bg_run to spawn itself (prevent recursion)
         if tool_name == "bg_run" || tool_name == "bg_status" {
+            tracing::warn!(tool_name, "⚠️ attempted recursive bg_run invocation");
             return Ok(ToolResult {
                 success: false,
                 output: String::new(),
@@ -313,6 +326,7 @@ impl Tool for BgRunTool {
         // Enforce concurrent job limit to prevent resource exhaustion
         let running_count = self.job_store.running_count().await;
         if running_count >= MAX_CONCURRENT_JOBS {
+            tracing::warn!(tool_name, running_count, max = MAX_CONCURRENT_JOBS, "⚠️ bg_run job limit reached");
             return Ok(ToolResult {
                 success: false,
                 output: String::new(),
@@ -326,6 +340,9 @@ impl Tool for BgRunTool {
         let job_id = generate_job_id();
         let job_store = self.job_store.clone();
         let job_id_for_task = job_id.clone();
+        let tool_name_log = tool_name.to_string();
+
+        tracing::info!(job_id = %job_id, tool_name = %tool_name, "🚀 bg_run job spawned");
 
         // Insert job in Running state
         // Note: sender is set to None here; when used from channels, the caller
@@ -368,11 +385,24 @@ impl Tool for BgRunTool {
                             tool_result.error,
                         )
                     };
+                    tracing::info!(
+                        job_id = %job_id_for_task,
+                        tool_name = %tool_name_log,
+                        status = ?status,
+                        has_error = error.is_some(),
+                        "✅ bg_run job completed"
+                    );
                     job_store
                         .update(&job_id_for_task, status, output, error)
                         .await;
                 }
                 Ok(Err(e)) => {
+                    tracing::error!(
+                        job_id = %job_id_for_task,
+                        tool_name = %tool_name_log,
+                        error = %e,
+                        "❌ bg_run job execution failed"
+                    );
                     job_store
                         .update(
                             &job_id_for_task,
@@ -383,6 +413,12 @@ impl Tool for BgRunTool {
                         .await;
                 }
                 Err(_) => {
+                    tracing::error!(
+                        job_id = %job_id_for_task,
+                        tool_name = %tool_name_log,
+                        timeout_secs = BG_TOOL_TIMEOUT_SECS,
+                        "⏱️ bg_run job timed out"
+                    );
                     job_store
                         .update(
                             &job_id_for_task,
@@ -433,8 +469,18 @@ impl Tool for BgStatusTool {
     }
 
     fn description(&self) -> &str {
-        "Query the status of a background job by ID, or list all jobs if no ID provided. \
-         Returns job status (running/complete/failed), result output, and elapsed time."
+        "Query the status of a background job by job_id, or list all jobs if no job_id provided. \
+         Returns job status (running/complete/failed), result output, and elapsed time. Hard limit of 5 concurrent jobs."
+    }
+
+    fn prompt_hint(&self) -> Option<&str> {
+        Some(
+            "Query the status of a background job. Use when: you need to monitor bg_run tasks. Don't use when: you only need immediate results.",
+        )
+    }
+
+    fn prompt_hint_compact(&self) -> &str {
+        "Query the status of a background job."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {
@@ -443,7 +489,7 @@ impl Tool for BgStatusTool {
             "properties": {
                 "job_id": {
                     "type": "string",
-                    "description": "Optional job ID to query. If omitted, returns all jobs."
+                    "description": "Optional job_id to query. If omitted, returns all jobs."
                 }
             }
         })

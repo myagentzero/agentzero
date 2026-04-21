@@ -13,7 +13,7 @@ pub use schema::{
     DockerRuntimeConfig, EconomicConfig, EconomicTokenPricing, EmbeddingRouteConfig, EstopConfig,
     GatewayConfig, GroupReplyConfig, GroupReplyMode, HardwareConfig, HardwareTransport,
     HeartbeatConfig, HooksConfig, HttpRequestConfig, HttpRequestCredentialProfile, IdentityConfig,
-    JiraConfig, MemoryConfig, ModelRouteConfig, MultimodalConfig,
+    MemoryConfig, ModelRouteConfig, MultimodalConfig,
     NonCliNaturalLanguageApprovalMode, NotionConfig, ObservabilityConfig, OtpChallengeDelivery,
     OtpConfig, OtpMethod, OutboundLeakGuardAction, OutboundLeakGuardConfig, PeripheralBoardConfig,
     PeripheralsConfig, PerplexityFilterConfig, PipelineConfig, PluginEntryConfig, PluginsConfig,

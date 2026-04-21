@@ -178,7 +178,19 @@ pub fn all_integrations() -> Vec<IntegrationEntry> {
             description: "Issue tracking & projects",
             category: IntegrationCategory::Productivity,
             status_fn: |c| {
-                if c.jira.enabled && !c.jira.api_token.is_empty() {
+                if c.atlassian.jira_enabled && !c.atlassian.api_token.is_empty() {
+                    IntegrationStatus::Active
+                } else {
+                    IntegrationStatus::Available
+                }
+            },
+        },
+        IntegrationEntry {
+            name: "Confluence",
+            description: "Wiki, docs & knowledge base",
+            category: IntegrationCategory::Productivity,
+            status_fn: |c| {
+                if c.atlassian.confluence_enabled && !c.atlassian.api_token.is_empty() {
                     IntegrationStatus::Active
                 } else {
                     IntegrationStatus::Available

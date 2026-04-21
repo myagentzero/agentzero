@@ -1303,7 +1303,7 @@ impl SecurityPolicy {
                 let lower = command.to_ascii_lowercase();
                 if lower.contains("curl") || lower.contains("wget") {
                     return Err(
-                        "Command blocked: high-risk command is disallowed by policy. Shell curl/wget are blocked; use `http_request` or `web_fetch` with configured allowed_domains."
+                        "Command blocked: high-risk command is disallowed by policy. Shell curl/wget are blocked; use `http_request` or `browser` with configured allowed_domains."
                             .into(),
                     );
                 }
@@ -1679,7 +1679,7 @@ impl SecurityPolicy {
 
     pub fn runtime_config_violation_message(&self, resolved: &Path) -> String {
         format!(
-            "Refusing to modify ZeroClaw runtime config/state file: {}. Use dedicated config tools or edit it manually outside the agent loop.",
+            "Refusing to modify runtime config/state file: {}. Use dedicated config tools or edit it manually outside the agent loop.",
             resolved.display()
         )
     }

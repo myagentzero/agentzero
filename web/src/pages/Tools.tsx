@@ -4,26 +4,21 @@ import {
   Search,
   ChevronDown,
   ChevronRight,
-  Terminal,
   Package,
 } from 'lucide-react';
-import type { ToolSpec, CliTool } from '@/types/api';
-import { getTools, getCliTools } from '@/lib/api';
+import type { ToolSpec } from '@/types/api';
+import { getTools } from '@/lib/api';
 
 export default function Tools() {
   const [tools, setTools] = useState<ToolSpec[]>([]);
-  const [cliTools, setCliTools] = useState<CliTool[]>([]);
   const [search, setSearch] = useState('');
   const [expandedTool, setExpandedTool] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    Promise.all([getTools(), getCliTools()])
-      .then(([t, c]) => {
-        setTools(t);
-        setCliTools(c);
-      })
+    getTools()
+      .then(setTools)
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
   }, []);
@@ -32,12 +27,6 @@ export default function Tools() {
     (t) =>
       t.name.toLowerCase().includes(search.toLowerCase()) ||
       t.description.toLowerCase().includes(search.toLowerCase()),
-  );
-
-  const filteredCli = cliTools.filter(
-    (t) =>
-      t.name.toLowerCase().includes(search.toLowerCase()) ||
-      t.category.toLowerCase().includes(search.toLowerCase()),
   );
 
   if (error) {
@@ -132,62 +121,6 @@ export default function Tools() {
           </div>
         )}
       </div>
-
-      {/* CLI Tools Section */}
-      {filteredCli.length > 0 && (
-        <div>
-          <div className="flex items-center gap-2 mb-4">
-            <Terminal className="h-5 w-5 text-green-400" />
-            <h2 className="text-base font-semibold text-white">
-              CLI Tools ({filteredCli.length})
-            </h2>
-          </div>
-
-          <div className="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-gray-800">
-                  <th className="text-left px-4 py-3 text-gray-400 font-medium">
-                    Name
-                  </th>
-                  <th className="text-left px-4 py-3 text-gray-400 font-medium">
-                    Path
-                  </th>
-                  <th className="text-left px-4 py-3 text-gray-400 font-medium">
-                    Version
-                  </th>
-                  <th className="text-left px-4 py-3 text-gray-400 font-medium">
-                    Category
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredCli.map((tool) => (
-                  <tr
-                    key={tool.name}
-                    className="border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors"
-                  >
-                    <td className="px-4 py-3 text-white font-medium">
-                      {tool.name}
-                    </td>
-                    <td className="px-4 py-3 text-gray-400 font-mono text-xs truncate max-w-[200px]">
-                      {tool.path}
-                    </td>
-                    <td className="px-4 py-3 text-gray-400">
-                      {tool.version ?? '-'}
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-800 text-gray-300 capitalize">
-                        {tool.category}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

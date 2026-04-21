@@ -835,21 +835,23 @@ export const CONFIG_SECTIONS: SectionDef[] = [
     ],
   },
 
-  // ── Jira ──────────────────────────────────────────────────────────
+  // ── Atlassian ────────────────────────────────────────────────────────
   {
-    path: 'jira',
+    path: 'atlassian',
     category: 'tools',
-    title: 'Jira',
-    description: 'Jira issue tracker integration',
+    title: 'Atlassian',
+    description: 'Jira and Confluence integration (shared Atlassian Cloud credentials)',
     icon: Ticket,
     defaultCollapsed: true,
     fields: [
-      { key: 'enabled', label: 'Enabled', type: 'toggle', defaultValue: false },
-      { key: 'base_url', label: 'Base URL', type: 'password', sensitive: true, description: 'e.g. https://yourcompany.atlassian.net' },
-      { key: 'email', label: 'Email', type: 'password', sensitive: true, description: 'Jira account email for API authentication' },
-      { key: 'api_token', label: 'API Token', type: 'password', sensitive: true, description: 'Jira API token (generate at id.atlassian.net)' },
-      { key: 'allowed_actions', label: 'Allowed Actions', type: 'tag-list', tagPlaceholder: 'e.g. search_tickets', description: 'Default: get_ticket. Options: get_ticket, search_tickets, comment_ticket, list_projects, myself' },
-      { key: 'timeout_secs', label: 'Timeout (s)', type: 'number', min: 1, defaultValue: 30, description: 'Default: 30' },
+      { key: 'base_url', label: 'Base URL', type: 'password', sensitive: true, description: 'e.g. https://yourcompany.atlassian.net (shared for Jira and Confluence)' },
+      { key: 'email', label: 'Email', type: 'password', sensitive: true, description: 'Atlassian account email for API authentication' },
+      { key: 'api_token', label: 'API Token', type: 'password', sensitive: true, description: 'Atlassian API token (generate at id.atlassian.net, shared for both tools)' },
+      { key: 'timeout_secs', label: 'Timeout (s)', type: 'number', min: 1, defaultValue: 30, description: 'Default: 30 (request timeout for both Jira and Confluence)' },
+      { key: 'jira_enabled', label: 'Jira Enabled', type: 'toggle', defaultValue: false },
+      { key: 'jira_allowed_actions', label: 'Jira Allowed Actions', type: 'tag-list', tagPlaceholder: 'e.g. get_ticket', description: 'Default: get_ticket. Options: get_ticket, search_tickets, comment_ticket, list_projects, myself' },
+      { key: 'confluence_enabled', label: 'Confluence Enabled', type: 'toggle', defaultValue: false },
+      { key: 'confluence_allowed_actions', label: 'Confluence Allowed Actions', type: 'tag-list', tagPlaceholder: 'e.g. get_page', description: 'Default: get_page, search_pages. Options: get_page, search_pages, list_spaces, get_space' },
     ],
   },
 

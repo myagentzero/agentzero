@@ -88,7 +88,7 @@ RUN mkdir -p /zeroclaw-data/.zeroclaw /zeroclaw-data/workspace && \
         '' \
         '[autonomy]' \
         'level = "supervised"' \
-        'auto_approve = ["file_read", "file_write", "file_edit", "memory_recall", "memory_store", "web_search_tool", "web_fetch", "calculator", "glob_search", "content_search", "image_info", "weather", "git_operations"]' \
+        'auto_approve = ["file_read", "file_write", "file_edit", "memory_recall", "memory_store", "web_search_tool", "web_fetch", "calculator", "glob_search", "content_search", "weather", "git_operations"]' \
         > /zeroclaw-data/.zeroclaw/config.toml && \
     chown -R 65534:65534 /zeroclaw-data
 

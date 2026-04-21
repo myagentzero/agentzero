@@ -601,14 +601,7 @@ impl Tool for ComposioTool {
     }
 
     fn description(&self) -> &str {
-        "Execute actions on 1000+ apps via Composio (Gmail, Notion, GitHub, Slack, etc.). \
-         Use action='list' to see available actions (includes parameter names). \
-         action='execute' with action_name/tool_slug and params to run an action. \
-         If you are unsure of the exact params, pass 'text' instead with a natural-language description \
-         of what you want (Composio will resolve the correct parameters via NLP). \
-         action='list_accounts' or action='connected_accounts' to list OAuth-connected accounts. \
-         action='connect' with app/auth_config_id to get OAuth URL. \
-         connected_account_id is auto-resolved when omitted."
+        "Execute actions on 1000+ apps via Composio (Gmail, Notion, GitHub, Slack, etc.)."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {

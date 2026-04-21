@@ -23,8 +23,8 @@ impl Tool for CronListTool {
 
     fn description(&self) -> &str {
         "List all cron jobs with schedule, status, and next run time. \
-        Use when: checking existing jobs before creating duplicates, finding a job_id for removal, \
-        or reviewing what's scheduled. Don't use when: the user already provided the job_id."
+         Use when: checking existing jobs before creating duplicates, finding a job_id for removal, \
+         or reviewing what's scheduled. Don't use when: the user already provided the job_id."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {

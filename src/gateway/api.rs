@@ -523,24 +523,24 @@ pub async fn handle_api_integrations_credentials_put(
         "jira" => {
             if let Some(base_url) = fields.get("base_url").and_then(|v| v.as_str()) {
                 if !base_url.is_empty() && base_url != MASKED_SECRET {
-                    config.jira.base_url = base_url.to_string();
+                    config.atlassian.base_url = base_url.to_string();
                 }
             }
             if let Some(email) = fields.get("email").and_then(|v| v.as_str()) {
                 if !email.is_empty() && email != MASKED_SECRET {
-                    config.jira.email = email.to_string();
+                    config.atlassian.email = email.to_string();
                 }
             }
             if let Some(api_token) = fields.get("api_token").and_then(|v| v.as_str()) {
                 if !api_token.is_empty() && api_token != MASKED_SECRET {
-                    config.jira.api_token = api_token.to_string();
+                    config.atlassian.api_token = api_token.to_string();
                 }
             }
-            if !config.jira.base_url.is_empty()
-                && !config.jira.email.is_empty()
-                && !config.jira.api_token.is_empty()
+            if !config.atlassian.base_url.is_empty()
+                && !config.atlassian.email.is_empty()
+                && !config.atlassian.api_token.is_empty()
             {
-                config.jira.enabled = true;
+                config.atlassian.jira_enabled = true;
             }
         }
         _ => {
@@ -791,9 +791,9 @@ fn integration_settings_fields(
             (configured, fields)
         }
         "Jira" => {
-            let has_token = !config.jira.api_token.is_empty();
-            let has_url = !config.jira.base_url.is_empty();
-            let has_email = !config.jira.email.is_empty();
+            let has_token = !config.atlassian.api_token.is_empty();
+            let has_url = !config.atlassian.base_url.is_empty();
+            let has_email = !config.atlassian.email.is_empty();
             let configured = has_token && has_url && has_email;
             let fields = vec![
                 serde_json::json!({
@@ -1008,7 +1008,14 @@ pub async fn handle_api_cli_tools(
         return e.into_response();
     }
 
-    let tools = crate::tools::cli_discovery::discover_cli_tools(&[], &[]);
+    let tools = tokio::task::spawn_blocking(|| {
+        crate::tools::cli_discovery::discover_cli_tools(&[], &[])
+    })
+    .await
+    .unwrap_or_else(|e| {
+        tracing::error!("CLI tool discovery task panicked: {}", e);
+        Vec::new()
+    });
 
     Json(serde_json::json!({"cli_tools": tools})).into_response()
 }
@@ -1187,9 +1194,9 @@ fn mask_sensitive_fields(config: &crate::config::Config) -> crate::config::Confi
     }
     mask_vec_secrets(&mut masked.gateway.paired_tokens);
     mask_required_secret(&mut masked.notion.api_key);
-    mask_required_secret(&mut masked.jira.api_token);
-    mask_required_secret(&mut masked.jira.email);
-    mask_required_secret(&mut masked.jira.base_url);
+    mask_required_secret(&mut masked.atlassian.api_token);
+    mask_required_secret(&mut masked.atlassian.email);
+    mask_required_secret(&mut masked.atlassian.base_url);
 
     if let Some(discord) = masked.channels_config.discord.as_mut() {
         mask_required_secret(&mut discord.bot_token);
@@ -1278,9 +1285,9 @@ fn restore_masked_sensitive_fields(
         &current.gateway.paired_tokens,
     );
     restore_required_secret(&mut incoming.notion.api_key, &current.notion.api_key);
-    restore_required_secret(&mut incoming.jira.api_token, &current.jira.api_token);
-    restore_required_secret(&mut incoming.jira.email, &current.jira.email);
-    restore_required_secret(&mut incoming.jira.base_url, &current.jira.base_url);
+    restore_required_secret(&mut incoming.atlassian.api_token, &current.atlassian.api_token);
+    restore_required_secret(&mut incoming.atlassian.email, &current.atlassian.email);
+    restore_required_secret(&mut incoming.atlassian.base_url, &current.atlassian.base_url);
 
     if let (Some(incoming_ch), Some(current_ch)) = (
         incoming.channels_config.discord.as_mut(),

@@ -80,29 +80,9 @@ const KNOWN_CLIS: &[KnownCli] = &[
         category: CliCategory::PackageManager,
     },
     KnownCli {
-        name: "docker",
-        version_args: &["--version"],
-        category: CliCategory::Container,
-    },
-    KnownCli {
-        name: "cargo",
-        version_args: &["--version"],
-        category: CliCategory::Build,
-    },
-    KnownCli {
         name: "make",
         version_args: &["--version"],
         category: CliCategory::Build,
-    },
-    KnownCli {
-        name: "kubectl",
-        version_args: &["version", "--client", "--short"],
-        category: CliCategory::Cloud,
-    },
-    KnownCli {
-        name: "rustc",
-        version_args: &["--version"],
-        category: CliCategory::Language,
     },
 ];
 
@@ -153,40 +133,56 @@ fn probe_cli(name: &str, version_args: &[&str], category: CliCategory) -> Option
     })
 }
 
-/// Find an executable on PATH.
+/// Find an executable on PATH by walking PATH entries — no subprocess needed.
 fn find_executable(name: &str) -> Option<PathBuf> {
-    #[cfg(target_os = "windows")]
-    let which_cmd = "where";
-    #[cfg(not(target_os = "windows"))]
-    let which_cmd = "which";
+    let path_var = std::env::var_os("PATH")?;
+    for dir in std::env::split_paths(&path_var) {
+        #[cfg(target_os = "windows")]
+        let candidate = {
+            let p = dir.join(name);
+            if p.extension().is_none() {
+                p.with_extension("exe")
+            } else {
+                p
+            }
+        };
+        #[cfg(not(target_os = "windows"))]
+        let candidate = dir.join(name);
 
-    let output = std::process::Command::new(which_cmd)
-        .arg(name)
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .output()
-        .ok()?;
-
-    if !output.status.success() {
-        return None;
+        if candidate.is_file() {
+            return Some(candidate);
+        }
     }
-
-    let path_str = String::from_utf8_lossy(&output.stdout);
-    let first_line = path_str.lines().next()?.trim();
-    if first_line.is_empty() {
-        return None;
-    }
-    Some(PathBuf::from(first_line))
+    None
 }
 
 /// Get the version string of a CLI tool.
+/// Enforces a 2-second timeout to avoid hanging on slow or broken tools.
 fn get_version(name: &str, args: &[&str]) -> Option<String> {
-    let output = std::process::Command::new(name)
+    let mut child = std::process::Command::new(name)
         .args(args)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
-        .output()
+        .spawn()
         .ok()?;
+
+    let deadline =
+        std::time::Instant::now() + std::time::Duration::from_secs(2);
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) => {
+                if std::time::Instant::now() >= deadline {
+                    let _ = child.kill();
+                    return None;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            Err(_) => return None,
+        }
+    }
+
+    let output = child.wait_with_output().ok()?;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);

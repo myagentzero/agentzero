@@ -253,7 +253,7 @@ pub async fn run_wizard(force: bool) -> Result<Config> {
         mcp: crate::config::schema::McpConfig::default(),
         model_support_vision: None,
         notion: crate::config::NotionConfig::default(),
-        jira: crate::config::JiraConfig::default(),
+        atlassian: crate::config::schema::AtlassianConfig::default(),
         ask_user: crate::config::AskUserConfig::default(),
         local_context: crate::config::schema::LocalContextConfig::default(),
     };
@@ -631,7 +631,7 @@ async fn run_quick_setup_with_home(
         mcp: crate::config::schema::McpConfig::default(),
         model_support_vision: None,
         notion: crate::config::NotionConfig::default(),
-        jira: crate::config::JiraConfig::default(),
+        atlassian: crate::config::schema::AtlassianConfig::default(),
         ask_user: crate::config::AskUserConfig::default(),
         local_context: crate::config::schema::LocalContextConfig::default(),
     };

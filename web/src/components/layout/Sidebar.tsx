@@ -83,7 +83,7 @@ export default function Sidebar({
                 <div
                   className="electric-brand-mark h-9 w-9 shrink-0 rounded-xl"
                   role="img"
-                  aria-label="ZeroClaw"
+                  aria-label="AgentZero"
                 >
                   <svg
                     xmlns="http://www.w3.org/2000/svg"
@@ -213,7 +213,7 @@ export default function Sidebar({
                     </g>
                     <path id="zeroclaw-brand-text-arc" d="M130,400 Q256,460 382,400" fill="none" />
                     <text fontFamily="'Courier New', monospace" fontSize="22" fontWeight="bold" fill="#ff6b35" textAnchor="middle" filter="url(#zeroclaw-brand-circuit-glow)" opacity="0.85">
-                      <textPath href="#zeroclaw-brand-text-arc" startOffset="50%">ZEROCLAW</textPath>
+                      <textPath href="#zeroclaw-brand-text-arc" startOffset="50%">AgentZero</textPath>
                     </text>
                     <text fontFamily="'Courier New', monospace" fontSize="9" fill="#ff6b35" opacity="0.15" textAnchor="middle">
                       <tspan x="256" y="480">01011010 01000011</tspan>
@@ -221,10 +221,10 @@ export default function Sidebar({
                     <circle cx="256" cy="256" r="248" fill="none" stroke="#ff6b35" strokeWidth="1" opacity="0.2" />
                     <circle cx="256" cy="256" r="252" fill="none" stroke="#ff6b35" strokeWidth="0.5" opacity="0.1" strokeDasharray="8,4" />
                   </svg>
-                  <span className="sr-only">ZeroClaw</span>
+                  <span className="sr-only">AgentZero</span>
                 </div>
                 <span className="text-lg font-semibold tracking-[0.1em] text-white">
-                  ZeroClaw
+                  AgentZero
                 </span>
               </>
             )}

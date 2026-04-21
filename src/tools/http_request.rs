@@ -322,7 +322,7 @@ impl Tool for HttpRequestTool {
 
     fn description(&self) -> &str {
         "Make HTTP requests to external APIs. Supports GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS methods. \
-        Security constraints: allowlist-only domains, no local/private hosts, configurable timeout and response size limits."
+         Security constraints: allowlist-only domains, no local/private hosts, configurable timeout and response size limits."
     }
 
     fn prompt_hint(&self) -> Option<&str> {

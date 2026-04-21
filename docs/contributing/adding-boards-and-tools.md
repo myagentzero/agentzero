@@ -76,13 +76,15 @@ builtin_led: 13
 
 ### PDF Datasheets
 
-With the `rag-pdf` feature, ZeroClaw can index PDF files:
+With the `rag-pdf` feature, ZeroClaw can index PDF datasheets for hardware RAG:
 
 ```bash
 cargo build --features hardware,rag-pdf
 ```
 
-Place PDFs in the datasheet directory. They are extracted and chunked for RAG.
+Place PDFs in the datasheet directory. They are extracted and chunked for RAG retrieval.
+
+Note: For general PDF reading/conversion, use the doc-converter skill instead of the file_read tool.
 
 ## Adding a New Board Type
 

@@ -23,11 +23,7 @@ impl Tool for CalculatorTool {
     }
 
     fn description(&self) -> &str {
-        "Perform arithmetic and statistical calculations. Supports 25 functions: \
-         add, subtract, divide, multiply, pow, sqrt, abs, modulo, round, \
-         log, ln, exp, factorial, sum, average, median, mode, min, max, \
-         range, variance, stdev, percentile, count, percentage_change, clamp. \
-         Use this tool whenever you need to compute a numeric result instead of guessing."
+        "Perform arithmetic and statistical calculations. Supports 26 functions. Use this tool whenever you need to compute a numeric result instead of guessing."
     }
 
     fn prompt_hint(&self) -> Option<&str> {

@@ -44,8 +44,8 @@ pub mod hardware_memory_map;
 #[cfg(feature = "hardware")]
 pub mod hardware_memory_read;
 pub mod http_request;
-pub mod image_info;
 pub mod jira_tool;
+pub mod confluence_tool;
 pub mod local_context;
 pub mod mcp_client;
 pub mod mcp_protocol;
@@ -62,7 +62,6 @@ pub mod provider_status;
 pub mod reaction;
 pub mod read_skill;
 pub mod schema;
-pub mod screenshot;
 pub mod shell;
 pub mod subagent_list;
 pub mod subagent_manage;
@@ -100,8 +99,8 @@ pub use hardware_memory_map::HardwareMemoryMapTool;
 #[cfg(feature = "hardware")]
 pub use hardware_memory_read::HardwareMemoryReadTool;
 pub use http_request::HttpRequestTool;
-pub use image_info::ImageInfoTool;
 pub use jira_tool::JiraTool;
+pub use confluence_tool::ConfluenceTool;
 pub use local_context::LocalContextTool;
 pub use mcp_client::McpRegistry;
 pub use mcp_tool::McpToolWrapper;
@@ -115,7 +114,6 @@ pub use reaction::ReactionTool;
 pub use read_skill::ReadSkillTool;
 #[allow(unused_imports)]
 pub use schema::{CleaningStrategy, SchemaCleanr};
-pub use screenshot::ScreenshotTool;
 pub use shell::ShellTool;
 pub use subagent_list::SubAgentListTool;
 pub use subagent_manage::SubAgentManageTool;
@@ -501,34 +499,56 @@ pub fn all_tools_with_runtime(
     }
 
     // Jira API tool (conditionally registered)
-    if root_config.jira.enabled {
-        let base_url = root_config.jira.base_url.trim();
-        let email = root_config.jira.email.trim();
-        let token = if root_config.jira.api_token.trim().is_empty() {
-            std::env::var("JIRA_API_TOKEN").unwrap_or_default()
+    if root_config.atlassian.jira_enabled {
+        let base_url = root_config.atlassian.base_url.trim();
+        let email = root_config.atlassian.email.trim();
+        let token = if root_config.atlassian.api_token.trim().is_empty() {
+            std::env::var("ATLASSIAN_API_TOKEN").unwrap_or_default()
         } else {
-            root_config.jira.api_token.trim().to_string()
+            root_config.atlassian.api_token.trim().to_string()
         };
 
         if base_url.is_empty() || email.is_empty() || token.trim().is_empty() {
             tracing::warn!(
-                "Jira tool enabled but missing required config (base_url, email, api_token or JIRA_API_TOKEN env var)"
+                "Jira tool enabled but missing required config in [atlassian] section (base_url, email, api_token or ATLASSIAN_API_TOKEN env var)"
             );
         } else {
             tool_arcs.push(Arc::new(JiraTool::new(
                 base_url.to_string(),
                 email.to_string(),
-                token,
-                root_config.jira.allowed_actions.clone(),
+                token.clone(),
+                root_config.atlassian.jira_allowed_actions.clone(),
                 security.clone(),
-                root_config.jira.timeout_secs,
+                root_config.atlassian.timeout_secs,
             )));
         }
     }
 
-    // Vision tools are always available
-    tool_arcs.push(Arc::new(ScreenshotTool::new(security.clone())));
-    tool_arcs.push(Arc::new(ImageInfoTool::new(security.clone())));
+    // Confluence API tool (conditionally registered)
+    if root_config.atlassian.confluence_enabled {
+        let base_url = root_config.atlassian.base_url.trim();
+        let email = root_config.atlassian.email.trim();
+        let token = if root_config.atlassian.api_token.trim().is_empty() {
+            std::env::var("ATLASSIAN_API_TOKEN").unwrap_or_default()
+        } else {
+            root_config.atlassian.api_token.trim().to_string()
+        };
+
+        if base_url.is_empty() || email.is_empty() || token.trim().is_empty() {
+            tracing::warn!(
+                "Confluence tool enabled but missing required config in [atlassian] section (base_url, email, api_token or ATLASSIAN_API_TOKEN env var)"
+            );
+        } else {
+            tool_arcs.push(Arc::new(ConfluenceTool::new(
+                base_url.to_string(),
+                email.to_string(),
+                token,
+                root_config.atlassian.confluence_allowed_actions.clone(),
+                security.clone(),
+                root_config.atlassian.timeout_secs,
+            )));
+        }
+    }
 
     if let Some(key) = composio_key {
         if !key.is_empty() {
@@ -781,7 +801,7 @@ mod tests {
     fn default_tools_has_expected_count() {
         let security = Arc::new(SecurityPolicy::default());
         let tools = default_tools(security);
-        assert_eq!(tools.len(), 6);
+        assert_eq!(tools.len(), 7);
     }
 
     #[test]

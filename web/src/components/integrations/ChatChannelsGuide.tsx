@@ -48,7 +48,7 @@ export default function ChatChannelsGuide() {
         <div className="border-t border-[#18356f] px-4 pb-5 pt-4 md:px-5">
           <div className="rounded-xl border border-[#1e3a78] bg-[#07142f]/85 p-3 md:p-4">
             <p className="text-sm leading-relaxed text-[#c8dcff]">
-              ZeroClaw can talk to you on the chat apps you already use through
+              AgentZero can talk to you on the chat apps you already use through
               Gateway. Text is supported across all channels; media and reactions
               vary by channel.
             </p>
