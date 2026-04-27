@@ -3625,7 +3625,7 @@ mod tests {
 
     #[test]
     fn heredoc_inside_quoted_string_not_treated_as_heredoc() {
-        let p = default_policy();
+        let _p = default_policy();
         // The << is inside quotes, so it's not a real heredoc operator
         let cmd = "echo \"python3 << EOF\"";
         let stripped = strip_heredoc_bodies(cmd);
@@ -3655,7 +3655,7 @@ mod tests {
 
     #[test]
     fn fd_redirect_ampersand_not_treated_as_background() {
-        let p = default_policy();
+        let _p = default_policy();
         // 2>&1 is stderr-to-stdout redirection, not a background operator
         assert!(
             !contains_unquoted_single_ampersand("echo hello 2>&1"),

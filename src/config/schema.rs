@@ -270,6 +270,10 @@ pub struct Config {
     #[serde(default)]
     pub goal_loop: GoalLoopConfig,
 
+    /// Memory consolidation configuration (`[consolidation]`).
+    #[serde(default)]
+    pub consolidation: ConsolidationConfig,
+
     /// Channel configurations: slack, Discord, Slack, etc. (`[channels_config]`).
     #[serde(default)]
     pub channels_config: ChannelsConfig,
@@ -456,6 +460,9 @@ pub struct ProviderConfig {
     /// Only relevant when the provider targets a LiteLLM proxy with caching enabled.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub litellm_cache: Option<crate::providers::compatible::LiteLlmCacheConfig>,
+    /// Custom User-Agent header sent with provider requests (custom: providers only).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_agent: Option<String>,
 }
 // ── Delegate Agents ──────────────────────────────────────────────
 
@@ -4140,6 +4147,58 @@ impl Default for HeartbeatConfig {
     }
 }
 
+// ── Consolidation ────────────────────────────────────────────────────
+
+/// Memory consolidation configuration (`[consolidation]` section).
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct ConsolidationConfig {
+    /// Enable nightly memory consolidation. Default: `false`.
+    pub enabled: bool,
+    /// Cron schedule expression for consolidation. Default: `"0 3 * * *"` (3:00 AM daily).
+    #[serde(default = "default_consolidation_schedule")]
+    pub schedule: String,
+    /// Optional IANA timezone for schedule evaluation (e.g. "America/New_York").
+    #[serde(default)]
+    pub timezone: Option<String>,
+    /// Run consolidation with light context (compact_context + skip_bootstrap_files). Default: `false`.
+    #[serde(default)]
+    pub light_context: bool,
+    /// Optional custom path to the consolidation prompt file (relative to workspace_dir).
+    /// Defaults to `CONSOLIDATION.md` in workspace root.
+    #[serde(default)]
+    pub prompt_file: Option<String>,
+    /// Channel to post the consolidation summary to after each run (e.g. "slack", "discord").
+    /// When omitted, no announcement is sent.
+    #[serde(default)]
+    pub delivery_channel: Option<String>,
+    /// Target recipient for delivery (e.g. Slack channel ID).
+    /// When omitted, auto-resolved from the matching channel config.
+    #[serde(default)]
+    pub delivery_to: Option<String>,
+    /// Treat delivery failures as non-fatal. Default: `true`.
+    #[serde(default = "default_true")]
+    pub delivery_best_effort: bool,
+}
+
+fn default_consolidation_schedule() -> String {
+    "0 3 * * *".to_string()
+}
+
+impl Default for ConsolidationConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            schedule: default_consolidation_schedule(),
+            timezone: None,
+            light_context: false,
+            prompt_file: None,
+            delivery_channel: None,
+            delivery_to: None,
+            delivery_best_effort: true,
+        }
+    }
+}
+
 // ── Goal Loop Config ────────────────────────────────────────────
 
 /// Configuration for the autonomous goal loop engine (`[goal_loop]`).
@@ -5706,6 +5765,7 @@ impl Default for Config {
             heartbeat: HeartbeatConfig::default(),
             cron: CronConfig::default(),
             goal_loop: GoalLoopConfig::default(),
+            consolidation: ConsolidationConfig::default(),
             channels_config: ChannelsConfig::default(),
             memory: MemoryConfig::default(),
             storage: StorageConfig::default(),
@@ -6786,6 +6846,11 @@ impl Config {
         &self,
     ) -> Option<crate::providers::compatible::LiteLlmCacheConfig> {
         self.provider.litellm_cache.clone()
+    }
+
+    /// Resolve custom user-agent from the `[provider]` section.
+    pub fn effective_provider_user_agent(&self) -> Option<String> {
+        self.provider.user_agent.clone()
     }
 
     fn lookup_model_provider_profile(
@@ -8859,6 +8924,7 @@ default_temperature = 0.7
             },
             cron: CronConfig::default(),
             goal_loop: GoalLoopConfig::default(),
+            consolidation: ConsolidationConfig::default(),
             channels_config: ChannelsConfig {
                 cli: true,
                 discord: Some(DiscordConfig {
@@ -9095,7 +9161,7 @@ max_tool_iterations = 20
 max_history_messages = 80
 parallel_tools = true
 tool_dispatcher = "xml"
-allowed_tools = ["delegate", "task_plan"]
+allowed_tools = ["delegate", "memory_recall"]
 denied_tools = ["shell"]
 "#;
         let parsed: Config = toml::from_str(raw).unwrap();
@@ -9106,7 +9172,7 @@ denied_tools = ["shell"]
         assert_eq!(parsed.agent.tool_dispatcher, "xml");
         assert_eq!(
             parsed.agent.allowed_tools,
-            vec!["delegate".to_string(), "task_plan".to_string()]
+            vec!["delegate".to_string(), "memory_recall".to_string()]
         );
         assert_eq!(parsed.agent.denied_tools, vec!["shell".to_string()]);
     }
@@ -9163,6 +9229,7 @@ denied_tools = ["shell"]
             heartbeat: HeartbeatConfig::default(),
             cron: CronConfig::default(),
             goal_loop: GoalLoopConfig::default(),
+            consolidation: ConsolidationConfig::default(),
             channels_config: ChannelsConfig::default(),
             memory: MemoryConfig::default(),
             storage: StorageConfig::default(),

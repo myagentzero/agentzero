@@ -3,7 +3,7 @@ let inMemoryToken: string | null = null;
 
 function readStorage(key: string): string | null {
   try {
-    return sessionStorage.getItem(key);
+    return localStorage.getItem(key);
   } catch {
     return null;
   }
@@ -11,21 +11,13 @@ function readStorage(key: string): string | null {
 
 function writeStorage(key: string, value: string): void {
   try {
-    sessionStorage.setItem(key, value);
+    localStorage.setItem(key, value);
   } catch {
-    // sessionStorage may be unavailable in some browser privacy modes
+    // localStorage may be unavailable in some browser privacy modes
   }
 }
 
 function removeStorage(key: string): void {
-  try {
-    sessionStorage.removeItem(key);
-  } catch {
-    // Ignore
-  }
-}
-
-function clearLegacyLocalStorageToken(key: string): void {
   try {
     localStorage.removeItem(key);
   } catch {
@@ -47,18 +39,6 @@ export function getToken(): string | null {
     return sessionToken;
   }
 
-  // One-time migration from older localStorage-backed sessions.
-  try {
-    const legacy = localStorage.getItem(TOKEN_STORAGE_KEY);
-    if (legacy && legacy.length > 0) {
-      inMemoryToken = legacy;
-      writeStorage(TOKEN_STORAGE_KEY, legacy);
-      localStorage.removeItem(TOKEN_STORAGE_KEY);
-      return legacy;
-    }
-  } catch {
-    // Ignore
-  }
 
   return null;
 }
@@ -69,7 +49,6 @@ export function getToken(): string | null {
 export function setToken(token: string): void {
   inMemoryToken = token;
   writeStorage(TOKEN_STORAGE_KEY, token);
-  clearLegacyLocalStorageToken(TOKEN_STORAGE_KEY);
 }
 
 /**
@@ -78,7 +57,6 @@ export function setToken(token: string): void {
 export function clearToken(): void {
   inMemoryToken = null;
   removeStorage(TOKEN_STORAGE_KEY);
-  clearLegacyLocalStorageToken(TOKEN_STORAGE_KEY);
 }
 
 /**

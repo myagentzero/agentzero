@@ -1009,7 +1009,7 @@ pub async fn handle_api_cli_tools(
     }
 
     let tools = tokio::task::spawn_blocking(|| {
-        crate::tools::cli_discovery::discover_cli_tools(&[], &[])
+        crate::util::discover_cli_tools(&[], &[])
     })
     .await
     .unwrap_or_else(|e| {

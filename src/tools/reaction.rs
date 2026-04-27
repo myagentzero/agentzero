@@ -183,6 +183,11 @@ mod tests {
     use super::*;
     use crate::channels::traits::{Channel, ChannelMessage, SendMessage};
     use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Mutex;
+
+    // Serialise tests that mutate the global live_channels registry.
+    static REGISTRY_LOCK: std::sync::LazyLock<Mutex<()>> =
+        std::sync::LazyLock::new(|| Mutex::new(()));
 
     struct MockChannel {
         reaction_added: AtomicBool,
@@ -255,21 +260,23 @@ mod tests {
     }
 
     /// Helper: register mock channels in the global registry for the duration of a test.
-    /// Returns a guard that clears the registry on drop.
+    /// Acquires REGISTRY_LOCK so tests that share this global state run serially.
+    /// Returns a guard that clears the registry (and releases the lock) on drop.
     fn register_test_channels(channels: Vec<(&str, Arc<dyn Channel>)>) -> impl Drop {
+        let serial = REGISTRY_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let map: std::collections::HashMap<String, Arc<dyn Channel>> = channels
             .into_iter()
             .map(|(name, ch)| (name.to_string(), ch))
             .collect();
         crate::channels::register_live_channels(&map);
 
-        struct Cleanup;
+        struct Cleanup(std::sync::MutexGuard<'static, ()>);
         impl Drop for Cleanup {
             fn drop(&mut self) {
                 crate::channels::register_live_channels(&std::collections::HashMap::new());
             }
         }
-        Cleanup
+        Cleanup(serial)
     }
 
     fn make_tool() -> ReactionTool {
@@ -445,6 +452,7 @@ mod tests {
 
     #[tokio::test]
     async fn empty_channels_returns_not_initialized() {
+        let _serial = REGISTRY_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         // Clear registry to simulate pre-init state
         crate::channels::register_live_channels(&std::collections::HashMap::new());
         let tool = make_tool();

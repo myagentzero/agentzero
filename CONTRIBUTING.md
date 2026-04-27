@@ -30,9 +30,6 @@ If you get stuck, open a draft PR early and ask questions in the description.
 git clone https://github.com/myagentzero/zeroclaw.git
 cd zeroclaw
 
-# Enable the pre-push hook (runs fmt, clippy, tests before every push)
-git config core.hooksPath .githooks
-
 # Build
 cargo build
 
@@ -58,47 +55,13 @@ cargo test --locked
 cargo build --release --locked
 ```
 
-### Pre-push hook
-
-The repo includes a pre-push hook in `.githooks/` that enforces `./scripts/ci/rust_quality_gate.sh` and `cargo test --locked` before every push. Enable it with `git config core.hooksPath .githooks`.
-
-For an opt-in strict lint pass during pre-push, set:
-
-```bash
-ZEROCLAW_STRICT_LINT=1 git push
-```
-
-For an opt-in strict lint delta pass during pre-push (changed Rust lines only), set:
-
-```bash
-ZEROCLAW_STRICT_DELTA_LINT=1 git push
-```
-
-For an opt-in docs quality pass during pre-push (changed-line markdown gate), set:
-
-```bash
-ZEROCLAW_DOCS_LINT=1 git push
-```
-
-For an opt-in docs links pass during pre-push (added-links gate), set:
-
-```bash
-ZEROCLAW_DOCS_LINKS=1 git push
-```
+### Optional CI-parity check
 
 For full CI parity in Docker, run:
 
 ```bash
 ./dev/ci.sh all
 ```
-
-To skip it during rapid iteration:
-
-```bash
-git push --no-verify
-```
-
-> **Note:** CI runs the same checks, so skipped hooks will be caught on the PR.
 
 ## Local Secret Management (Required)
 
@@ -159,16 +122,6 @@ For extra guardrails, install one of:
 - **truffleHog**: [GitHub - trufflesecurity/trufflehog](https://github.com/trufflesecurity/trufflehog)
 - **git-secrets**: [GitHub - awslabs/git-secrets](https://github.com/awslabs/git-secrets)
 
-This repo includes `.githooks/pre-commit` to run `gitleaks protect --staged --redact` when gitleaks is installed.
-
-Enable hooks with:
-
-```bash
-git config core.hooksPath .githooks
-```
-
-If gitleaks is not installed, the pre-commit hook prints a warning and continues.
-
 ### What Must Never Be Committed
 
 - `.env` files (use `.env.example` only)
@@ -223,14 +176,12 @@ To keep docs useful under high PR volume, we use these rules:
 | `docs/reviewer-playbook.md` | reviewer operating checklist | review depth or triage behavior changes |
 | `docs/ci-map.md` | CI ownership and triage entry points | workflow trigger/job ownership changes |
 | `docs/network-deployment.md` | runtime deployment and network operating guide | gateway/channel/tunnel/network runtime behavior changes |
-| `docs/proxy-agent-playbook.md` | agent-operable proxy runbook and rollback recipes | proxy scope/selector/tooling behavior changes |
 
 ## PR Definition of Ready (DoR)
 
 Before requesting review, ensure all of the following are true:
 
 - Scope is focused to a single concern.
-- `.github/pull_request_template.md` is fully completed.
 - Relevant local validation has been run (`fmt`, `clippy`, `test`, scenario checks).
 - Security impact and rollback path are explicitly described.
 - No personal/sensitive data is introduced in code/docs/tests/fixtures/logs/examples/commit messages.
@@ -245,7 +196,7 @@ Before requesting review, ensure all of the following are true:
 A PR is merge-ready when:
 
 - `CI Required Gate` is green.
-- Required reviewers approved (including CODEOWNERS paths).
+- Required reviewers approved.
 - Risk level matches changed paths (`risk: low/medium/high`).
 - User-visible behavior, migration, and rollback notes are complete.
 - Follow-up TODOs are explicit and tracked in issues.
@@ -257,7 +208,7 @@ When PR traffic is high (especially with AI-assisted contributions), these rules
 
 - **One concern per PR**: avoid mixing refactor + feature + infra in one change.
 - **Small PRs first**: prefer PR size `XS/S/M`; split large work into stacked PRs.
-- **Template is mandatory**: complete every section in `.github/pull_request_template.md`.
+- **Template is mandatory**: complete every section in the PR description.
 - **Explicit rollback**: every PR must include a fast rollback path.
 - **Security-first review**: changes in `src/security/`, runtime, gateway, and CI need stricter validation.
 - **Risk-first triage**: use labels (`risk: high`, `risk: medium`, `risk: low`) to route review depth.
@@ -535,7 +486,6 @@ Recommended scope keys in commit titles:
 - Require passing `CI Required Gate` before merge.
 - Require docs quality checks when docs are touched.
 - Require review approval for non-trivial changes.
-- Require CODEOWNERS review for protected paths.
 - Use risk labels to determine review depth, scope labels (`core`, `provider`, `channel`, `security`, etc.) to route ownership, and module labels (`<module>:<component>`, e.g. `channel:telegram`, `provider:kimi`, `tool:shell`) to route subsystem expertise.
 - Contributor tier labels are auto-applied on PRs and issues by merged PR count: `experienced contributor` (>=10), `principal contributor` (>=20), `distinguished contributor` (>=50). Treat them as read-only automation labels; manual edits are auto-corrected.
 - Prefer squash merge with conventional commit title.

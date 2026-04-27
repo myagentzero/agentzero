@@ -46,7 +46,7 @@ import {
 import type { SectionDef } from './types';
 
 // Default user agent string for HTTP requests and web fetching
-const DEFAULT_USER_AGENT = 'Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; Claude/1.0; +https://claude.ai/';
+const DEFAULT_USER_AGENT = 'Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36';
 
 export const CONFIG_SECTIONS: SectionDef[] = [
   // ── General ───────────────────────────────────────────────────────
@@ -109,6 +109,7 @@ export const CONFIG_SECTIONS: SectionDef[] = [
     defaultCollapsed: true,
     fields: [
       { key: 'reasoning_level', label: 'Reasoning Level', type: 'text', description: 'e.g. low, medium, high' },
+      { key: 'user_agent', label: 'User Agent', type: 'text', description: 'Custom User-Agent header sent with provider requests (custom: providers only)' },
       // LiteLLM dynamic cache controls (for LiteLLM proxy providers)
       { key: 'litellm_cache.ttl', label: 'Cache TTL (seconds)', type: 'number', min: 0, description: 'Cache duration in seconds (LiteLLM proxy)' },
       { key: 'litellm_cache.s_maxage', label: 'Cache Max Age (seconds)', type: 'number', min: 0, description: 'Max acceptable age for cached responses (LiteLLM s-maxage)' },
@@ -532,6 +533,26 @@ export const CONFIG_SECTIONS: SectionDef[] = [
     ],
   },
 
+  // ── Consolidation ──────────────────────────────────────────────────
+  {
+    path: 'consolidation',
+    category: 'memory',
+    title: 'Consolidation',
+    description: 'Nightly memory consolidation',
+    icon: RefreshCw,
+    defaultCollapsed: true,
+    fields: [
+      { key: 'enabled', label: 'Enabled', type: 'toggle', defaultValue: false },
+      { key: 'schedule', label: 'Schedule (cron)', type: 'text', defaultValue: '0 3 * * *', description: 'Default: 0 3 * * * (3:00 AM daily)' },
+      { key: 'timezone', label: 'Timezone', type: 'text', description: 'e.g. America/New_York (empty = system local)' },
+      { key: 'light_context', label: 'Light Context', type: 'toggle', defaultValue: false, description: 'Run with compact context and skip bootstrap files' },
+      { key: 'prompt_file', label: 'Prompt File', type: 'text', description: 'Custom prompt file relative to workspace (default: CONSOLIDATION.md)' },
+      { key: 'delivery_channel', label: 'Delivery Channel', type: 'text', description: 'e.g. slack, discord — post summary after each run' },
+      { key: 'delivery_to', label: 'Delivery Recipient', type: 'text', description: 'Channel ID (auto-resolved from channel config if empty)' },
+      { key: 'delivery_best_effort', label: 'Best-Effort Delivery', type: 'toggle', defaultValue: true, description: 'Treat delivery failures as non-fatal' },
+    ],
+  },
+
   // ── Cron ──────────────────────────────────────────────────────────
   {
     path: 'cron',
@@ -849,7 +870,7 @@ export const CONFIG_SECTIONS: SectionDef[] = [
       { key: 'api_token', label: 'API Token', type: 'password', sensitive: true, description: 'Atlassian API token (generate at id.atlassian.net, shared for both tools)' },
       { key: 'timeout_secs', label: 'Timeout (s)', type: 'number', min: 1, defaultValue: 30, description: 'Default: 30 (request timeout for both Jira and Confluence)' },
       { key: 'jira_enabled', label: 'Jira Enabled', type: 'toggle', defaultValue: false },
-      { key: 'jira_allowed_actions', label: 'Jira Allowed Actions', type: 'tag-list', tagPlaceholder: 'e.g. get_ticket', description: 'Default: get_ticket. Options: get_ticket, search_tickets, comment_ticket, list_projects, myself' },
+      { key: 'jira_allowed_actions', label: 'Jira Allowed Actions', type: 'tag-list', tagPlaceholder: 'e.g. get_ticket', description: 'Default: get_ticket. Options: get_ticket, search_tickets, comment_ticket, watch_ticket, unwatch_ticket, list_projects, myself' },
       { key: 'confluence_enabled', label: 'Confluence Enabled', type: 'toggle', defaultValue: false },
       { key: 'confluence_allowed_actions', label: 'Confluence Allowed Actions', type: 'tag-list', tagPlaceholder: 'e.g. get_page', description: 'Default: get_page, search_pages. Options: get_page, search_pages, list_spaces, get_space' },
     ],

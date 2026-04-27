@@ -52,6 +52,7 @@ fn runtime_trace_event_to_sse_json(event: &RuntimeTraceEvent) -> Option<serde_js
             "type": "llm_request",
             "provider": event.provider,
             "model": event.model,
+            "messages_count": event.payload.get("messages_count").and_then(|v| v.as_u64()),
             "timestamp": event.timestamp,
         })),
         "tool_call" => Some(serde_json::json!({
@@ -264,11 +265,12 @@ impl crate::observability::Observer for BroadcastObserver {
         // Broadcast to SSE subscribers
         let json = match event {
             crate::observability::ObserverEvent::LlmRequest {
-                provider, model, ..
+                provider, model, messages_count,
             } => serde_json::json!({
                 "type": "llm_request",
                 "provider": provider,
                 "model": model,
+                "messages_count": messages_count,
                 "timestamp": chrono::Utc::now().to_rfc3339(),
             }),
             crate::observability::ObserverEvent::ToolCall {

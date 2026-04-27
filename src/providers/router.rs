@@ -1,7 +1,7 @@
 use super::Provider;
 use super::traits::{ChatMessage, ChatRequest, ChatResponse};
 use async_trait::async_trait;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// A single route: maps a task hint to a provider + model combo.
 #[derive(Debug, Clone)]
@@ -189,7 +189,14 @@ impl Provider for RouterProvider {
     }
 
     async fn warmup(&self) -> anyhow::Result<()> {
+        let mut seen_keys: HashSet<String> = HashSet::new();
         for (name, provider) in &self.providers {
+            if let Some(key) = provider.warmup_key() {
+                if !seen_keys.insert(key) {
+                    tracing::debug!(provider = name, "Skipping duplicate warmup");
+                    continue;
+                }
+            }
             tracing::info!(provider = name, "Warming up routed provider");
             if let Err(e) = provider.warmup().await {
                 tracing::warn!(provider = name, "Warmup failed (non-fatal): {e}");

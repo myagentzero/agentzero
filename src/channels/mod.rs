@@ -4242,9 +4242,9 @@ If this input is legitimate, rephrase the request and avoid instruction-override
             } else if is_context_window_overflow_error(&e) {
                 let compacted = compact_sender_history(ctx.as_ref(), &history_key);
                 let error_text = if compacted {
-                    "⚠️ Context window exceeded for this conversation. I compacted recent history and kept the latest context. Please resend your last message."
+                    "  ⚠️ Context window exceeded for this conversation. I compacted recent history and kept the latest context. Please resend your last message."
                 } else {
-                    "⚠️ Context window exceeded for this conversation. Please resend your last message."
+                    "  ⚠️ Context window exceeded for this conversation. Please resend your last message."
                 };
                 eprintln!(
                     "  ⚠️ Context window exceeded after {}ms; sender history compacted={}",
@@ -4282,7 +4282,7 @@ If this input is legitimate, rephrase the request and avoid instruction-override
             } else if is_tool_iteration_limit_error(&e) {
                 let limit = runtime_defaults.max_tool_iterations.max(1);
                 let pause_text = format!(
-                    "⚠️ Reached tool-iteration limit ({limit}) for this turn. Context and progress were preserved. Reply \"continue\" to resume, or increase `agent.max_tool_iterations`."
+                    "  ⚠️ Reached tool-iteration limit ({limit}) for this turn. Context and progress were preserved. Reply \"continue\" to resume, or increase `agent.max_tool_iterations`."
                 );
                 runtime_trace::record_event(
                     "channel_message_error",
@@ -5201,6 +5201,7 @@ pub async fn start_channels(
         max_tokens_override: None,
         model_support_vision: config.model_support_vision,
         litellm_cache: config.effective_litellm_cache(),
+        user_agent: config.effective_provider_user_agent(),
     };
     let provider: Arc<dyn Provider> = Arc::from(
         create_routed_provider_nonblocking(

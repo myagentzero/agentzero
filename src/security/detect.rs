@@ -110,7 +110,6 @@ fn detect_best_sandbox() -> Arc<dyn Sandbox> {
     }
 
     // Fallback: application-layer security only
-    tracing::info!("No sandbox backend available, using application-layer security");
     Arc::new(super::traits::NoopSandbox)
 }
 

@@ -721,6 +721,7 @@ pub struct ProviderRuntimeOptions {
     pub max_tokens_override: Option<u32>,
     pub model_support_vision: Option<bool>,
     pub litellm_cache: Option<compatible::LiteLlmCacheConfig>,
+    pub user_agent: Option<String>,
 }
 
 impl Default for ProviderRuntimeOptions {
@@ -738,6 +739,7 @@ impl Default for ProviderRuntimeOptions {
             max_tokens_override: None,
             model_support_vision: None,
             litellm_cache: None,
+            user_agent: None,
         }
     }
 }
@@ -1539,6 +1541,7 @@ fn create_provider_with_url_and_options(
                 options.max_tokens_override,
             );
             provider.litellm_cache = options.litellm_cache.clone();
+            provider.user_agent = options.user_agent.clone();
             Ok(Box::new(provider))
         }
 

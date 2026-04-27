@@ -17,13 +17,10 @@
 
 pub mod agent_load_tracker;
 pub mod agent_selection;
-pub mod agents_ipc;
 pub mod ask_user;
-pub mod auth_profile;
 pub mod bg_run;
 pub mod browser;
 pub mod calculator;
-pub mod cli_discovery;
 pub mod composio;
 pub mod content_search;
 pub mod cron_add;
@@ -67,7 +64,6 @@ pub mod subagent_list;
 pub mod subagent_manage;
 pub mod subagent_registry;
 pub mod subagent_spawn;
-pub mod task_plan;
 pub mod traits;
 pub mod url_validation;
 pub mod weather_tool;
@@ -119,14 +115,12 @@ pub use subagent_list::SubAgentListTool;
 pub use subagent_manage::SubAgentManageTool;
 pub use subagent_registry::SubAgentRegistry;
 pub use subagent_spawn::SubAgentSpawnTool;
-pub use task_plan::TaskPlanTool;
 pub use traits::Tool;
 #[allow(unused_imports)]
 pub use traits::{ToolResult, ToolSpec};
 pub use weather_tool::WeatherTool;
 pub use web_fetch::WebFetchTool;
 pub use web_search_tool::WebSearchTool;
-pub use auth_profile::ManageAuthProfileTool;
 
 use crate::config::{Config, DelegateAgentConfig};
 use crate::memory::Memory;
@@ -359,12 +353,10 @@ pub fn all_tools_with_runtime(
         Arc::new(MemoryStoreTool::new(memory.clone(), security.clone())),
         Arc::new(MemoryRecallTool::new(memory.clone())),
         Arc::new(MemoryForgetTool::new(memory, security.clone())),
-        Arc::new(TaskPlanTool::new(security.clone())),
         Arc::new(ModelRoutingConfigTool::new(
             config.clone(),
             security.clone(),
         )),
-        Arc::new(ManageAuthProfileTool::new(config.clone())),
         Arc::new(CalculatorTool::new()),
         Arc::new(WeatherTool::new()),
         Arc::new(ReactionTool::new(security.clone())),
@@ -589,6 +581,7 @@ pub fn all_tools_with_runtime(
             max_tokens_override: None,
             model_support_vision: root_config.model_support_vision,
             litellm_cache: root_config.effective_litellm_cache(),
+            user_agent: root_config.effective_provider_user_agent(),
         };
         let runtime_config_path = Some(root_config.config_path.clone());
         let parent_tools = Arc::new(tool_arcs.clone());

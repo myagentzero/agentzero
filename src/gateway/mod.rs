@@ -398,6 +398,7 @@ pub async fn run_gateway(
             max_tokens_override: None,
             model_support_vision: config.model_support_vision,
             litellm_cache: config.effective_litellm_cache(),
+            user_agent: config.effective_provider_user_agent(),
         },
     )?);
     let model = config

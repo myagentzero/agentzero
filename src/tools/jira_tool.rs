@@ -21,12 +21,14 @@ enum LevelOfDetails {
 
 /// Tool for interacting with the Jira REST API v3.
 ///
-/// Supports five actions gated by `[jira].allowed_actions` in config:
-/// - `get_ticket`     — always in the default allowlist; read-only.
-/// - `search_tickets` — requires explicit opt-in; read-only.
-/// - `comment_ticket` — requires explicit opt-in; mutating (Act policy).
-/// - `list_projects`  — requires explicit opt-in; read-only.
-/// - `myself`         — requires explicit opt-in; read-only. Verifies credentials.
+/// Supports seven actions gated by `[jira].allowed_actions` in config:
+/// - `get_ticket`      — always in the default allowlist; read-only.
+/// - `search_tickets`  — requires explicit opt-in; read-only.
+/// - `comment_ticket`  — requires explicit opt-in; mutating (Act policy).
+/// - `watch_ticket`    — requires explicit opt-in; mutating (Act policy).
+/// - `unwatch_ticket`  — requires explicit opt-in; mutating (Act policy).
+/// - `list_projects`   — requires explicit opt-in; read-only.
+/// - `myself`          — requires explicit opt-in; read-only. Verifies credentials.
 pub struct JiraTool {
     base_url: String,
     email: String,
@@ -423,6 +425,99 @@ impl JiraTool {
         })
     }
 
+    async fn current_account_id(&self) -> anyhow::Result<String> {
+        let url = format!("{}/rest/api/3/myself", self.base_url);
+        let resp = self
+            .http
+            .get(&url)
+            .basic_auth(&self.email, Some(&self.api_token))
+            .timeout(std::time::Duration::from_secs(self.timeout_secs))
+            .send()
+            .await
+            .map_err(|e| anyhow::anyhow!("Jira myself request failed: {e}"))?;
+
+        let status = resp.status();
+        if !status.is_success() {
+            let text = resp.text().await.unwrap_or_default();
+            anyhow::bail!(
+                "Jira myself failed ({status}): {}",
+                crate::util::truncate_with_ellipsis(&text, MAX_ERROR_BODY_CHARS)
+            );
+        }
+
+        let raw: Value = resp
+            .json()
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to parse Jira myself response: {e}"))?;
+
+        raw["accountId"]
+            .as_str()
+            .map(String::from)
+            .ok_or_else(|| anyhow::anyhow!("Jira myself response missing accountId"))
+    }
+
+    async fn watch_ticket(&self, issue_key: &str) -> anyhow::Result<ToolResult> {
+        validate_issue_key(issue_key)?;
+        let account_id = self.current_account_id().await?;
+
+        let url = format!("{}/rest/api/3/issue/{}/watchers", self.base_url, issue_key);
+        let resp = self
+            .http
+            .post(&url)
+            .basic_auth(&self.email, Some(&self.api_token))
+            .json(&json!(account_id))
+            .timeout(std::time::Duration::from_secs(self.timeout_secs))
+            .send()
+            .await
+            .map_err(|e| anyhow::anyhow!("Jira watch_ticket request failed: {e}"))?;
+
+        let status = resp.status();
+        if !status.is_success() {
+            let text = resp.text().await.unwrap_or_default();
+            anyhow::bail!(
+                "Jira watch_ticket failed ({status}): {}",
+                crate::util::truncate_with_ellipsis(&text, MAX_ERROR_BODY_CHARS)
+            );
+        }
+
+        Ok(ToolResult {
+            success: true,
+            output: format!("Now watching {issue_key}"),
+            error: None,
+        })
+    }
+
+    async fn unwatch_ticket(&self, issue_key: &str) -> anyhow::Result<ToolResult> {
+        validate_issue_key(issue_key)?;
+        let account_id = self.current_account_id().await?;
+
+        let url = format!("{}/rest/api/3/issue/{}/watchers", self.base_url, issue_key);
+        let resp = self
+            .http
+            .delete(&url)
+            .basic_auth(&self.email, Some(&self.api_token))
+            .query(&[("accountId", &account_id)])
+            .timeout(std::time::Duration::from_secs(self.timeout_secs))
+            .send()
+            .await
+            .map_err(|e| anyhow::anyhow!("Jira unwatch_ticket request failed: {e}"))?;
+
+        let status = resp.status();
+        if !status.is_success() {
+            let text = resp.text().await.unwrap_or_default();
+            anyhow::bail!(
+                "Jira unwatch_ticket failed ({status}): {}",
+                crate::util::truncate_with_ellipsis(&text, MAX_ERROR_BODY_CHARS)
+            );
+        }
+
+        Ok(ToolResult {
+            success: true,
+            output: format!("Stopped watching {issue_key}"),
+            error: None,
+        })
+    }
+
     async fn resolve_email(&self, email: &str) -> Option<(String, String)> {
         let url = format!("{}/rest/api/3/user/search", self.base_url);
         let result = self
@@ -459,17 +554,17 @@ impl Tool for JiraTool {
     }
 
     fn description(&self) -> &str {
-        "Interact with Jira: get ticket details (summary, status, comments, changelog), search issues with JQL, list projects, verify credentials, and add comments with @mention and formatting support."
+        "Interact with Jira: get ticket details (summary, status, comments, changelog), search issues with JQL, list projects, verify credentials, add comments with @mention and formatting support, and watch/unwatch tickets."
     }
 
     fn prompt_hint(&self) -> Option<&str> {
         Some(
-            "Interact with Jira: get ticket details, search with JQL, list projects, add comments. Use when: user references Jira tickets, asks about project status, or wants to comment on issues. Don't use when: user is discussing tickets conceptually without needing live data.",
+            "Interact with Jira: get ticket details, search with JQL, list projects, add comments, watch/unwatch tickets. Use when: user references Jira tickets, asks about project status, or wants to comment on or watch issues. Don't use when: user is discussing tickets conceptually without needing live data.",
         )
     }
 
     fn prompt_hint_compact(&self) -> &str {
-        "Interact with Jira tickets, search, and comment."
+        "Interact with Jira tickets, search, comment, and watch."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {
@@ -478,12 +573,12 @@ impl Tool for JiraTool {
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["get_ticket", "search_tickets", "comment_ticket", "list_projects", "myself"],
+                    "enum": ["get_ticket", "search_tickets", "comment_ticket", "watch_ticket", "unwatch_ticket", "list_projects", "myself"],
                     "description": "The Jira action to perform. Enabled actions are configured in [jira].allowed_actions. Use 'myself' to verify that credentials are valid and the Jira connection is working."
                 },
                 "issue_key": {
                     "type": "string",
-                    "description": "Jira issue key, e.g. 'PROJ-123'. Required for get_ticket and comment_ticket."
+                    "description": "Jira issue key, e.g. 'PROJ-123'. Required for get_ticket, comment_ticket, watch_ticket, and unwatch_ticket."
                 },
                 "level_of_details": {
                     "type": "string",
@@ -524,13 +619,19 @@ impl Tool for JiraTool {
         // clear "unknown action" error rather than a misleading "not enabled" one.
         if !matches!(
             action,
-            "get_ticket" | "search_tickets" | "comment_ticket" | "list_projects" | "myself"
+            "get_ticket"
+                | "search_tickets"
+                | "comment_ticket"
+                | "watch_ticket"
+                | "unwatch_ticket"
+                | "list_projects"
+                | "myself"
         ) {
             return Ok(ToolResult {
                 success: false,
                 output: String::new(),
                 error: Some(format!(
-                    "Unknown action: '{action}'. Valid actions: get_ticket, search_tickets, comment_ticket, list_projects, myself"
+                    "Unknown action: '{action}'. Valid actions: get_ticket, search_tickets, comment_ticket, watch_ticket, unwatch_ticket, list_projects, myself"
                 )),
             });
         }
@@ -549,7 +650,7 @@ impl Tool for JiraTool {
 
         let operation = match action {
             "get_ticket" | "search_tickets" | "list_projects" | "myself" => ToolOperation::Read,
-            "comment_ticket" => ToolOperation::Act,
+            "comment_ticket" | "watch_ticket" | "unwatch_ticket" => ToolOperation::Act,
             _ => unreachable!(),
         };
 
@@ -624,6 +725,25 @@ impl Tool for JiraTool {
                     }
                 };
                 self.comment_ticket(issue_key, comment).await
+            }
+            "watch_ticket" | "unwatch_ticket" => {
+                let issue_key = match args.get("issue_key").and_then(|v| v.as_str()) {
+                    Some(k) => k,
+                    None => {
+                        return Ok(ToolResult {
+                            success: false,
+                            output: String::new(),
+                            error: Some(format!(
+                                "{action} requires issue_key parameter"
+                            )),
+                        });
+                    }
+                };
+                if action == "watch_ticket" {
+                    self.watch_ticket(issue_key).await
+                } else {
+                    self.unwatch_ticket(issue_key).await
+                }
             }
             _ => unreachable!(),
         };
@@ -1530,5 +1650,104 @@ mod tests {
     fn shape_projects_empty_inputs() {
         let shaped = shape_projects(&[], &[]);
         assert_eq!(shaped.len(), 0);
+    }
+
+    // ── watch_ticket / unwatch_ticket actions ────────────────────────────────
+
+    #[test]
+    fn parameters_schema_includes_watch_actions() {
+        let schema = test_tool(vec!["get_ticket"]).parameters_schema();
+        let actions = schema["properties"]["action"]["enum"].as_array().unwrap();
+        let action_strs: Vec<&str> = actions.iter().filter_map(|v| v.as_str()).collect();
+        assert!(action_strs.contains(&"watch_ticket"));
+        assert!(action_strs.contains(&"unwatch_ticket"));
+    }
+
+    #[tokio::test]
+    async fn execute_watch_ticket_missing_key_returns_error() {
+        let result = test_tool(vec!["get_ticket", "watch_ticket"])
+            .execute(json!({"action": "watch_ticket"}))
+            .await
+            .unwrap();
+        assert!(!result.success);
+        assert!(result.error.as_deref().unwrap().contains("issue_key"));
+    }
+
+    #[tokio::test]
+    async fn execute_unwatch_ticket_missing_key_returns_error() {
+        let result = test_tool(vec!["get_ticket", "unwatch_ticket"])
+            .execute(json!({"action": "unwatch_ticket"}))
+            .await
+            .unwrap();
+        assert!(!result.success);
+        assert!(result.error.as_deref().unwrap().contains("issue_key"));
+    }
+
+    #[tokio::test]
+    async fn execute_watch_ticket_disallowed_returns_error() {
+        let result = test_tool(vec!["get_ticket"])
+            .execute(json!({"action": "watch_ticket", "issue_key": "PROJ-1"}))
+            .await
+            .unwrap();
+        assert!(!result.success);
+        let err = result.error.unwrap();
+        assert!(err.contains("not enabled"));
+        assert!(err.contains("allowed_actions"));
+    }
+
+    #[tokio::test]
+    async fn execute_unwatch_ticket_disallowed_returns_error() {
+        let result = test_tool(vec!["get_ticket"])
+            .execute(json!({"action": "unwatch_ticket", "issue_key": "PROJ-1"}))
+            .await
+            .unwrap();
+        assert!(!result.success);
+        let err = result.error.unwrap();
+        assert!(err.contains("not enabled"));
+        assert!(err.contains("allowed_actions"));
+    }
+
+    #[tokio::test]
+    async fn execute_watch_ticket_blocked_in_readonly_mode() {
+        let security = Arc::new(SecurityPolicy {
+            autonomy: AutonomyLevel::ReadOnly,
+            ..SecurityPolicy::default()
+        });
+        let tool = JiraTool::new(
+            "https://test.atlassian.net".into(),
+            "test@example.com".into(),
+            "token".into(),
+            vec!["watch_ticket".into()],
+            security,
+            30,
+        );
+        let result = tool
+            .execute(json!({"action": "watch_ticket", "issue_key": "PROJ-1"}))
+            .await
+            .unwrap();
+        assert!(!result.success);
+        assert!(result.error.as_deref().unwrap().contains("read-only"));
+    }
+
+    #[tokio::test]
+    async fn execute_unwatch_ticket_blocked_in_readonly_mode() {
+        let security = Arc::new(SecurityPolicy {
+            autonomy: AutonomyLevel::ReadOnly,
+            ..SecurityPolicy::default()
+        });
+        let tool = JiraTool::new(
+            "https://test.atlassian.net".into(),
+            "test@example.com".into(),
+            "token".into(),
+            vec!["unwatch_ticket".into()],
+            security,
+            30,
+        );
+        let result = tool
+            .execute(json!({"action": "unwatch_ticket", "issue_key": "PROJ-1"}))
+            .await
+            .unwrap();
+        assert!(!result.success);
+        assert!(result.error.as_deref().unwrap().contains("read-only"));
     }
 }

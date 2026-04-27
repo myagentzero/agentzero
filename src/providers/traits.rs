@@ -482,6 +482,13 @@ pub trait Provider: Send + Sync {
         Ok(())
     }
 
+    /// Key identifying the endpoint this provider warms up (typically `base_url`).
+    /// Used by composite providers to skip duplicate warmup calls when multiple
+    /// child providers share the same underlying endpoint.
+    fn warmup_key(&self) -> Option<String> {
+        None
+    }
+
     /// Chat with tool definitions for native function calling support.
     /// The default implementation falls back to chat_with_history and returns
     /// an empty tool_calls vector (prompt-based tool use only).

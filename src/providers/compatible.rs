@@ -81,7 +81,7 @@ pub struct OpenAiCompatibleProvider {
     /// When false, do not fall back to /v1/responses on chat completions 404.
     /// GLM/Zhipu does not support the responses API.
     supports_responses_fallback: bool,
-    user_agent: Option<String>,
+    pub(crate) user_agent: Option<String>,
     /// When true, collect all `system` messages and prepend their content
     /// to the first `user` message, then drop the system messages.
     /// Required for providers that reject `role: system` (e.g. MiniMax).
@@ -2724,6 +2724,10 @@ impl Provider for OpenAiCompatibleProvider {
             }
         }
         Ok(())
+    }
+
+    fn warmup_key(&self) -> Option<String> {
+        Some(self.base_url.clone())
     }
 }
 

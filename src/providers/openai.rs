@@ -518,6 +518,10 @@ impl Provider for OpenAiProvider {
         }
         Ok(())
     }
+
+    fn warmup_key(&self) -> Option<String> {
+        Some(self.base_url.clone())
+    }
 }
 
 #[cfg(test)]

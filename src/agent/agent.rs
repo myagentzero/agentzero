@@ -914,7 +914,6 @@ mod tests {
     use async_trait::async_trait;
     use parking_lot::Mutex;
     use std::collections::HashMap;
-    use tempfile::TempDir;
 
     struct MockProvider {
         responses: Mutex<Vec<crate::providers::ChatResponse>>,

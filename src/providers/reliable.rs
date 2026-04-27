@@ -368,6 +368,10 @@ impl Provider for ReliableProvider {
         Ok(())
     }
 
+    fn warmup_key(&self) -> Option<String> {
+        self.providers.first().and_then(|(_, p)| p.warmup_key())
+    }
+
     async fn chat_with_system(
         &self,
         system_prompt: Option<&str>,

@@ -91,6 +91,24 @@ pub async fn run(config: Config, host: String, port: u16) -> Result<()> {
                 .await;
     }
 
+    if config.consolidation.enabled {
+        // Ensure CONSOLIDATION.md exists in workspace
+        let _ = crate::cron::consolidation::ensure_consolidation_file(&config.workspace_dir).await;
+        // Ensure the consolidation cron job is registered (requires cron to be enabled)
+        if config.cron.enabled {
+            if let Err(e) = crate::cron::consolidation::ensure_consolidation_job(&config) {
+                tracing::warn!("Failed to register consolidation job: {e}");
+            }
+        } else {
+            tracing::warn!(
+                "Consolidation enabled but cron is disabled; consolidation job will not run"
+            );
+        }
+    } else {
+        // If consolidation was disabled, remove any existing job
+        let _ = crate::cron::consolidation::remove_consolidation_job(&config);
+    }
+
     // Create a shared PairingGuard so gateway and channels share pairing state.
     // This enables live `/reset-pairing` from channels without gateway restart.
     let shared_pairing = Arc::new(PairingGuard::new(
