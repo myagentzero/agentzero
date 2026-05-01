@@ -555,8 +555,7 @@ Upgrade strategy:
 
 Natural-language config path:
 
-- During normal agent chat, ask the assistant to rewire routes in plain language.
-- The runtime can persist these updates via tool `model_routing_config` (defaults, scenarios, and delegate sub-agents) without manual TOML editing.
+- To configure defaults, scenarios, and delegate settings, edit the TOML configuration file directly or use the appropriate configuration sections under `[default]`, `[model_routes]`, `[query_classification]`, and `[agents]`.
 
 Example requests:
 

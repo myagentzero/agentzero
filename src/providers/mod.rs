@@ -1781,6 +1781,9 @@ pub fn create_routed_provider_with_options(
         {
             route_options.provider_transport = Some(transport.to_string());
         }
+        if let Some(mode) = route.provider_api {
+            route_options.custom_provider_api_mode = Some(mode.as_compatible_mode());
+        }
 
         match create_resilient_provider_with_options(
             &route.provider,
@@ -3562,6 +3565,7 @@ mod tests {
             max_tokens: Some(4096),
             api_key: None,
             transport: None,
+            provider_api: None,
         }];
 
         let provider = create_routed_provider_with_options(
@@ -3586,6 +3590,7 @@ mod tests {
             max_tokens: None,
             api_key: None,
             transport: None,
+            provider_api: None,
         }];
 
         let provider = create_routed_provider_with_options(
@@ -3613,6 +3618,7 @@ mod tests {
             max_tokens: None,
             api_key: None,
             transport: None,
+            provider_api: None,
         }];
 
         let provider = create_routed_provider_with_options(
@@ -3640,6 +3646,7 @@ mod tests {
             max_tokens: None,
             api_key: None,
             transport: None,
+            provider_api: None,
         }];
 
         let err = match create_routed_provider_with_options(

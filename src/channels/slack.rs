@@ -703,10 +703,8 @@ impl SlackChannel {
             .filter(|thread_ts| Self::is_valid_slack_ts(thread_ts))
             .map(str::to_string);
 
-        let formatted = self
-            .format_permalink_context(permalink, message, thread_ts.as_deref())
-            .await;
-        formatted
+        self.format_permalink_context(permalink, message, thread_ts.as_deref())
+            .await
     }
 
     async fn fetch_permalink_message(
@@ -2187,7 +2185,7 @@ impl SlackChannel {
 
         Self::file_extension(&Self::slack_file_name(file))
             .as_deref()
-            .is_some_and(|ext| SLACK_AUDIO_EXTENSIONS.contains(&ext.as_ref()))
+            .is_some_and(|ext| SLACK_AUDIO_EXTENSIONS.contains(&ext))
     }
 
     async fn download_text_snippet(&self, file: &serde_json::Value) -> Option<String> {

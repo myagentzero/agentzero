@@ -88,7 +88,7 @@ pub async fn handle_api_status(
 
     let body = serde_json::json!({
         "version": env!("ZEROCLAW_BUILD_VERSION"),
-        "provider": format_provider_display(&config.default_provider),
+        "provider": format_provider_display(config.default_provider.as_ref()),
         "model": state.model,
         "temperature": state.temperature,
         "uptime_seconds": health.uptime_seconds,
@@ -104,8 +104,8 @@ pub async fn handle_api_status(
 }
 
 /// Format provider name for display — strip URL suffixes from custom providers.
-fn format_provider_display(raw: &Option<String>) -> Option<String> {
-    raw.as_ref().map(|s| {
+fn format_provider_display(raw: Option<&String>) -> Option<String> {
+    raw.map(|s| {
         if let Some(prefix) = s.split(':').next() {
             if s.contains("://") {
                 // e.g. "custom:http://..." → "Custom"

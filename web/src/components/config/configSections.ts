@@ -62,8 +62,8 @@ export const CONFIG_SECTIONS: SectionDef[] = [
       { key: 'default_provider', label: 'Default Provider', type: 'text', description: 'e.g. openrouter, openai, anthropic', defaultValue: 'openrouter' },
       {
         key: 'provider_api', label: 'Provider API Mode', type: 'select', options: [
-          { value: 'open-ai-chat-completions', label: 'OpenAI Chat Completions' },
-          { value: 'open-ai-responses', label: 'OpenAI Responses' },
+          { value: 'open-ai-chat-completions', label: 'Chat Completions' },
+          { value: 'open-ai-responses', label: 'Responses' },
         ]
       },
       { key: 'default_model', label: 'Default Model', type: 'text', description: 'e.g. anthropic/claude-sonnet-4.6', defaultValue: 'anthropic/claude-sonnet-4.6' },

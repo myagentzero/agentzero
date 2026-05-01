@@ -734,15 +734,12 @@ impl BrowserTool {
         action: &str,
         params: &serde_json::Map<String, Value>,
     ) -> anyhow::Result<()> {
-        match action {
-            "open" => {
-                let url = params
-                    .get("url")
-                    .and_then(Value::as_str)
-                    .ok_or_else(|| anyhow::anyhow!("Missing 'url' for open action"))?;
-                self.validate_url(url)?;
-            }
-            _ => {}
+        if action == "open" {
+            let url = params
+                .get("url")
+                .and_then(Value::as_str)
+                .ok_or_else(|| anyhow::anyhow!("Missing 'url' for open action"))?;
+            self.validate_url(url)?;
         }
         Ok(())
     }

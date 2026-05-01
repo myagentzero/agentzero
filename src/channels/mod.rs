@@ -1745,7 +1745,7 @@ fn classify_message_route(
 
     Some(ChannelRouteSelection {
         provider: route.provider.clone(),
-        model: route.model.clone(),
+        model: format!("hint:{}", route.hint.trim()),
     })
 }
 
@@ -3344,7 +3344,7 @@ fn spawn_scoped_typing_task(
 ) -> tokio::task::JoinHandle<()> {
     let stop_signal = cancellation_token;
     let refresh_interval = Duration::from_secs(CHANNEL_TYPING_REFRESH_INTERVAL_SECS);
-    let handle = tokio::spawn(async move {
+    tokio::spawn(async move {
         let mut interval = tokio::time::interval(refresh_interval);
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
@@ -3362,9 +3362,7 @@ fn spawn_scoped_typing_task(
         if let Err(e) = channel.stop_typing(&recipient).await {
             tracing::debug!("Failed to stop typing on {}: {e}", channel.name());
         }
-    });
-
-    handle
+    })
 }
 
 async fn process_channel_message(
@@ -4609,6 +4607,7 @@ pub fn build_system_prompt(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn build_system_prompt_with_mode(
     workspace_dir: &std::path::Path,
     model_name: &str,
@@ -5620,6 +5619,44 @@ mod tests {
         assert_eq!(
             channel_message_timeout_budget_secs(300, 10),
             300 * CHANNEL_MESSAGE_TIMEOUT_SCALE_CAP
+        );
+    }
+
+    #[test]
+    fn classify_message_route_returns_hint_prefixed_model() {
+        let query_classification = crate::config::QueryClassificationConfig {
+            enabled: true,
+            rules: vec![crate::config::ClassificationRule {
+                hint: "reasoning".to_string(),
+                keywords: vec!["analyze".to_string()],
+                patterns: vec![],
+                min_length: None,
+                max_length: None,
+                priority: 10,
+            }],
+        };
+        let routes = vec![crate::config::ModelRouteConfig {
+            hint: "reasoning".to_string(),
+            provider: "custom:https://example.com".to_string(),
+            model: "gpt-5.5".to_string(),
+            max_tokens: None,
+            api_key: None,
+            transport: None,
+            provider_api: Some(crate::config::schema::ProviderApiMode::OpenAiResponses),
+        }];
+
+        let selection = classify_message_route(
+            &query_classification,
+            &routes,
+            "please analyze this problem",
+        )
+        .expect("classification should match");
+
+        assert_eq!(selection.provider, "custom:https://example.com");
+        assert_eq!(
+            selection.model, "hint:reasoning",
+            "classify_message_route must return a hint-prefixed model so RouterProvider dispatches \
+             to the per-route provider instance (preserving provider_api override)"
         );
     }
 
@@ -9691,6 +9728,7 @@ BTC is currently around $65,000 based on latest tool output."#
             max_tokens: Some(512),
             api_key: None,
             transport: None,
+            provider_api: None,
         }];
         cfg.save().await.expect("save updated config");
 
@@ -9767,6 +9805,7 @@ BTC is currently around $65,000 based on latest tool output."#
             max_tokens: Some(512),
             api_key: Some("route-specific-key".to_string()),
             transport: Some("sse".to_string()),
+            provider_api: None,
         }];
 
         let config_path = cfg.config_path.clone();

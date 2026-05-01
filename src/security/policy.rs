@@ -325,7 +325,6 @@ fn extract_heredoc_delimiter(line: &str) -> Option<String> {
                 if ch == '\'' {
                     quote = QuoteState::None;
                 }
-                continue;
             }
             QuoteState::Double => {
                 if escaped {
@@ -339,7 +338,6 @@ fn extract_heredoc_delimiter(line: &str) -> Option<String> {
                 if ch == '"' {
                     quote = QuoteState::None;
                 }
-                continue;
             }
             QuoteState::None => {
                 if escaped {

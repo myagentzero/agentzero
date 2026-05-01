@@ -51,7 +51,6 @@ pub mod mcp_transport;
 pub mod memory_forget;
 pub mod memory_recall;
 pub mod memory_store;
-pub mod model_routing_config;
 pub mod notion_tool;
 pub mod orchestration_settings;
 pub mod pipeline;
@@ -103,7 +102,6 @@ pub use mcp_tool::McpToolWrapper;
 pub use memory_forget::MemoryForgetTool;
 pub use memory_recall::MemoryRecallTool;
 pub use memory_store::MemoryStoreTool;
-pub use model_routing_config::ModelRoutingConfigTool;
 pub use notion_tool::NotionTool;
 pub use provider_status::ProviderStatusTool;
 pub use reaction::ReactionTool;
@@ -353,10 +351,6 @@ pub fn all_tools_with_runtime(
         Arc::new(MemoryStoreTool::new(memory.clone(), security.clone())),
         Arc::new(MemoryRecallTool::new(memory.clone())),
         Arc::new(MemoryForgetTool::new(memory, security.clone())),
-        Arc::new(ModelRoutingConfigTool::new(
-            config.clone(),
-            security.clone(),
-        )),
         Arc::new(CalculatorTool::new()),
         Arc::new(WeatherTool::new()),
         Arc::new(ReactionTool::new(security.clone())),
@@ -832,7 +826,7 @@ mod tests {
             &cfg,
         );
         let names: Vec<&str> = tools.iter().map(|t| t.name()).collect();
-        assert!(names.contains(&"model_routing_config"));
+        assert!(names.contains(&"shell"));
     }
 
     #[test]
@@ -871,7 +865,7 @@ mod tests {
         );
         let names: Vec<&str> = tools.iter().map(|t| t.name()).collect();
         assert!(names.contains(&"content_search"));
-        assert!(names.contains(&"model_routing_config"));
+        assert!(names.contains(&"shell"));
     }
 
     #[test]

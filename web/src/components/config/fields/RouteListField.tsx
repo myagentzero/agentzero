@@ -7,6 +7,7 @@ interface RouteEntry {
   model: string;
   max_tokens?: number;
   transport?: string;
+  provider_api?: string;
 }
 
 const TRANSPORT_OPTIONS = [
@@ -14,6 +15,12 @@ const TRANSPORT_OPTIONS = [
   { value: 'auto', label: 'Auto' },
   { value: 'websocket', label: 'WebSocket' },
   { value: 'sse', label: 'SSE' },
+] as const;
+
+const PROVIDER_API_OPTIONS = [
+  { value: '', label: 'Default' },
+  { value: 'open-ai-chat-completions', label: 'Chat Completions' },
+  { value: 'open-ai-responses', label: 'Responses' },
 ] as const;
 
 const DEFAULT_ENTRY: RouteEntry = { hint: '', provider: '', model: '' };
@@ -26,6 +33,7 @@ export default function RouteListField({ value, onChange }: FieldProps) {
         model: v.model ?? '',
         max_tokens: v.max_tokens,
         transport: v.transport,
+        provider_api: v.provider_api,
       }))
     : [];
 
@@ -39,6 +47,7 @@ export default function RouteListField({ value, onChange }: FieldProps) {
         };
         if (r.max_tokens != null && r.max_tokens > 0) entry.max_tokens = r.max_tokens;
         if (r.transport && r.transport.trim()) entry.transport = r.transport.trim();
+        if (r.provider_api && r.provider_api.trim()) entry.provider_api = r.provider_api.trim();
         return entry;
       }),
     );
@@ -153,6 +162,24 @@ export default function RouteListField({ value, onChange }: FieldProps) {
                 ))}
               </select>
             </div>
+          </div>
+
+          {/* Row 4: Provider API (custom: providers only) */}
+          <div>
+            <label className="text-[11px] text-gray-500 mb-0.5 block">
+              Provider API <span className="text-gray-600">(custom: providers only)</span>
+            </label>
+            <select
+              value={entry.provider_api ?? ''}
+              onChange={(e) => update(i, { provider_api: e.target.value || undefined })}
+              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-2.5 py-1.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              {PROVIDER_API_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
           </div>
         </div>
       ))}

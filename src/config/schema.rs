@@ -4027,6 +4027,11 @@ pub struct ModelRouteConfig {
     /// Existing configs without this field remain valid.
     #[serde(default)]
     pub transport: Option<String>,
+    /// Optional route-specific API protocol override for `custom:` providers.
+    /// When set, this route uses the chosen protocol regardless of the global
+    /// `provider_api`. Only valid when `provider` starts with `custom:`.
+    #[serde(default)]
+    pub provider_api: Option<ProviderApiMode>,
 }
 
 // ── Embedding routing ───────────────────────────────────────────
@@ -7559,6 +7564,14 @@ impl Config {
             );
         }
 
+        for (i, route) in self.model_routes.iter().enumerate() {
+            if route.provider_api.is_some() && !route.provider.starts_with("custom:") {
+                anyhow::bail!(
+                    "model_routes[{i}].provider_api is only valid when provider uses the custom:<url> format"
+                );
+            }
+        }
+
         // Embedding routes
         for (i, route) in self.embedding_routes.iter().enumerate() {
             if route.hint.trim().is_empty() {
@@ -10382,6 +10395,7 @@ provider_api = "not-a-real-mode"
             max_tokens: Some(0),
             api_key: None,
             transport: None,
+            provider_api: None,
         }];
 
         let err = config
@@ -10404,6 +10418,7 @@ provider_api = "not-a-real-mode"
             max_tokens: None,
             api_key: None,
             transport: None,
+            provider_api: None,
         }];
 
         let err = config
@@ -10426,6 +10441,7 @@ provider_api = "not-a-real-mode"
             max_tokens: None,
             api_key: None,
             transport: None,
+            provider_api: None,
         }];
 
         let result = config.validate();
@@ -10446,6 +10462,7 @@ provider_api = "not-a-real-mode"
             max_tokens: None,
             api_key: None,
             transport: None,
+            provider_api: None,
         }];
 
         let result = config.validate();
@@ -10479,6 +10496,47 @@ provider_api = "not-a-real-mode"
     }
 
     #[test]
+    async fn model_route_provider_api_rejects_non_custom_provider() {
+        let mut config = Config::default();
+        config.model_routes = vec![ModelRouteConfig {
+            hint: "reasoning".to_string(),
+            provider: "openrouter".to_string(),
+            model: "openai/gpt-5.2".to_string(),
+            max_tokens: None,
+            api_key: None,
+            transport: None,
+            provider_api: Some(ProviderApiMode::OpenAiResponses),
+        }];
+
+        let err = config
+            .validate()
+            .expect_err("provider_api on non-custom route should be rejected");
+        assert!(
+            err.to_string()
+                .contains("model_routes[0].provider_api is only valid when provider uses the custom:<url> format"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    async fn model_route_provider_api_allowed_on_custom_provider() {
+        let mut config = Config::default();
+        config.model_routes = vec![ModelRouteConfig {
+            hint: "reasoning".to_string(),
+            provider: "custom:https://example.com/v1".to_string(),
+            model: "my-model".to_string(),
+            max_tokens: None,
+            api_key: None,
+            transport: None,
+            provider_api: Some(ProviderApiMode::OpenAiResponses),
+        }];
+
+        config
+            .validate()
+            .expect("provider_api on custom: route should validate");
+    }
+
+    #[test]
     async fn model_route_transport_invalid_is_rejected() {
         let mut config = Config::default();
         config.model_routes = vec![ModelRouteConfig {
@@ -10488,6 +10546,7 @@ provider_api = "not-a-real-mode"
             max_tokens: None,
             api_key: None,
             transport: Some("udp".to_string()),
+            provider_api: None,
         }];
 
         let err = config
@@ -12970,6 +13029,7 @@ reserve_percent = 15
             api_key: None,
             max_tokens: None,
             transport: None,
+            provider_api: None,
         }];
 
         config

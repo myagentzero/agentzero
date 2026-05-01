@@ -59,7 +59,7 @@ Last verified: **March 26, 2026**.
 
 Tip:
 
-- In interactive chat, you can ask for route changes in natural language (for example “conversation uses kimi, coding uses gpt-5.3-codex”); the assistant can persist this via tool `model_routing_config`.
+- To configure model routes and scenarios, edit the TOML configuration file under `[model_routes]` and `[query_classification]` sections.
 
 ### `acp`
 

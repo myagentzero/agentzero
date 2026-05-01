@@ -310,7 +310,7 @@ impl Tool for DelegateTool {
                 success: false,
                 output: String::new(),
                 error: Some(
-                    "Agent teams are currently disabled. Re-enable with model_routing_config action set_orchestration."
+                    "Agent teams are currently disabled. Enable in configuration file under [agent.teams] section."
                         .to_string(),
                 ),
             });

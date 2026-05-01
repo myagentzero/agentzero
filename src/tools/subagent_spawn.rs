@@ -216,7 +216,7 @@ impl Tool for SubAgentSpawnTool {
                 success: false,
                 output: String::new(),
                 error: Some(
-                    "Subagents are currently disabled. Re-enable with model_routing_config action set_orchestration."
+                    "Subagents are currently disabled. Enable in configuration file under [agent.subagents] section."
                         .to_string(),
                 ),
             });

@@ -18,6 +18,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashSet;
+use std::sync::{Arc, Mutex};
 use tokio_tungstenite::{
     connect_async,
     tungstenite::{
@@ -95,6 +96,8 @@ pub struct OpenAiCompatibleProvider {
     max_tokens_override: Option<u32>,
     /// LiteLLM dynamic cache controls injected into request bodies.
     pub(crate) litellm_cache: Option<LiteLlmCacheConfig>,
+    /// Last Responses API response ID, used for chaining to reduce context on subsequent calls.
+    last_response_id: Arc<Mutex<Option<String>>>,
 }
 
 /// How the provider expects the API key to be sent.
@@ -299,6 +302,7 @@ impl OpenAiCompatibleProvider {
             api_mode,
             max_tokens_override: max_tokens_override.filter(|value| *value > 0),
             litellm_cache: None,
+            last_response_id: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -488,11 +492,20 @@ impl OpenAiCompatibleProvider {
     }
 }
 
-#[derive(Debug, Serialize)]
+enum ChatSendResult {
+    Success(reqwest::Response),
+    NonSuccess {
+        status: reqwest::StatusCode,
+        body: String,
+    },
+}
+
+#[derive(Debug, Clone, Serialize)]
 struct ApiChatRequest {
     model: String,
     messages: Vec<Message>,
-    temperature: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    temperature: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     max_tokens: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -505,27 +518,27 @@ struct ApiChatRequest {
     cache: Option<LiteLlmCacheConfig>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 struct Message {
     role: String,
     content: MessageContent,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(untagged)]
 enum MessageContent {
     Text(String),
     Parts(Vec<MessagePart>),
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum MessagePart {
     Text { text: String },
     ImageUrl { image_url: ImageUrlPart },
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 struct ImageUrlPart {
     url: String,
 }
@@ -632,7 +645,7 @@ impl ResponseMessage {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 struct ToolCall {
     #[serde(skip_serializing_if = "Option::is_none")]
     id: Option<String>,
@@ -686,7 +699,7 @@ impl ToolCall {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 struct Function {
     #[serde(default)]
     name: Option<String>,
@@ -694,11 +707,12 @@ struct Function {
     arguments: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 struct NativeChatRequest {
     model: String,
     messages: Vec<NativeMessage>,
-    temperature: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    temperature: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     max_tokens: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -711,7 +725,7 @@ struct NativeChatRequest {
     cache: Option<LiteLlmCacheConfig>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 struct NativeMessage {
     role: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -731,6 +745,8 @@ struct ResponsesRequest {
     model: String,
     input: Vec<ResponsesInput>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    previous_response_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     instructions: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     max_output_tokens: Option<u32>,
@@ -745,16 +761,46 @@ struct ResponsesRequest {
 }
 
 #[derive(Debug, Serialize)]
-struct ResponsesInput {
-    role: String,
-    content: String,
+#[serde(untagged)]
+enum ResponsesInput {
+    Message {
+        role: String,
+        content: String,
+    },
+    FunctionCall {
+        #[serde(rename = "type")]
+        kind: &'static str,
+        call_id: String,
+        name: String,
+        arguments: String,
+    },
+    FunctionCallOutput {
+        #[serde(rename = "type")]
+        kind: &'static str,
+        call_id: String,
+        output: String,
+    },
+}
+
+/// Deserialize a field that may arrive as `null` by falling back to `T::default()`.
+///
+/// `#[serde(default)]` alone only handles missing keys — an explicit `null` still
+/// fails with "invalid type: null". Some upstream Responses APIs emit `"content": null`
+/// on non-text output items (e.g. function calls), which breaks `Vec<T>` parsing.
+fn deserialize_null_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    T: Default + Deserialize<'de>,
+    D: serde::Deserializer<'de>,
+{
+    let opt = Option::<T>::deserialize(deserializer)?;
+    Ok(opt.unwrap_or_default())
 }
 
 #[derive(Debug, Deserialize, Clone)]
 struct ResponsesResponse {
     #[serde(default)]
     id: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     output: Vec<ResponsesOutput>,
     #[serde(default)]
     output_text: Option<String>,
@@ -783,7 +829,7 @@ struct ResponsesOutput {
     arguments: Option<String>,
     #[serde(default)]
     call_id: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     content: Vec<ResponsesContent>,
 }
 
@@ -979,21 +1025,137 @@ fn normalize_responses_role(role: &str) -> &'static str {
     }
 }
 
-fn build_responses_prompt(messages: &[ChatMessage]) -> (Option<String>, Vec<ResponsesInput>) {
+fn build_responses_prompt(
+    messages: &[ChatMessage],
+    previous_response_id: Option<&str>,
+) -> (Option<String>, Vec<ResponsesInput>) {
     let mut instructions_parts = Vec::new();
-    let mut input = Vec::new();
+    let mut input: Vec<ResponsesInput> = Vec::new();
+    let mut assistant_tool_call_ids: HashSet<String> = HashSet::new();
 
-    for message in messages {
+    // Always collect system messages for instructions (they're lightweight and important)
+    for message in messages.iter().filter(|m| m.role == "system") {
+        if !message.content.trim().is_empty() {
+            instructions_parts.push(message.content.clone());
+        }
+    }
+
+    // When chaining Responses API calls via previous_response_id, only include the last user message
+    // and any subsequent tool interactions. This leverages the API's context chaining feature to
+    // reduce token usage while maintaining full conversation context.
+    let messages_to_process = if previous_response_id.is_some() {
+        messages
+            .iter()
+            .rposition(|m| m.role == "user")
+            .map(|idx| &messages[idx..])
+            .unwrap_or(&messages[..])
+    } else {
+        messages
+    };
+
+    for message in messages_to_process {
+        if message.role == "system" {
+            continue;
+        }
+
+        if message.role == "assistant" {
+            if let Ok(value) = serde_json::from_str::<serde_json::Value>(&message.content) {
+                if let Some(tool_calls) =
+                    OpenAiCompatibleProvider::parse_history_tool_calls(&value)
+                {
+                    let text = value
+                        .get("content")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("");
+                    if !text.trim().is_empty() {
+                        input.push(ResponsesInput::Message {
+                            role: "assistant".to_string(),
+                            content: text.to_string(),
+                        });
+                    }
+
+                    for call in tool_calls {
+                        let name = call
+                            .function
+                            .as_ref()
+                            .and_then(|f| f.name.clone())
+                            .unwrap_or_default();
+                        if name.is_empty() {
+                            continue;
+                        }
+                        let arguments = call
+                            .function
+                            .as_ref()
+                            .and_then(|f| f.arguments.clone())
+                            .unwrap_or_else(|| "{}".to_string());
+                        let call_id = call
+                            .id
+                            .clone()
+                            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+                        assistant_tool_call_ids.insert(call_id.clone());
+                        input.push(ResponsesInput::FunctionCall {
+                            kind: "function_call",
+                            call_id,
+                            name,
+                            arguments,
+                        });
+                    }
+                    continue;
+                }
+            }
+        }
+
+        if message.role == "tool" {
+            if let Ok(value) = serde_json::from_str::<serde_json::Value>(&message.content) {
+                let id = value
+                    .get("tool_call_id")
+                    .or_else(|| value.get("tool_use_id"))
+                    .or_else(|| value.get("toolUseId"))
+                    .or_else(|| value.get("id"))
+                    .and_then(serde_json::Value::as_str)
+                    .map(ToString::to_string);
+                let content = value
+                    .get("content")
+                    .and_then(serde_json::Value::as_str)
+                    .map(ToString::to_string)
+                    .unwrap_or_else(|| message.content.clone());
+
+                if let Some(id) = id {
+                    if assistant_tool_call_ids.contains(&id) {
+                        input.push(ResponsesInput::FunctionCallOutput {
+                            kind: "function_call_output",
+                            call_id: id,
+                            output: content,
+                        });
+                        continue;
+                    }
+                    tracing::warn!(
+                        tool_call_id = %id,
+                        "Dropping orphan tool-role message from Responses input; \
+                         no matching assistant function_call in history"
+                    );
+                } else {
+                    tracing::warn!(
+                        "Tool-role message missing tool_call_id; \
+                         preserving as user text fallback in Responses input"
+                    );
+                }
+
+                if !content.trim().is_empty() {
+                    input.push(ResponsesInput::Message {
+                        role: "user".to_string(),
+                        content: format!("[Tool result]\n{content}"),
+                    });
+                }
+                continue;
+            }
+        }
+
         if message.content.trim().is_empty() {
             continue;
         }
 
-        if message.role == "system" {
-            instructions_parts.push(message.content.clone());
-            continue;
-        }
-
-        input.push(ResponsesInput {
+        input.push(ResponsesInput::Message {
             role: normalize_responses_role(&message.role).to_string(),
             content: message.content.clone(),
         });
@@ -1352,6 +1514,12 @@ impl OpenAiCompatibleProvider {
         self.max_tokens_override.filter(|value| *value > 0)
     }
 
+    fn store_response_id(&self, id: Option<&str>) {
+        if let Some(id) = id {
+            *self.last_response_id.lock().unwrap() = Some(id.to_string());
+        }
+    }
+
     fn should_try_responses_websocket(&self) -> bool {
         if let Ok(raw) = std::env::var("ZEROCLAW_RESPONSES_WEBSOCKET") {
             let normalized = raw.trim().to_ascii_lowercase();
@@ -1430,7 +1598,8 @@ impl OpenAiCompatibleProvider {
         model: &str,
         tools: Option<Vec<Value>>,
     ) -> anyhow::Result<ResponsesResponse> {
-        let (instructions, input) = build_responses_prompt(messages);
+        let previous_id = self.last_response_id.lock().unwrap().clone();
+        let (instructions, input) = build_responses_prompt(messages, previous_id.as_deref());
         if input.is_empty() {
             anyhow::bail!(
                 "{} Responses API websocket mode requires at least one non-system message",
@@ -1442,7 +1611,7 @@ impl OpenAiCompatibleProvider {
         let payload = ResponsesWebSocketCreateEvent {
             kind: "response.create",
             model: model.to_string(),
-            previous_response_id: None,
+            previous_response_id: previous_id,
             input,
             instructions,
             store: Some(false),
@@ -1470,6 +1639,7 @@ impl OpenAiCompatibleProvider {
                     let event: Value = serde_json::from_str(text.as_ref())?;
                     if let Some(response) = accumulator.apply_event(&event)? {
                         let _ = ws_stream.close(None).await;
+                        self.store_response_id(response.id.as_deref());
                         return Ok(response);
                     }
                 }
@@ -1480,6 +1650,7 @@ impl OpenAiCompatibleProvider {
                     let event: Value = serde_json::from_str(&text)?;
                     if let Some(response) = accumulator.apply_event(&event)? {
                         let _ = ws_stream.close(None).await;
+                        self.store_response_id(response.id.as_deref());
                         return Ok(response);
                     }
                 }
@@ -1492,6 +1663,7 @@ impl OpenAiCompatibleProvider {
         }
 
         if let Some(response) = accumulator.fallback_response() {
+            self.store_response_id(response.id.as_deref());
             return Ok(response);
         }
 
@@ -1505,7 +1677,8 @@ impl OpenAiCompatibleProvider {
         model: &str,
         tools: Option<Vec<Value>>,
     ) -> anyhow::Result<ResponsesResponse> {
-        let (instructions, input) = build_responses_prompt(messages);
+        let previous_id = self.last_response_id.lock().unwrap().clone();
+        let (instructions, input) = build_responses_prompt(messages, previous_id.as_deref());
         if input.is_empty() {
             anyhow::bail!(
                 "{} Responses API fallback requires at least one non-system message",
@@ -1517,6 +1690,7 @@ impl OpenAiCompatibleProvider {
         let request = ResponsesRequest {
             model: model.to_string(),
             input,
+            previous_response_id: previous_id,
             instructions,
             max_output_tokens: self.effective_max_tokens(),
             stream: Some(false),
@@ -1540,7 +1714,9 @@ impl OpenAiCompatibleProvider {
         }
 
         let body = response.text().await?;
-        parse_responses_response_body(&self.name, &body)
+        let parsed = parse_responses_response_body(&self.name, &body)?;
+        self.store_response_id(parsed.id.as_deref());
+        Ok(parsed)
     }
 
     async fn send_responses_request(
@@ -1550,6 +1726,7 @@ impl OpenAiCompatibleProvider {
         model: &str,
         tools: Option<Vec<Value>>,
     ) -> anyhow::Result<ResponsesResponse> {
+        let tools = tools.map(Self::to_responses_tool_format);
         if self.should_try_responses_websocket() {
             match self
                 .send_responses_websocket_request(credential, messages, model, tools.clone())
@@ -1589,6 +1766,11 @@ impl OpenAiCompatibleProvider {
         model: &str,
         temperature: f64,
     ) -> anyhow::Result<String> {
+        tracing::info!(
+            provider = %self.name,
+            model = %model,
+            "Calling Responses API"
+        );
         let responses = match self
             .send_responses_request(credential, messages, model, None)
             .await
@@ -1630,6 +1812,12 @@ impl OpenAiCompatibleProvider {
         tools: Option<Vec<Value>>,
         temperature: f64,
     ) -> anyhow::Result<ProviderChatResponse> {
+        tracing::info!(
+            provider = %self.name,
+            model = %model,
+            has_tools = tools.is_some(),
+            "Calling Responses API with tools support"
+        );
         let responses = match self
             .send_responses_request(credential, messages, model, tools.clone())
             .await
@@ -1718,6 +1906,38 @@ impl OpenAiCompatibleProvider {
                 })
                 .collect()
         })
+    }
+
+    /// Flatten Chat Completions-style tools (`{type, function: {name, ...}}`) into
+    /// the Responses API's flat shape (`{type, name, description, parameters}`).
+    /// Already-flat entries (top-level `name`) are passed through untouched.
+    fn to_responses_tool_format(tools: Vec<serde_json::Value>) -> Vec<serde_json::Value> {
+        tools
+            .into_iter()
+            .map(|tool| {
+                if tool.get("name").is_some() {
+                    return tool;
+                }
+                let Some(function) = tool.get("function") else {
+                    return tool;
+                };
+                let mut obj = serde_json::Map::new();
+                obj.insert(
+                    "type".to_string(),
+                    serde_json::Value::String("function".to_string()),
+                );
+                if let Some(name) = function.get("name") {
+                    obj.insert("name".to_string(), name.clone());
+                }
+                if let Some(description) = function.get("description") {
+                    obj.insert("description".to_string(), description.clone());
+                }
+                if let Some(parameters) = function.get("parameters") {
+                    obj.insert("parameters".to_string(), parameters.clone());
+                }
+                serde_json::Value::Object(obj)
+            })
+            .collect()
     }
 
     fn to_message_content(
@@ -1997,6 +2217,120 @@ impl OpenAiCompatibleProvider {
         super::is_native_tool_schema_rejection(status, error)
     }
 
+    /// Detects upstream 400 responses indicating the model requires an
+    /// explicit `temperature` value in the request body. ZeroClaw omits
+    /// `temperature` by default for forward compatibility with models that
+    /// reject custom values (gpt-5, o-series, Claude 4.x on Bedrock). When
+    /// a legacy provider instead demands temperature, this classifier
+    /// triggers a one-shot retry with the caller-configured value.
+    fn is_temperature_required_error(status: reqwest::StatusCode, error: &str) -> bool {
+        if status != reqwest::StatusCode::BAD_REQUEST {
+            return false;
+        }
+        let body = error.to_lowercase();
+        if !body.contains("temperature") {
+            return false;
+        }
+        body.contains("required")
+            || body.contains("must be provided")
+            || body.contains("missing")
+            || body.contains("must be set")
+    }
+
+    async fn post_api_chat_with_temperature_retry(
+        &self,
+        credential: &str,
+        url: &str,
+        request: ApiChatRequest,
+        temperature: f64,
+        model: &str,
+    ) -> reqwest::Result<ChatSendResult> {
+        let response = self
+            .apply_auth_header(self.http_client().post(url).json(&request), credential)
+            .send()
+            .await?;
+        if response.status().is_success() {
+            return Ok(ChatSendResult::Success(response));
+        }
+        let status = response.status();
+        let body = response.text().await?;
+        if Self::is_temperature_required_error(status, &body) && request.temperature.is_none() {
+            tracing::warn!(
+                provider = %self.name,
+                model = %model,
+                "Upstream requires temperature; retrying with configured value"
+            );
+            let retry_request = ApiChatRequest {
+                temperature: Some(temperature),
+                ..request
+            };
+            let retry_response = self
+                .apply_auth_header(
+                    self.http_client().post(url).json(&retry_request),
+                    credential,
+                )
+                .send()
+                .await?;
+            if retry_response.status().is_success() {
+                return Ok(ChatSendResult::Success(retry_response));
+            }
+            let retry_status = retry_response.status();
+            let retry_body = retry_response.text().await?;
+            return Ok(ChatSendResult::NonSuccess {
+                status: retry_status,
+                body: retry_body,
+            });
+        }
+        Ok(ChatSendResult::NonSuccess { status, body })
+    }
+
+    async fn post_native_chat_with_temperature_retry(
+        &self,
+        credential: &str,
+        url: &str,
+        request: NativeChatRequest,
+        temperature: f64,
+        model: &str,
+    ) -> reqwest::Result<ChatSendResult> {
+        let response = self
+            .apply_auth_header(self.http_client().post(url).json(&request), credential)
+            .send()
+            .await?;
+        if response.status().is_success() {
+            return Ok(ChatSendResult::Success(response));
+        }
+        let status = response.status();
+        let body = response.text().await?;
+        if Self::is_temperature_required_error(status, &body) && request.temperature.is_none() {
+            tracing::warn!(
+                provider = %self.name,
+                model = %model,
+                "Upstream requires temperature; retrying with configured value"
+            );
+            let retry_request = NativeChatRequest {
+                temperature: Some(temperature),
+                ..request
+            };
+            let retry_response = self
+                .apply_auth_header(
+                    self.http_client().post(url).json(&retry_request),
+                    credential,
+                )
+                .send()
+                .await?;
+            if retry_response.status().is_success() {
+                return Ok(ChatSendResult::Success(retry_response));
+            }
+            let retry_status = retry_response.status();
+            let retry_body = retry_response.text().await?;
+            return Ok(ChatSendResult::NonSuccess {
+                status: retry_status,
+                body: retry_body,
+            });
+        }
+        Ok(ChatSendResult::NonSuccess { status, body })
+    }
+
     async fn prompt_guided_tools_fallback(
         &self,
         messages: &[ChatMessage],
@@ -2073,7 +2407,7 @@ impl Provider for OpenAiCompatibleProvider {
         let request = ApiChatRequest {
             model: model.to_string(),
             messages,
-            temperature,
+            temperature: None,
             max_tokens: self.effective_max_tokens(),
             stream: Some(false),
             tools: None,
@@ -2100,12 +2434,38 @@ impl Provider for OpenAiCompatibleProvider {
                 .await;
         }
 
+        tracing::info!(
+            provider = %self.name,
+            model = %model,
+            "Calling Chat Completions API"
+        );
         let response = match self
-            .apply_auth_header(self.http_client().post(&url).json(&request), credential)
-            .send()
+            .post_api_chat_with_temperature_retry(credential, &url, request, temperature, model)
             .await
         {
-            Ok(response) => response,
+            Ok(ChatSendResult::Success(response)) => response,
+            Ok(ChatSendResult::NonSuccess { status, body: error }) => {
+                let sanitized = super::sanitize_api_error(&error);
+
+                if status == reqwest::StatusCode::NOT_FOUND && self.supports_responses_fallback {
+                    tracing::warn!(
+                        provider = %self.name,
+                        model = %model,
+                        "Chat Completions not found; falling back to Responses API"
+                    );
+                    return self
+                        .chat_via_responses(credential, &fallback_messages, model, temperature)
+                        .await
+                        .map_err(|responses_err| {
+                            anyhow::anyhow!(
+                                "{} API error ({status}): {sanitized} (chat completions unavailable; responses fallback failed: {responses_err})",
+                                self.name
+                            )
+                        });
+                }
+
+                anyhow::bail!("{} API error ({status}): {sanitized}", self.name);
+            }
             Err(chat_error) => {
                 if self.supports_responses_fallback {
                     let sanitized = super::sanitize_api_error(&chat_error.to_string());
@@ -2123,26 +2483,6 @@ impl Provider for OpenAiCompatibleProvider {
                 return Err(chat_error.into());
             }
         };
-
-        if !response.status().is_success() {
-            let status = response.status();
-            let error = response.text().await?;
-            let sanitized = super::sanitize_api_error(&error);
-
-            if status == reqwest::StatusCode::NOT_FOUND && self.supports_responses_fallback {
-                return self
-                    .chat_via_responses(credential, &fallback_messages, model, temperature)
-                    .await
-                    .map_err(|responses_err| {
-                        anyhow::anyhow!(
-                            "{} API error ({status}): {sanitized} (chat completions unavailable; responses fallback failed: {responses_err})",
-                            self.name
-                        )
-                    });
-            }
-
-            anyhow::bail!("{} API error ({status}): {sanitized}", self.name);
-        }
 
         let body = response.text().await?;
         let chat_response = parse_chat_response_body(&self.name, &body)?;
@@ -2203,7 +2543,7 @@ impl Provider for OpenAiCompatibleProvider {
         let request = ApiChatRequest {
             model: model.to_string(),
             messages: api_messages,
-            temperature,
+            temperature: None,
             max_tokens: self.effective_max_tokens(),
             stream: Some(false),
             tools: None,
@@ -2217,13 +2557,39 @@ impl Provider for OpenAiCompatibleProvider {
                 .await;
         }
 
+        tracing::info!(
+            provider = %self.name,
+            model = %model,
+            "Calling Chat Completions API"
+        );
         let url = self.chat_completions_url();
         let response = match self
-            .apply_auth_header(self.http_client().post(&url).json(&request), credential)
-            .send()
+            .post_api_chat_with_temperature_retry(credential, &url, request, temperature, model)
             .await
         {
-            Ok(response) => response,
+            Ok(ChatSendResult::Success(response)) => response,
+            Ok(ChatSendResult::NonSuccess { status, body: error }) => {
+                // Mirror chat_with_system: 404 may mean this provider uses the Responses API
+                if status == reqwest::StatusCode::NOT_FOUND && self.supports_responses_fallback {
+                    tracing::warn!(
+                        provider = %self.name,
+                        model = %model,
+                        "Chat Completions not found; falling back to Responses API"
+                    );
+                    return self
+                        .chat_via_responses(credential, &effective_messages, model, temperature)
+                        .await
+                        .map_err(|responses_err| {
+                            anyhow::anyhow!(
+                                "{} API error (chat completions unavailable; responses fallback failed: {responses_err})",
+                                self.name
+                            )
+                        });
+                }
+
+                let sanitized = super::sanitize_api_error(&error);
+                anyhow::bail!("{} API error ({status}): {sanitized}", self.name);
+            }
             Err(chat_error) => {
                 if self.supports_responses_fallback {
                     let sanitized = super::sanitize_api_error(&chat_error.to_string());
@@ -2241,25 +2607,6 @@ impl Provider for OpenAiCompatibleProvider {
                 return Err(chat_error.into());
             }
         };
-
-        if !response.status().is_success() {
-            let status = response.status();
-
-            // Mirror chat_with_system: 404 may mean this provider uses the Responses API
-            if status == reqwest::StatusCode::NOT_FOUND && self.supports_responses_fallback {
-                return self
-                    .chat_via_responses(credential, &effective_messages, model, temperature)
-                    .await
-                    .map_err(|responses_err| {
-                        anyhow::anyhow!(
-                            "{} API error (chat completions unavailable; responses fallback failed: {responses_err})",
-                            self.name
-                        )
-                    });
-            }
-
-            return Err(super::api_error(&self.name, response).await);
-        }
 
         let body = response.text().await?;
         let chat_response = parse_chat_response_body(&self.name, &body)?;
@@ -2321,7 +2668,7 @@ impl Provider for OpenAiCompatibleProvider {
         let request = ApiChatRequest {
             model: model.to_string(),
             messages: api_messages,
-            temperature,
+            temperature: None,
             max_tokens: self.effective_max_tokens(),
             stream: Some(false),
             tools: if tools.is_empty() {
@@ -2349,13 +2696,53 @@ impl Provider for OpenAiCompatibleProvider {
                 .await;
         }
 
+        tracing::info!(
+            provider = %self.name,
+            model = %model,
+            num_tools = tools.len(),
+            "Calling Chat Completions API with tools"
+        );
         let url = self.chat_completions_url();
         let response = match self
-            .apply_auth_header(self.http_client().post(&url).json(&request), credential)
-            .send()
+            .post_api_chat_with_temperature_retry(credential, &url, request, temperature, model)
             .await
         {
-            Ok(response) => response,
+            Ok(ChatSendResult::Success(response)) => response,
+            Ok(ChatSendResult::NonSuccess { status, body: error }) => {
+                let sanitized = super::sanitize_api_error(&error);
+
+                if Self::is_native_tool_schema_unsupported(status, &error) {
+                    let fallback_tool_specs = Self::openai_tools_to_tool_specs(tools);
+                    return self
+                        .prompt_guided_tools_fallback(
+                            messages,
+                            (!fallback_tool_specs.is_empty())
+                                .then_some(fallback_tool_specs.as_slice()),
+                            model,
+                            temperature,
+                        )
+                        .await;
+                }
+
+                if status == reqwest::StatusCode::NOT_FOUND && self.supports_responses_fallback {
+                    tracing::warn!(
+                        provider = %self.name,
+                        model = %model,
+                        "Chat Completions not found; falling back to Responses API"
+                    );
+                    return self
+                        .chat_via_responses_chat(
+                            credential,
+                            &effective_messages,
+                            model,
+                            (!tools.is_empty()).then(|| tools.to_vec()),
+                            temperature,
+                        )
+                        .await;
+                }
+
+                anyhow::bail!("{} API error ({status}): {sanitized}", self.name);
+            }
             Err(error) => {
                 tracing::warn!(
                     "{} native tool call transport failed: {error}; falling back to history path",
@@ -2373,38 +2760,6 @@ impl Provider for OpenAiCompatibleProvider {
                 });
             }
         };
-
-        if !response.status().is_success() {
-            let status = response.status();
-            let error = response.text().await?;
-            let sanitized = super::sanitize_api_error(&error);
-
-            if Self::is_native_tool_schema_unsupported(status, &error) {
-                let fallback_tool_specs = Self::openai_tools_to_tool_specs(tools);
-                return self
-                    .prompt_guided_tools_fallback(
-                        messages,
-                        (!fallback_tool_specs.is_empty()).then_some(fallback_tool_specs.as_slice()),
-                        model,
-                        temperature,
-                    )
-                    .await;
-            }
-
-            if status == reqwest::StatusCode::NOT_FOUND && self.supports_responses_fallback {
-                return self
-                    .chat_via_responses_chat(
-                        credential,
-                        &effective_messages,
-                        model,
-                        (!tools.is_empty()).then(|| tools.to_vec()),
-                        temperature,
-                    )
-                    .await;
-            }
-
-            anyhow::bail!("{} API error ({status}): {sanitized}", self.name);
-        }
 
         let body = response.text().await?;
         let chat_response = parse_chat_response_body(&self.name, &body)?;
@@ -2480,7 +2835,7 @@ impl Provider for OpenAiCompatibleProvider {
                 &effective_messages,
                 !self.merge_system_into_user,
             ),
-            temperature,
+            temperature: None,
             max_tokens: self.effective_max_tokens(),
             stream: Some(false),
             tool_choice: tools.as_ref().map(|_| "auto".to_string()),
@@ -2500,16 +2855,63 @@ impl Provider for OpenAiCompatibleProvider {
                 .await;
         }
 
+        tracing::info!(
+            provider = %self.name,
+            model = %model,
+            num_tools = response_tools.as_ref().map(|t| t.len()).unwrap_or(0),
+            "Calling Chat Completions API with native tools"
+        );
         let url = self.chat_completions_url();
         let response = match self
-            .apply_auth_header(
-                self.http_client().post(&url).json(&native_request),
+            .post_native_chat_with_temperature_retry(
                 credential,
+                &url,
+                native_request,
+                temperature,
+                model,
             )
-            .send()
             .await
         {
-            Ok(response) => response,
+            Ok(ChatSendResult::Success(response)) => response,
+            Ok(ChatSendResult::NonSuccess { status, body: error }) => {
+                let sanitized = super::sanitize_api_error(&error);
+
+                if Self::is_native_tool_schema_unsupported(status, &error) {
+                    return self
+                        .prompt_guided_tools_fallback(
+                            request.messages,
+                            request.tools,
+                            model,
+                            temperature,
+                        )
+                        .await;
+                }
+
+                if status == reqwest::StatusCode::NOT_FOUND && self.supports_responses_fallback {
+                    tracing::warn!(
+                        provider = %self.name,
+                        model = %model,
+                        "Chat Completions not found; falling back to Responses API"
+                    );
+                    return self
+                        .chat_via_responses_chat(
+                            credential,
+                            &effective_messages,
+                            model,
+                            response_tools.clone(),
+                            temperature,
+                        )
+                        .await
+                        .map_err(|responses_err| {
+                            anyhow::anyhow!(
+                                "{} API error ({status}): {sanitized} (chat completions unavailable; responses fallback failed: {responses_err})",
+                                self.name
+                            )
+                        });
+                }
+
+                anyhow::bail!("{} API error ({status}): {sanitized}", self.name);
+            }
             Err(chat_error) => {
                 if self.supports_responses_fallback {
                     let sanitized = super::sanitize_api_error(&chat_error.to_string());
@@ -2533,43 +2935,6 @@ impl Provider for OpenAiCompatibleProvider {
                 return Err(chat_error.into());
             }
         };
-
-        if !response.status().is_success() {
-            let status = response.status();
-            let error = response.text().await?;
-            let sanitized = super::sanitize_api_error(&error);
-
-            if Self::is_native_tool_schema_unsupported(status, &error) {
-                return self
-                    .prompt_guided_tools_fallback(
-                        request.messages,
-                        request.tools,
-                        model,
-                        temperature,
-                    )
-                    .await;
-            }
-
-            if status == reqwest::StatusCode::NOT_FOUND && self.supports_responses_fallback {
-                return self
-                    .chat_via_responses_chat(
-                        credential,
-                        &effective_messages,
-                        model,
-                        response_tools.clone(),
-                        temperature,
-                    )
-                    .await
-                    .map_err(|responses_err| {
-                        anyhow::anyhow!(
-                            "{} API error ({status}): {sanitized} (chat completions unavailable; responses fallback failed: {responses_err})",
-                            self.name
-                        )
-                    });
-            }
-
-            anyhow::bail!("{} API error ({status}): {sanitized}", self.name);
-        }
 
         let native_response: ApiChatResponse = response.json().await?;
         let usage = native_response.usage.map(|u| TokenUsage {
@@ -2633,7 +2998,7 @@ impl Provider for OpenAiCompatibleProvider {
         let request = ApiChatRequest {
             model: model.to_string(),
             messages,
-            temperature,
+            temperature: None,
             max_tokens: self.effective_max_tokens(),
             stream: Some(options.enabled),
             tools: None,
@@ -2644,54 +3009,76 @@ impl Provider for OpenAiCompatibleProvider {
         let url = self.chat_completions_url();
         let client = self.http_client();
         let auth_header = self.auth_header.clone();
+        let provider_name = self.name.clone();
+
+        tracing::info!(
+            provider = %self.name,
+            model = %model,
+            "Calling Chat Completions API (streaming)"
+        );
 
         // Use a channel to bridge the async HTTP response to the stream
         let (tx, rx) = tokio::sync::mpsc::channel::<StreamResult<StreamChunk>>(100);
 
         tokio::spawn(async move {
-            // Build request with auth
-            let mut req_builder = client.post(&url).json(&request);
+            let mut current_request = request;
+            let mut attempt = 0u32;
 
-            // Apply auth header
-            req_builder = match &auth_header {
-                AuthStyle::Bearer => {
-                    req_builder.header("Authorization", format!("Bearer {}", credential))
-                }
-                AuthStyle::XApiKey => req_builder.header("x-api-key", &credential),
-                AuthStyle::Custom(header) => req_builder.header(header, &credential),
-            };
+            loop {
+                attempt += 1;
 
-            // Set accept header for streaming
-            req_builder = req_builder.header("Accept", "text/event-stream");
+                // Build request with auth
+                let mut req_builder = client.post(&url).json(&current_request);
+                req_builder = match &auth_header {
+                    AuthStyle::Bearer => {
+                        req_builder.header("Authorization", format!("Bearer {}", credential))
+                    }
+                    AuthStyle::XApiKey => req_builder.header("x-api-key", &credential),
+                    AuthStyle::Custom(header) => req_builder.header(header, &credential),
+                };
+                req_builder = req_builder.header("Accept", "text/event-stream");
 
-            // Send request
-            let response = match req_builder.send().await {
-                Ok(r) => r,
-                Err(e) => {
-                    let _ = tx.send(Err(StreamError::Http(e))).await;
+                let response = match req_builder.send().await {
+                    Ok(r) => r,
+                    Err(e) => {
+                        let _ = tx.send(Err(StreamError::Http(e))).await;
+                        return;
+                    }
+                };
+
+                if response.status().is_success() {
+                    let mut chunk_stream = sse_bytes_to_chunks(response, options.count_tokens);
+                    while let Some(chunk) = chunk_stream.next().await {
+                        if tx.send(chunk).await.is_err() {
+                            break;
+                        }
+                    }
                     return;
                 }
-            };
 
-            // Check status
-            if !response.status().is_success() {
                 let status = response.status();
                 let error = match response.text().await {
                     Ok(e) => e,
                     Err(_) => format!("HTTP error: {}", status),
                 };
+
+                if attempt == 1
+                    && OpenAiCompatibleProvider::is_temperature_required_error(status, &error)
+                    && current_request.temperature.is_none()
+                {
+                    tracing::warn!(
+                        provider = %provider_name,
+                        model = %current_request.model,
+                        "Upstream requires temperature; retrying with configured value"
+                    );
+                    current_request.temperature = Some(temperature);
+                    continue;
+                }
+
                 let _ = tx
                     .send(Err(StreamError::Provider(format!("{}: {}", status, error))))
                     .await;
                 return;
-            }
-
-            // Convert to chunk stream and forward to channel
-            let mut chunk_stream = sse_bytes_to_chunks(response, options.count_tokens);
-            while let Some(chunk) = chunk_stream.next().await {
-                if tx.send(chunk).await.is_err() {
-                    break; // Receiver dropped
-                }
             }
         });
 
@@ -2767,6 +3154,45 @@ mod tests {
         assert_eq!(p.base_url, "https://example.com");
     }
 
+    #[test]
+    fn to_responses_tool_format_flattens_nested_function() {
+        let tools = vec![serde_json::json!({
+            "type": "function",
+            "function": {
+                "name": "shell",
+                "description": "Run a shell command",
+                "parameters": {"type": "object", "properties": {}}
+            }
+        })];
+
+        let flattened = OpenAiCompatibleProvider::to_responses_tool_format(tools);
+        assert_eq!(flattened.len(), 1);
+        let tool = &flattened[0];
+        assert_eq!(tool.get("type").and_then(Value::as_str), Some("function"));
+        assert_eq!(tool.get("name").and_then(Value::as_str), Some("shell"));
+        assert_eq!(
+            tool.get("description").and_then(Value::as_str),
+            Some("Run a shell command")
+        );
+        assert!(tool.get("parameters").is_some());
+        assert!(
+            tool.get("function").is_none(),
+            "nested `function` object must be removed"
+        );
+    }
+
+    #[test]
+    fn to_responses_tool_format_preserves_already_flat_entries() {
+        let flat = serde_json::json!({
+            "type": "function",
+            "name": "already_flat",
+            "description": "desc",
+            "parameters": {"type": "object"}
+        });
+        let flattened = OpenAiCompatibleProvider::to_responses_tool_format(vec![flat.clone()]);
+        assert_eq!(flattened, vec![flat]);
+    }
+
     #[tokio::test]
     async fn chat_fails_without_key() {
         let p = make_provider("Venice", "https://api.venice.ai", None);
@@ -2796,7 +3222,7 @@ mod tests {
                     content: MessageContent::Text("hello".to_string()),
                 },
             ],
-            temperature: 0.4,
+            temperature: Some(0.4),
             max_tokens: None,
             stream: Some(false),
             tools: None,
@@ -2810,6 +3236,229 @@ mod tests {
         // tools/tool_choice should be omitted when None
         assert!(!json.contains("tools"));
         assert!(!json.contains("tool_choice"));
+    }
+
+    #[test]
+    fn api_chat_request_omits_temperature_when_none() {
+        let req = ApiChatRequest {
+            model: "gpt-5.5".to_string(),
+            messages: vec![Message {
+                role: "user".to_string(),
+                content: MessageContent::Text("hi".to_string()),
+            }],
+            temperature: None,
+            max_tokens: None,
+            stream: Some(false),
+            tools: None,
+            tool_choice: None,
+            cache: None,
+        };
+        let json = serde_json::to_string(&req).unwrap();
+        assert!(
+            !json.contains("temperature"),
+            "temperature key must be absent when None: {json}"
+        );
+    }
+
+    #[test]
+    fn api_chat_request_includes_temperature_when_set() {
+        let req = ApiChatRequest {
+            model: "gpt-4o".to_string(),
+            messages: vec![Message {
+                role: "user".to_string(),
+                content: MessageContent::Text("hi".to_string()),
+            }],
+            temperature: Some(0.7),
+            max_tokens: None,
+            stream: Some(false),
+            tools: None,
+            tool_choice: None,
+            cache: None,
+        };
+        let json = serde_json::to_string(&req).unwrap();
+        assert!(json.contains("\"temperature\":0.7"), "got: {json}");
+    }
+
+    #[test]
+    fn native_chat_request_omits_temperature_when_none() {
+        let req = NativeChatRequest {
+            model: "claude-opus-4-7".to_string(),
+            messages: vec![NativeMessage {
+                role: "user".to_string(),
+                content: Some(MessageContent::Text("hi".to_string())),
+                tool_call_id: None,
+                tool_calls: None,
+                reasoning_content: None,
+            }],
+            temperature: None,
+            max_tokens: None,
+            stream: Some(false),
+            tools: None,
+            tool_choice: None,
+            cache: None,
+        };
+        let json = serde_json::to_string(&req).unwrap();
+        assert!(
+            !json.contains("temperature"),
+            "temperature key must be absent when None: {json}"
+        );
+    }
+
+    #[test]
+    fn native_chat_request_includes_temperature_when_set() {
+        let req = NativeChatRequest {
+            model: "gpt-4o".to_string(),
+            messages: vec![NativeMessage {
+                role: "user".to_string(),
+                content: Some(MessageContent::Text("hi".to_string())),
+                tool_call_id: None,
+                tool_calls: None,
+                reasoning_content: None,
+            }],
+            temperature: Some(0.9),
+            max_tokens: None,
+            stream: Some(false),
+            tools: None,
+            tool_choice: None,
+            cache: None,
+        };
+        let json = serde_json::to_string(&req).unwrap();
+        assert!(json.contains("\"temperature\":0.9"), "got: {json}");
+    }
+
+    #[test]
+    fn is_temperature_required_error_matches_required_phrasings() {
+        use reqwest::StatusCode;
+        let cases = [
+            "temperature is required",
+            "Missing required field: temperature",
+            "temperature must be provided",
+            "temperature must be set",
+        ];
+        for body in cases {
+            assert!(
+                OpenAiCompatibleProvider::is_temperature_required_error(
+                    StatusCode::BAD_REQUEST,
+                    body,
+                ),
+                "expected true for: {body}"
+            );
+        }
+    }
+
+    #[test]
+    fn is_temperature_required_error_rejects_unsupported_phrasings() {
+        use reqwest::StatusCode;
+        let opposite_cases = [
+            // The two real-world error bodies the user reported — these mean
+            // the model REFUSES custom temperature, so we must NOT retry with one.
+            "'temperature' does not support 0.7 with this model. Only the default (1) value is supported",
+            "`temperature` is deprecated for this model",
+            // A legitimate range error — also not a "required" signal.
+            "temperature must be between 0 and 2",
+        ];
+        for body in opposite_cases {
+            assert!(
+                !OpenAiCompatibleProvider::is_temperature_required_error(
+                    StatusCode::BAD_REQUEST,
+                    body,
+                ),
+                "expected false for: {body}"
+            );
+        }
+    }
+
+    #[test]
+    fn is_temperature_required_error_ignores_non_400_statuses() {
+        use reqwest::StatusCode;
+        assert!(!OpenAiCompatibleProvider::is_temperature_required_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "temperature is required",
+        ));
+        assert!(!OpenAiCompatibleProvider::is_temperature_required_error(
+            StatusCode::BAD_REQUEST,
+            "some unrelated 400 error",
+        ));
+    }
+
+    #[tokio::test]
+    async fn chat_with_history_retries_once_with_temperature_on_upstream_demand() {
+        #[derive(Clone, Default)]
+        struct RetryState {
+            calls: Arc<Mutex<Vec<Value>>>,
+        }
+
+        async fn endpoint(
+            State(state): State<RetryState>,
+            Json(payload): Json<Value>,
+        ) -> (StatusCode, Json<Value>) {
+            let mut calls = state.calls.lock().await;
+            calls.push(payload.clone());
+            let has_temperature = payload.get("temperature").is_some();
+            drop(calls);
+
+            if !has_temperature {
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(serde_json::json!({
+                        "error": { "message": "temperature is required" }
+                    })),
+                )
+            } else {
+                (
+                    StatusCode::OK,
+                    Json(serde_json::json!({
+                        "choices": [{ "message": { "content": "ok" } }]
+                    })),
+                )
+            }
+        }
+
+        let state = RetryState::default();
+        let app = Router::new()
+            .route("/chat/completions", post(endpoint))
+            .with_state(state.clone());
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind test server");
+        let addr = listener.local_addr().expect("server local addr");
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.expect("serve test app");
+        });
+
+        let provider = OpenAiCompatibleProvider::new(
+            "test",
+            &format!("http://{}", addr),
+            Some("test-key"),
+            AuthStyle::Bearer,
+        );
+
+        let messages = vec![ChatMessage::user("hi")];
+        let text = provider
+            .chat_with_history(&messages, "legacy-model", 0.42)
+            .await
+            .expect("retry path should succeed");
+        assert_eq!(text, "ok");
+
+        let calls = state.calls.lock().await.clone();
+        assert_eq!(calls.len(), 2, "expected one retry after the initial 400");
+        assert!(
+            calls[0].get("temperature").is_none(),
+            "first call must omit temperature: {}",
+            calls[0]
+        );
+        assert_eq!(
+            calls[1]
+                .get("temperature")
+                .and_then(|v| v.as_f64())
+                .unwrap(),
+            0.42,
+            "retry must carry the configured temperature: {}",
+            calls[1]
+        );
+
+        server.abort();
+        let _ = server.await;
     }
 
     #[test]
@@ -2947,6 +3596,30 @@ mod tests {
     }
 
     #[test]
+    fn responses_deserializes_null_content_field() {
+        // LiteLLM / OpenAI Responses can emit `"content": null` on function_call
+        // items. With only `#[serde(default)]`, serde rejects this with
+        // "invalid type: null, expected a sequence". The deserialize_null_default
+        // helper must turn null into an empty Vec.
+        let json = r#"{
+            "output":[
+                {"type":"function_call","call_id":"c1","name":"shell","arguments":"{}","content":null}
+            ]
+        }"#;
+        let response: ResponsesResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(response.output.len(), 1);
+        assert!(response.output[0].content.is_empty());
+    }
+
+    #[test]
+    fn responses_deserializes_null_output_field() {
+        let json = r#"{"output":null,"output_text":"fallback"}"#;
+        let response: ResponsesResponse = serde_json::from_str(json).unwrap();
+        assert!(response.output.is_empty());
+        assert_eq!(response.output_text.as_deref(), Some("fallback"));
+    }
+
+    #[test]
     fn responses_extracts_function_call_as_tool_call() {
         let json = r#"{
             "output":[
@@ -3072,23 +3745,143 @@ mod tests {
         let messages = vec![
             ChatMessage::system("policy"),
             ChatMessage::user("step 1"),
-            ChatMessage::assistant("ack 1"),
-            ChatMessage::tool("{\"result\":\"ok\"}"),
+            ChatMessage::assistant(
+                r#"{"content":"thinking","tool_calls":[{"id":"call_abc","name":"browser","arguments":"{\"action\":\"get_text\"}"}]}"#,
+            ),
+            ChatMessage::tool(r#"{"tool_call_id":"call_abc","content":"page text"}"#),
             ChatMessage::user("step 2"),
         ];
 
-        let (instructions, input) = build_responses_prompt(&messages);
+        let (instructions, input) = build_responses_prompt(&messages, None);
+        let json = serde_json::to_value(&input).unwrap();
 
         assert_eq!(instructions.as_deref(), Some("policy"));
+        assert_eq!(input.len(), 5);
+
+        assert_eq!(json[0]["role"], "user");
+        assert_eq!(json[0]["content"], "step 1");
+        assert!(json[0].get("type").is_none());
+
+        assert_eq!(json[1]["role"], "assistant");
+        assert_eq!(json[1]["content"], "thinking");
+        assert!(json[1].get("type").is_none());
+
+        assert_eq!(json[2]["type"], "function_call");
+        assert_eq!(json[2]["call_id"], "call_abc");
+        assert_eq!(json[2]["name"], "browser");
+        assert!(
+            json[2]["arguments"]
+                .as_str()
+                .unwrap()
+                .contains("get_text")
+        );
+        assert!(json[2].get("role").is_none());
+
+        assert_eq!(json[3]["type"], "function_call_output");
+        assert_eq!(json[3]["call_id"], "call_abc");
+        assert_eq!(json[3]["output"], "page text");
+        assert!(json[3].get("role").is_none());
+
+        assert_eq!(json[4]["role"], "user");
+        assert_eq!(json[4]["content"], "step 2");
+    }
+
+    #[test]
+    fn build_responses_prompt_emits_function_call_and_output() {
+        let messages = vec![
+            ChatMessage::user("extract the h1"),
+            ChatMessage::assistant(
+                r#"{"content":"","tool_calls":[{"id":"call_1","name":"browser","arguments":"{\"action\":\"get_text\",\"selector\":\"h1\"}"}]}"#,
+            ),
+            ChatMessage::tool(r#"{"tool_call_id":"call_1","content":"Hello World"}"#),
+            ChatMessage::assistant("The heading is 'Hello World'."),
+        ];
+
+        let (_, input) = build_responses_prompt(&messages, None);
+        let json = serde_json::to_value(&input).unwrap();
+
         assert_eq!(input.len(), 4);
-        assert_eq!(input[0].role, "user");
-        assert_eq!(input[0].content, "step 1");
-        assert_eq!(input[1].role, "assistant");
-        assert_eq!(input[1].content, "ack 1");
-        assert_eq!(input[2].role, "assistant");
-        assert_eq!(input[2].content, "{\"result\":\"ok\"}");
-        assert_eq!(input[3].role, "user");
-        assert_eq!(input[3].content, "step 2");
+
+        assert_eq!(json[0]["role"], "user");
+        assert_eq!(json[1]["type"], "function_call");
+        assert_eq!(json[1]["call_id"], "call_1");
+        assert_eq!(json[1]["name"], "browser");
+        assert_eq!(json[2]["type"], "function_call_output");
+        assert_eq!(json[2]["call_id"], "call_1");
+        assert_eq!(json[2]["output"], "Hello World");
+        assert_eq!(json[3]["role"], "assistant");
+        assert_eq!(json[3]["content"], "The heading is 'Hello World'.");
+    }
+
+    #[test]
+    fn build_responses_prompt_drops_orphan_tool_message() {
+        let messages = vec![
+            ChatMessage::user("go"),
+            ChatMessage::tool(r#"{"tool_call_id":"call_missing","content":"stale"}"#),
+        ];
+
+        let (_, input) = build_responses_prompt(&messages, None);
+        let json = serde_json::to_value(&input).unwrap();
+
+        assert_eq!(input.len(), 2);
+        assert_eq!(json[1]["role"], "user");
+        let text = json[1]["content"].as_str().unwrap();
+        assert!(text.contains("[Tool result]"));
+        assert!(text.contains("stale"));
+        assert!(json[1].get("type").is_none());
+    }
+
+    #[test]
+    fn build_responses_prompt_falls_back_when_assistant_not_json() {
+        let messages = vec![ChatMessage::assistant("just a plain string")];
+        let (_, input) = build_responses_prompt(&messages, None);
+        let json = serde_json::to_value(&input).unwrap();
+
+        assert_eq!(input.len(), 1);
+        assert_eq!(json[0]["role"], "assistant");
+        assert_eq!(json[0]["content"], "just a plain string");
+        assert!(json[0].get("type").is_none());
+    }
+
+    #[test]
+    fn build_responses_prompt_handles_alternate_tool_id_keys() {
+        for key in ["tool_call_id", "tool_use_id", "toolUseId", "id"] {
+            let messages = vec![
+                ChatMessage::assistant(
+                    r#"{"content":"","tool_calls":[{"id":"call_x","name":"t","arguments":"{}"}]}"#,
+                ),
+                ChatMessage::tool(&format!(r#"{{"{key}":"call_x","content":"r"}}"#)),
+            ];
+            let (_, input) = build_responses_prompt(&messages, None);
+            let json = serde_json::to_value(&input).unwrap();
+
+            assert_eq!(json[1]["type"], "function_call_output", "key={key}");
+            assert_eq!(json[1]["call_id"], "call_x", "key={key}");
+            assert_eq!(json[1]["output"], "r", "key={key}");
+        }
+    }
+
+    #[test]
+    fn build_responses_prompt_with_chaining_reduces_context() {
+        let messages = vec![
+            ChatMessage::system("system context"),
+            ChatMessage::user("initial question"),
+            ChatMessage::assistant("first response"),
+            ChatMessage::user("follow-up question"),
+        ];
+
+        let (instructions_full, input_full) = build_responses_prompt(&messages, None);
+        let (instructions_chained, input_chained) = build_responses_prompt(&messages, Some("response_123"));
+
+        // Full history should include all messages
+        assert_eq!(input_full.len(), 3, "full context should include all non-system messages");
+
+        // Chaining should only include the last user message (no prior context)
+        assert_eq!(input_chained.len(), 1, "chained context should only include last user message");
+
+        // Both should preserve system instructions
+        assert_eq!(instructions_chained.as_deref(), instructions_full.as_deref());
+        assert_eq!(instructions_chained.as_deref(), Some("system context"));
     }
 
     #[tokio::test]
@@ -4076,7 +4869,7 @@ mod tests {
                 role: "user".to_string(),
                 content: MessageContent::Text("What is the weather?".to_string()),
             }],
-            temperature: 0.7,
+            temperature: Some(0.7),
             max_tokens: None,
             stream: Some(false),
             tools: Some(tools),

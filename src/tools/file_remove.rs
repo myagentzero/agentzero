@@ -37,15 +37,13 @@ impl FileRemoveTool {
         };
 
         if let Some(file_name) = stripped.file_name().and_then(|n| n.to_str()) {
-            if stripped.parent().map_or(false, |p| p.as_os_str().is_empty())
-                || stripped.parent().is_none()
-            {
-                if BOOTSTRAP_FILES
+            if (stripped.parent().map_or(false, |p| p.as_os_str().is_empty())
+                || stripped.parent().is_none())
+                && BOOTSTRAP_FILES
                     .iter()
                     .any(|b| b.eq_ignore_ascii_case(file_name))
-                {
-                    return true;
-                }
+            {
+                return true;
             }
         }
 
