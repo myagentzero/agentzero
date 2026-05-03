@@ -478,11 +478,19 @@ impl Memory for SqliteMemory {
         category: MemoryCategory,
         session_id: Option<&str>,
     ) -> anyhow::Result<()> {
-        // Compute embedding (async, before blocking work)
-        let embedding_bytes = self
-            .get_or_compute_embedding(content)
-            .await?
-            .map(|emb| vector::vec_to_bytes(&emb));
+        // Compute embedding (async, before blocking work).
+        // Embedding failures are logged but don't block the store — the row
+        // is still searchable via FTS5, and `memory reindex` can backfill later.
+        let embedding_bytes = match self.get_or_compute_embedding(content).await {
+            Ok(Some(emb)) => Some(vector::vec_to_bytes(&emb)),
+            Ok(None) => None,
+            Err(e) => {
+                tracing::warn!(
+                    "embedding failed for key '{key}'; storing without vector: {e}"
+                );
+                None
+            }
+        };
 
         let conn = self.conn.clone();
         let key = key.to_string();
@@ -1487,6 +1495,47 @@ mod tests {
             .unwrap();
         let entry = mem.get("").await.unwrap().unwrap();
         assert_eq!(entry.content, "content for empty key");
+    }
+
+    // Embedder that always fails — used to verify store() resilience.
+    struct FailingEmbedder;
+
+    #[async_trait]
+    impl super::super::embeddings::EmbeddingProvider for FailingEmbedder {
+        fn name(&self) -> &str {
+            "failing"
+        }
+        fn dimensions(&self) -> usize {
+            1536
+        }
+        async fn embed(&self, _texts: &[&str]) -> anyhow::Result<Vec<Vec<f32>>> {
+            anyhow::bail!("simulated embedder failure")
+        }
+    }
+
+    #[tokio::test]
+    async fn store_succeeds_when_embedder_fails() {
+        let tmp = TempDir::new().unwrap();
+        let mem = SqliteMemory::with_embedder(
+            tmp.path(),
+            Arc::new(FailingEmbedder),
+            0.7,
+            0.3,
+            1000,
+            None,
+        )
+        .unwrap();
+
+        mem.store("resilient_key", "content", MemoryCategory::Core, None)
+            .await
+            .expect("store should not fail when embedder errors");
+
+        let entry = mem
+            .get("resilient_key")
+            .await
+            .unwrap()
+            .expect("entry should exist despite embedding failure");
+        assert_eq!(entry.content, "content");
     }
 
     #[tokio::test]

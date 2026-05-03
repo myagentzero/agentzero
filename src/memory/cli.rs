@@ -105,7 +105,13 @@ async fn handle_store(
     category: &str,
     session: Option<&str>,
 ) -> Result<()> {
-    let mem = create_cli_memory(config)?;
+    let mem = super::create_memory_with_storage_and_routes(
+        &config.memory,
+        &config.embedding_routes,
+        Some(&config.storage.provider.config),
+        &config.workspace_dir,
+        config.api_key.as_deref(),
+    )?;
     let cat = parse_category(category);
     mem.store(key, content, cat.clone(), session).await?;
     println!(
