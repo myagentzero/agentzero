@@ -23,17 +23,17 @@ impl Tool for CalculatorTool {
     }
 
     fn description(&self) -> &str {
-        "Perform arithmetic and statistical calculations. Supports 26 functions. Use this tool whenever you need to compute a numeric result instead of guessing."
+        "Perform arithmetic, statistical, and quantitative calculations. Supports 27 functions for any numeric computation."
     }
 
     fn prompt_hint(&self) -> Option<&str> {
         Some(
-            "Perform arithmetic and statistical calculations. Use when: any numeric computation is needed. Don't use when: the answer is trivially obvious.",
+            "Perform math calculations. Use when: any numeric computation is needed. Don't use when: the answer is trivially obvious.",
         )
     }
 
     fn prompt_hint_compact(&self) -> &str {
-        "Perform arithmetic and statistical calculations."
+        "Perform math calculations."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {
@@ -47,13 +47,13 @@ impl Tool for CalculatorTool {
                         Logarithmic/exponential: log(x,base?), ln(x), exp(x), factorial(x). \
                         Aggregation: sum(values), average(values), count(values), min(values), max(values), range(values). \
                         Statistics: median(values), mode(values), variance(values), stdev(values), percentile(values,p). \
-                        Utility: percentage_change(a,b), clamp(x,min_val,max_val).",
+                        Utility: percentage_change(a,b), clamp(x,min_val,max_val), convert_temp(x,from_unit).",
                     "enum": [
                         "add", "subtract", "divide", "multiply", "pow", "sqrt",
                         "abs", "modulo", "round", "log", "ln", "exp", "factorial",
                         "sum", "average", "median", "mode", "min", "max", "range",
                         "variance", "stdev", "percentile", "count",
-                        "percentage_change", "clamp"
+                        "percentage_change", "clamp", "convert_temp"
                     ]
                 },
                 "values": {
@@ -71,7 +71,7 @@ impl Tool for CalculatorTool {
                 },
                 "x": {
                     "type": "number",
-                    "description": "Input number. Required for: sqrt, abs, exp, ln, log, factorial."
+                    "description": "Input number. Required for: sqrt, abs, exp, ln, log, factorial, convert_temp."
                 },
                 "base": {
                     "type": "number",
@@ -92,6 +92,11 @@ impl Tool for CalculatorTool {
                 "max_val": {
                     "type": "number",
                     "description": "Maximum bound. Required for: clamp."
+                },
+                "from_unit": {
+                    "type": "string",
+                    "description": "Unit of the temperature (C or F). Required for: convert_temp.",
+                    "enum": ["C", "F"]
                 }
             },
             "required": ["function"]
@@ -137,6 +142,7 @@ impl Tool for CalculatorTool {
             "count" => calc_count(&args),
             "percentage_change" => calc_percentage_change(&args),
             "clamp" => calc_clamp(&args),
+            "convert_temp" => calc_convert_temp(&args),
             other => Err(format!("Unknown function: {other}")),
         };
 
@@ -457,6 +463,26 @@ fn calc_clamp(args: &serde_json::Value) -> Result<String, String> {
         return Err("min_val must be less than or equal to max_val".to_string());
     }
     Ok(format_num(x.clamp(min_val, max_val)))
+}
+
+fn calc_convert_temp(args: &serde_json::Value) -> Result<String, String> {
+    let x = extract_f64(args, "x", "x")?;
+    let from_unit = match args.get("from_unit").and_then(|v| v.as_str()) {
+        Some(u) => u,
+        None => return Err("Missing required parameter: from_unit".to_string()),
+    };
+
+    match from_unit {
+        "C" => {
+            let fahrenheit = (x * 9.0 / 5.0) + 32.0;
+            Ok(format!("{} °F", format_num(fahrenheit)))
+        }
+        "F" => {
+            let celsius = (x - 32.0) * 5.0 / 9.0;
+            Ok(format!("{} °C", format_num(celsius)))
+        }
+        _ => Err("from_unit must be 'C' or 'F'".to_string()),
+    }
 }
 
 #[cfg(test)]
@@ -826,5 +852,60 @@ mod tests {
             .unwrap();
         assert!(result.success);
         assert_eq!(result.output, "15");
+    }
+
+    #[tokio::test]
+    async fn test_convert_celsius_to_fahrenheit() {
+        let tool = CalculatorTool::new();
+        let result = tool
+            .execute(json!({"function": "convert_temp", "x": 0.0, "from_unit": "C"}))
+            .await
+            .unwrap();
+        assert!(result.success);
+        assert_eq!(result.output, "32 °F");
+    }
+
+    #[tokio::test]
+    async fn test_convert_fahrenheit_to_celsius() {
+        let tool = CalculatorTool::new();
+        let result = tool
+            .execute(json!({"function": "convert_temp", "x": 32.0, "from_unit": "F"}))
+            .await
+            .unwrap();
+        assert!(result.success);
+        assert_eq!(result.output, "0 °C");
+    }
+
+    #[tokio::test]
+    async fn test_convert_temp_negative_celsius() {
+        let tool = CalculatorTool::new();
+        let result = tool
+            .execute(json!({"function": "convert_temp", "x": -40.0, "from_unit": "C"}))
+            .await
+            .unwrap();
+        assert!(result.success);
+        assert_eq!(result.output, "-40 °F");
+    }
+
+    #[tokio::test]
+    async fn test_convert_temp_missing_from_unit() {
+        let tool = CalculatorTool::new();
+        let result = tool
+            .execute(json!({"function": "convert_temp", "x": 20.0}))
+            .await
+            .unwrap();
+        assert!(!result.success);
+        assert!(result.error.as_ref().unwrap().contains("from_unit"));
+    }
+
+    #[tokio::test]
+    async fn test_convert_temp_invalid_unit() {
+        let tool = CalculatorTool::new();
+        let result = tool
+            .execute(json!({"function": "convert_temp", "x": 20.0, "from_unit": "K"}))
+            .await
+            .unwrap();
+        assert!(!result.success);
+        assert!(result.error.is_some());
     }
 }

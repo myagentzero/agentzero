@@ -414,7 +414,7 @@ mod tests {
     #[test]
     fn parse_since_rfc3339() {
         let cutoff = parse_since("2026-04-10T12:00:00Z").unwrap();
-        assert_eq!(cutoff.to_rfc3339().contains("2026-04-10"), true);
+        assert!(cutoff.to_rfc3339().contains("2026-04-10"));
     }
 
     #[test]

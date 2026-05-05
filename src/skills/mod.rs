@@ -167,57 +167,11 @@ fn load_workspace_skills(workspace_dir: &Path, allow_scripts: bool) -> Vec<Skill
 }
 
 pub fn load_skills_from_directory(skills_dir: &Path, allow_scripts: bool) -> Vec<Skill> {
-    if !skills_dir.exists() {
-        return Vec::new();
-    }
+    load_skills_from_directory_internal(skills_dir, allow_scripts, SkillSource::Workspace)
+}
 
-    let mut skills = Vec::new();
-
-    let Ok(entries) = std::fs::read_dir(skills_dir) else {
-        return skills;
-    };
-
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if !path.is_dir() {
-            continue;
-        }
-
-        match audit::audit_skill_directory_with_options(
-            &path,
-            audit::SkillAuditOptions { allow_scripts },
-        ) {
-            Ok(report) if report.is_clean() => {}
-            Ok(report) => {
-                let summary = report.summary();
-                warn_skipped_skill(&path, &summary, allow_scripts);
-                continue;
-            }
-            Err(err) => {
-                tracing::warn!(
-                    "skipping unauditable skill directory {}: {err}",
-                    path.display()
-                );
-                continue;
-            }
-        }
-
-        // Try SKILL.toml first, then SKILL.md
-        let manifest_path = path.join("SKILL.toml");
-        let md_path = path.join("SKILL.md");
-
-        if manifest_path.exists() {
-            if let Ok(skill) = load_skill_toml(&manifest_path) {
-                skills.push(skill);
-            }
-        } else if md_path.exists() {
-            if let Ok(skill) = load_skill_md(&md_path, &path) {
-                skills.push(skill);
-            }
-        }
-    }
-
-    skills
+fn load_open_skills_from_directory(skills_dir: &Path, allow_scripts: bool) -> Vec<Skill> {
+    load_skills_from_directory_internal(skills_dir, allow_scripts, SkillSource::OpenSkills)
 }
 
 fn finalize_open_skill(mut skill: Skill) -> Skill {
@@ -230,7 +184,17 @@ fn finalize_open_skill(mut skill: Skill) -> Skill {
     skill
 }
 
-fn load_open_skills_from_directory(skills_dir: &Path, allow_scripts: bool) -> Vec<Skill> {
+#[derive(Clone, Copy)]
+enum SkillSource {
+    Workspace,
+    OpenSkills,
+}
+
+fn load_skills_from_directory_internal(
+    skills_dir: &Path,
+    allow_scripts: bool,
+    source: SkillSource,
+) -> Vec<Skill> {
     if !skills_dir.exists() {
         return Vec::new();
     }
@@ -239,6 +203,11 @@ fn load_open_skills_from_directory(skills_dir: &Path, allow_scripts: bool) -> Ve
 
     let Ok(entries) = std::fs::read_dir(skills_dir) else {
         return skills;
+    };
+
+    let unauditable_label = match source {
+        SkillSource::Workspace => "skill",
+        SkillSource::OpenSkills => "open-skill",
     };
 
     for entry in entries.flatten() {
@@ -259,22 +228,32 @@ fn load_open_skills_from_directory(skills_dir: &Path, allow_scripts: bool) -> Ve
             }
             Err(err) => {
                 tracing::warn!(
-                    "skipping unauditable open-skill directory {}: {err}",
+                    "skipping unauditable {unauditable_label} directory {}: {err}",
                     path.display()
                 );
                 continue;
             }
         }
 
+        // Try SKILL.toml first, then SKILL.md
         let manifest_path = path.join("SKILL.toml");
         let md_path = path.join("SKILL.md");
 
         if manifest_path.exists() {
             if let Ok(skill) = load_skill_toml(&manifest_path) {
-                skills.push(finalize_open_skill(skill));
+                let skill = match source {
+                    SkillSource::Workspace => skill,
+                    SkillSource::OpenSkills => finalize_open_skill(skill),
+                };
+                skills.push(skill);
             }
         } else if md_path.exists() {
-            if let Ok(skill) = load_open_skill_md(&md_path) {
+            let loaded = match source {
+                SkillSource::Workspace => load_skill_md(&md_path, &path),
+                // load_open_skill_md already applies finalize_open_skill internally.
+                SkillSource::OpenSkills => load_open_skill_md(&md_path),
+            };
+            if let Ok(skill) = loaded {
                 skills.push(skill);
             }
         }

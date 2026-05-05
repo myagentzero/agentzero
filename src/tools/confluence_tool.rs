@@ -527,6 +527,142 @@ impl Tool for ConfluenceTool {
     }
 }
 
+// ── Input validation ──────────────────────────────────────────────────────────
+
+fn validate_page_id(id: &str) -> anyhow::Result<()> {
+    // Confluence page IDs are numeric strings
+    if id.is_empty() || !id.chars().all(|c| c.is_ascii_digit()) {
+        anyhow::bail!("Invalid page ID '{id}'. Expected numeric ID (e.g., '12345')")
+    }
+    Ok(())
+}
+
+fn validate_space_key(key: &str) -> anyhow::Result<()> {
+    // Space keys are alphanumeric (e.g., PROJ, DEV) or numeric IDs
+    let valid = !key.is_empty()
+        && (key.chars().all(|c| c.is_ascii_alphanumeric())
+            || key.chars().all(|c| c.is_ascii_digit()));
+
+    if !valid {
+        anyhow::bail!(
+            "Invalid space key '{key}'. Expected alphanumeric key (e.g., 'PROJ') or numeric ID"
+        )
+    }
+    Ok(())
+}
+
+fn validate_cql(cql: &str) -> anyhow::Result<()> {
+    if cql.is_empty() {
+        anyhow::bail!("CQL query cannot be empty")
+    }
+    if cql.len() > 2000 {
+        anyhow::bail!("CQL query too long (max 2000 chars)")
+    }
+    Ok(())
+}
+
+// ── Response shaping ──────────────────────────────────────────────────────────
+
+/// Safely extracts the first 10 characters (date prefix) from a string.
+/// Returns the full string if it is shorter than 10 characters.
+fn date_prefix(s: &str) -> &str {
+    s.get(..10).unwrap_or(s)
+}
+
+fn extract_excerpt(raw: &Value) -> Value {
+    // Try multiple possible fields for excerpt/summary
+    if let Some(excerpt) = raw["excerpt"].as_str() {
+        return json!(excerpt);
+    }
+    if let Some(body) = raw["body"]["view"]["value"].as_str() {
+        // Truncate body to first 200 chars as excerpt
+        let truncated = body.chars().take(200).collect::<String>();
+        return json!(truncated);
+    }
+    Value::Null
+}
+
+fn extract_labels(raw: &Value) -> Value {
+    if let Some(labels_array) = raw["labels"]["results"].as_array() {
+        let labels: Vec<String> = labels_array
+            .iter()
+            .filter_map(|l| l["name"].as_str().map(String::from))
+            .collect();
+        return json!(labels);
+    }
+    json!([])
+}
+
+fn extract_body(raw: &Value) -> Value {
+    // Try to get the rendered view format first, fallback to storage
+    if let Some(view_body) = raw["body"]["view"]["value"].as_str() {
+        return json!(view_body);
+    }
+    if let Some(storage_body) = raw["body"]["storage"]["value"].as_str() {
+        return json!(storage_body);
+    }
+    Value::Null
+}
+
+fn shape_search_result(raw: &Value) -> Value {
+    json!({
+        "id": raw["id"],
+        "title": raw["title"],
+        "type": raw["type"],
+        "status": raw["status"],
+        "spaceKey": raw["space"]["key"],
+        "version": raw["version"]["number"],
+        "createdAt": date_prefix(raw["history"]["createdDate"].as_str().unwrap_or("")),
+        "lastModified": date_prefix(raw["version"]["when"].as_str().unwrap_or("")),
+        "authorId": raw["history"]["createdBy"]["accountId"],
+        "excerpt": raw["excerpt"],
+        "url": raw["_links"]["webui"],
+    })
+}
+
+fn shape_page_basic(raw: &Value) -> Value {
+    json!({
+        "id": raw["id"],
+        "title": raw["title"],
+        "type": raw["type"],
+        "status": raw["status"],
+        "spaceId": raw["spaceId"],
+        "version": raw["version"]["number"],
+        "createdAt": date_prefix(raw["createdAt"].as_str().unwrap_or("")),
+        "lastModified": date_prefix(raw["lastModified"].as_str().unwrap_or("")),
+        "authorId": raw["authorId"],
+        "url": raw["_links"]["webui"],
+    })
+}
+
+fn shape_page_standard(raw: &Value) -> Value {
+    let mut result = shape_page_basic(raw);
+    let obj = result.as_object_mut().unwrap();
+    obj.insert("excerpt".to_string(), extract_excerpt(raw));
+    obj.insert("labels".to_string(), extract_labels(raw));
+    result
+}
+
+fn shape_page_full(raw: &Value) -> Value {
+    let mut result = shape_page_standard(raw);
+    let obj = result.as_object_mut().unwrap();
+    obj.insert("body".to_string(), extract_body(raw));
+    result
+}
+
+fn shape_space(raw: &Value) -> Value {
+    json!({
+        "id": raw["id"],
+        "key": raw["key"],
+        "name": raw["name"],
+        "type": raw["type"],
+        "status": raw["status"],
+        "description": raw["description"]["view"]["value"],
+        "homepageId": raw["homepageId"],
+        "url": raw["_links"]["webui"],
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -825,140 +961,4 @@ mod tests {
             ContentDetailLevel::Standard
         ));
     }
-}
-
-// ── Input validation ──────────────────────────────────────────────────────────
-
-fn validate_page_id(id: &str) -> anyhow::Result<()> {
-    // Confluence page IDs are numeric strings
-    if id.is_empty() || !id.chars().all(|c| c.is_ascii_digit()) {
-        anyhow::bail!("Invalid page ID '{id}'. Expected numeric ID (e.g., '12345')")
-    }
-    Ok(())
-}
-
-fn validate_space_key(key: &str) -> anyhow::Result<()> {
-    // Space keys are alphanumeric (e.g., PROJ, DEV) or numeric IDs
-    let valid = !key.is_empty()
-        && (key.chars().all(|c| c.is_ascii_alphanumeric())
-            || key.chars().all(|c| c.is_ascii_digit()));
-
-    if !valid {
-        anyhow::bail!(
-            "Invalid space key '{key}'. Expected alphanumeric key (e.g., 'PROJ') or numeric ID"
-        )
-    }
-    Ok(())
-}
-
-fn validate_cql(cql: &str) -> anyhow::Result<()> {
-    if cql.is_empty() {
-        anyhow::bail!("CQL query cannot be empty")
-    }
-    if cql.len() > 2000 {
-        anyhow::bail!("CQL query too long (max 2000 chars)")
-    }
-    Ok(())
-}
-
-// ── Response shaping ──────────────────────────────────────────────────────────
-
-/// Safely extracts the first 10 characters (date prefix) from a string.
-/// Returns the full string if it is shorter than 10 characters.
-fn date_prefix(s: &str) -> &str {
-    s.get(..10).unwrap_or(s)
-}
-
-fn extract_excerpt(raw: &Value) -> Value {
-    // Try multiple possible fields for excerpt/summary
-    if let Some(excerpt) = raw["excerpt"].as_str() {
-        return json!(excerpt);
-    }
-    if let Some(body) = raw["body"]["view"]["value"].as_str() {
-        // Truncate body to first 200 chars as excerpt
-        let truncated = body.chars().take(200).collect::<String>();
-        return json!(truncated);
-    }
-    Value::Null
-}
-
-fn extract_labels(raw: &Value) -> Value {
-    if let Some(labels_array) = raw["labels"]["results"].as_array() {
-        let labels: Vec<String> = labels_array
-            .iter()
-            .filter_map(|l| l["name"].as_str().map(String::from))
-            .collect();
-        return json!(labels);
-    }
-    json!([])
-}
-
-fn extract_body(raw: &Value) -> Value {
-    // Try to get the rendered view format first, fallback to storage
-    if let Some(view_body) = raw["body"]["view"]["value"].as_str() {
-        return json!(view_body);
-    }
-    if let Some(storage_body) = raw["body"]["storage"]["value"].as_str() {
-        return json!(storage_body);
-    }
-    Value::Null
-}
-
-fn shape_search_result(raw: &Value) -> Value {
-    json!({
-        "id": raw["id"],
-        "title": raw["title"],
-        "type": raw["type"],
-        "status": raw["status"],
-        "spaceKey": raw["space"]["key"],
-        "version": raw["version"]["number"],
-        "createdAt": date_prefix(raw["history"]["createdDate"].as_str().unwrap_or("")),
-        "lastModified": date_prefix(raw["version"]["when"].as_str().unwrap_or("")),
-        "authorId": raw["history"]["createdBy"]["accountId"],
-        "excerpt": raw["excerpt"],
-        "url": raw["_links"]["webui"],
-    })
-}
-
-fn shape_page_basic(raw: &Value) -> Value {
-    json!({
-        "id": raw["id"],
-        "title": raw["title"],
-        "type": raw["type"],
-        "status": raw["status"],
-        "spaceId": raw["spaceId"],
-        "version": raw["version"]["number"],
-        "createdAt": date_prefix(raw["createdAt"].as_str().unwrap_or("")),
-        "lastModified": date_prefix(raw["lastModified"].as_str().unwrap_or("")),
-        "authorId": raw["authorId"],
-        "url": raw["_links"]["webui"],
-    })
-}
-
-fn shape_page_standard(raw: &Value) -> Value {
-    let mut result = shape_page_basic(raw);
-    let obj = result.as_object_mut().unwrap();
-    obj.insert("excerpt".to_string(), extract_excerpt(raw));
-    obj.insert("labels".to_string(), extract_labels(raw));
-    result
-}
-
-fn shape_page_full(raw: &Value) -> Value {
-    let mut result = shape_page_standard(raw);
-    let obj = result.as_object_mut().unwrap();
-    obj.insert("body".to_string(), extract_body(raw));
-    result
-}
-
-fn shape_space(raw: &Value) -> Value {
-    json!({
-        "id": raw["id"],
-        "key": raw["key"],
-        "name": raw["name"],
-        "type": raw["type"],
-        "status": raw["status"],
-        "description": raw["description"]["view"]["value"],
-        "homepageId": raw["homepageId"],
-        "url": raw["_links"]["webui"],
-    })
 }

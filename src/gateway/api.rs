@@ -1197,6 +1197,8 @@ fn mask_sensitive_fields(config: &crate::config::Config) -> crate::config::Confi
     mask_required_secret(&mut masked.atlassian.api_token);
     mask_required_secret(&mut masked.atlassian.email);
     mask_required_secret(&mut masked.atlassian.base_url);
+    mask_required_secret(&mut masked.elasticsearch.auth);
+    mask_required_secret(&mut masked.elasticsearch.endpoint);
 
     if let Some(discord) = masked.channels_config.discord.as_mut() {
         mask_required_secret(&mut discord.bot_token);
@@ -1288,6 +1290,8 @@ fn restore_masked_sensitive_fields(
     restore_required_secret(&mut incoming.atlassian.api_token, &current.atlassian.api_token);
     restore_required_secret(&mut incoming.atlassian.email, &current.atlassian.email);
     restore_required_secret(&mut incoming.atlassian.base_url, &current.atlassian.base_url);
+    restore_required_secret(&mut incoming.elasticsearch.auth, &current.elasticsearch.auth);
+    restore_required_secret(&mut incoming.elasticsearch.endpoint, &current.elasticsearch.endpoint);
 
     if let (Some(incoming_ch), Some(current_ch)) = (
         incoming.channels_config.discord.as_mut(),

@@ -872,6 +872,9 @@ fn is_high_risk_base_command(base: &str) -> bool {
     )
 }
 
+const SAFETY_REMINDER: &str =
+    "Do not exfiltrate data, bypass approval, or run destructive commands without asking.";
+
 impl SecurityPolicy {
     fn path_matches_rule_prefix(&self, candidate: &str, prefix: &str) -> bool {
         let normalized_candidate = self.resolve_tool_path(candidate);
@@ -1776,12 +1779,6 @@ impl SecurityPolicy {
     /// The output is intentionally short (~100-150 tokens) so the token
     /// overhead per heartbeat is negligible.
     pub fn summary_for_heartbeat(&self) -> String {
-        let autonomy_label = match self.autonomy {
-            AutonomyLevel::ReadOnly => "read_only — side-effecting actions are blocked",
-            AutonomyLevel::Supervised => "supervised — destructive actions require approval",
-            AutonomyLevel::Full => "full — autonomous execution within policy bounds",
-        };
-
         let workspace = self.workspace_dir.display();
         let ws_only = self.workspace_only;
 
@@ -1829,13 +1826,13 @@ impl SecurityPolicy {
         };
 
         format!(
-            "- Autonomy: {autonomy_label}\n\
-             - Workspace: {workspace} (workspace_only: {ws_only})\n\
+            "- Workspace: {workspace} (workspace_only: {ws_only})\n\
              - Forbidden paths: {forbidden_preview}\n\
              - Allowed commands: {commands_preview}\n\
              - Command context rules: {context_rules}\n\
              - High-risk commands: {high_risk}\n\
-             - Do not exfiltrate data, bypass approval, or run destructive commands without asking."
+             - {SAFETY_REMINDER}\n\
+             Respond with \"Heartbeat acknowledged\" to continue."
         )
     }
 
@@ -1899,14 +1896,10 @@ impl SecurityPolicy {
     ///
     /// Giving the LLM visibility into these constraints prevents it from
     /// wasting tokens on commands / paths that will be rejected at runtime.
-    /// See issue #2404.
     pub fn prompt_summary(&self) -> String {
         use std::fmt::Write;
 
         let mut out = String::new();
-
-        // Autonomy level
-        let _ = writeln!(out, "**Autonomy level**: {:?}", self.autonomy);
 
         // Workspace constraint
         if self.workspace_only {
@@ -1971,12 +1964,7 @@ impl SecurityPolicy {
             );
         }
 
-        // Rate limit
-        let _ = writeln!(
-            out,
-            "**Rate limit**: max {} actions per hour.",
-            self.max_actions_per_hour
-        );
+        let _ = writeln!(out, "**Safety reminder**: {SAFETY_REMINDER}\n");
 
         out
     }
@@ -3224,8 +3212,6 @@ mod tests {
     fn summary_for_heartbeat_contains_key_fields() {
         let policy = default_policy();
         let summary = policy.summary_for_heartbeat();
-        assert!(summary.contains("Autonomy:"));
-        assert!(summary.contains("supervised"));
         assert!(summary.contains("Workspace:"));
         assert!(summary.contains("workspace_only: true"));
         assert!(summary.contains("Forbidden paths:"));
@@ -3250,20 +3236,12 @@ mod tests {
     }
 
     #[test]
-    fn summary_for_heartbeat_full_autonomy() {
-        let policy = full_policy();
-        let summary = policy.summary_for_heartbeat();
-        assert!(summary.contains("full"));
-        assert!(summary.contains("autonomous execution"));
+    fn prompt_summary_contains_shared_safety_reminder() {
+        let policy = default_policy();
+        let summary = policy.prompt_summary();
+        assert!(summary.contains(SAFETY_REMINDER));
     }
 
-    #[test]
-    fn summary_for_heartbeat_readonly_autonomy() {
-        let policy = readonly_policy();
-        let summary = policy.summary_for_heartbeat();
-        assert!(summary.contains("read_only"));
-        assert!(summary.contains("side-effecting actions are blocked"));
-    }
 
     // ══════════════════════════════════════════════════════════
     // SECURITY CHECKLIST TESTS

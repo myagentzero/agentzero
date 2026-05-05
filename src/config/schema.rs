@@ -399,6 +399,9 @@ pub struct Config {
     #[serde(default)]
     pub atlassian: AtlassianConfig,
 
+    /// Elasticsearch query tool (`[elasticsearch]`).
+    #[serde(default)]
+    pub elasticsearch: ElasticsearchConfig,
 }
 
 /// Named provider profile definition compatible with Codex app-server style config.
@@ -5671,6 +5674,43 @@ impl Default for AtlassianConfig {
     }
 }
 
+// -- Elasticsearch --
+
+/// Elasticsearch query tool configuration (`[elasticsearch]`).
+///
+/// Exposes a read-only `ess_query` agent tool against a single cluster.
+/// `auth` is a base64-encoded API key (as shown in Kibana "Create API key") and
+/// is encrypted at rest via the zeroclaw secret store (`enc2:` prefix).
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct ElasticsearchConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub endpoint: String,
+    #[serde(default)]
+    pub auth: String,
+    #[serde(default)]
+    pub cluster_names: Vec<String>,
+    #[serde(default = "default_elasticsearch_timeout")]
+    pub timeout_secs: u64,
+}
+
+fn default_elasticsearch_timeout() -> u64 {
+    30
+}
+
+impl Default for ElasticsearchConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            endpoint: String::new(),
+            auth: String::new(),
+            cluster_names: Vec::new(),
+            timeout_secs: default_elasticsearch_timeout(),
+        }
+    }
+}
+
 // -- Notion --
 
 /// Notion integration configuration (`[notion]`).
@@ -5800,6 +5840,7 @@ impl Default for Config {
             model_support_vision: None,
             notion: NotionConfig::default(),
             atlassian: AtlassianConfig::default(),
+            elasticsearch: ElasticsearchConfig::default(),
             ask_user: AskUserConfig::default(),
             local_context: LocalContextConfig::default(),
         }
@@ -6648,6 +6689,16 @@ impl Config {
             }
             if !config.atlassian.api_token.is_empty() {
                 decrypt_secret(&store, &mut config.atlassian.api_token, "config.atlassian.api_token")?;
+            }
+
+            // Elasticsearch secret (base64 API key)
+            if !config.elasticsearch.auth.is_empty() {
+                decrypt_secret(&store, &mut config.elasticsearch.auth, "config.elasticsearch.auth")?;
+            }
+
+            // Elasticsearch endpoint (encrypted URL)
+            if !config.elasticsearch.endpoint.is_empty() {
+                decrypt_secret(&store, &mut config.elasticsearch.endpoint, "config.elasticsearch.endpoint")?;
             }
 
             config.apply_env_overrides();
@@ -8344,6 +8395,24 @@ impl Config {
             )?;
         }
 
+        // Elasticsearch secret (base64 API key)
+        if !config_to_save.elasticsearch.auth.is_empty() {
+            encrypt_secret(
+                &store,
+                &mut config_to_save.elasticsearch.auth,
+                "config.elasticsearch.auth",
+            )?;
+        }
+
+        // Elasticsearch endpoint (encrypted URL)
+        if !config_to_save.elasticsearch.endpoint.is_empty() {
+            encrypt_secret(
+                &store,
+                &mut config_to_save.elasticsearch.endpoint,
+                "config.elasticsearch.endpoint",
+            )?;
+        }
+
         let toml_str =
             toml::to_string_pretty(&config_to_save).context("Failed to serialize config")?;
 
@@ -8984,6 +9053,7 @@ default_temperature = 0.7
             model_support_vision: None,
             notion: NotionConfig::default(),
             atlassian: AtlassianConfig::default(),
+            elasticsearch: ElasticsearchConfig::default(),
             ask_user: AskUserConfig::default(),
             local_context: LocalContextConfig::default(),
         };
@@ -9270,6 +9340,7 @@ denied_tools = ["shell"]
             model_support_vision: None,
             notion: NotionConfig::default(),
             atlassian: AtlassianConfig::default(),
+            elasticsearch: ElasticsearchConfig::default(),
             ask_user: AskUserConfig::default(),
             local_context: LocalContextConfig::default(),
         };

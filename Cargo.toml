@@ -9,7 +9,7 @@ resolver = "2"
 
 [package]
 name = "zeroclaw"
-version = "0.2.32"
+version = "0.2.34"
 edition = "2024"
 build = "build.rs"
 authors = ["myagentzero"]
@@ -33,6 +33,9 @@ tokio-stream = { version = "0.1.18", default-features = false, features = ["fs",
 
 # HTTP client - minimal features
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "blocking", "multipart", "stream", "socks", "form", "query"] }
+
+# Elasticsearch client (read-only ess_query tool)
+elasticsearch = { version = "9.1.0-alpha.1", default-features = false, features = ["rustls-tls"] }
 
 # Serialization
 serde = { version = "1.0", default-features = false, features = ["derive"] }

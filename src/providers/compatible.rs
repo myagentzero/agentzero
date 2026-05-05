@@ -1048,7 +1048,7 @@ fn build_responses_prompt(
             .iter()
             .rposition(|m| m.role == "user")
             .map(|idx| &messages[idx..])
-            .unwrap_or(&messages[..])
+            .unwrap_or(&messages)
     } else {
         messages
     };
@@ -3850,7 +3850,7 @@ mod tests {
                 ChatMessage::assistant(
                     r#"{"content":"","tool_calls":[{"id":"call_x","name":"t","arguments":"{}"}]}"#,
                 ),
-                ChatMessage::tool(&format!(r#"{{"{key}":"call_x","content":"r"}}"#)),
+                ChatMessage::tool(format!(r#"{{"{key}":"call_x","content":"r"}}"#)),
             ];
             let (_, input) = build_responses_prompt(&messages, None);
             let json = serde_json::to_value(&input).unwrap();

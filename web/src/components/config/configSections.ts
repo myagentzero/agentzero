@@ -876,6 +876,23 @@ export const CONFIG_SECTIONS: SectionDef[] = [
     ],
   },
 
+  // ── Elasticsearch ─────────────────────────────────────────────────
+  {
+    path: 'elasticsearch',
+    category: 'tools',
+    title: 'Elasticsearch',
+    description: 'Read-only query tool for one or more Elasticsearch / ESS cluster names',
+    icon: Search,
+    defaultCollapsed: true,
+    fields: [
+      { key: 'enabled', label: 'Enabled', type: 'toggle', defaultValue: false, description: 'Enable the ess_query agent tool' },
+      { key: 'endpoint', label: 'Endpoint', type: 'text', description: 'e.g. https://my-cluster.es.us-east-1.aws.elastic-cloud.com' },
+      { key: 'auth', label: 'API Key (base64)', type: 'password', sensitive: true, description: 'Base64-encoded API key from Kibana → Stack Management → API Keys' },
+      { key: 'cluster_names', label: 'Cluster Names', type: 'tag-list', tagPlaceholder: 'e.g. prod, staging', description: 'List of cluster names available to the agent. First entry is the default.' },
+      { key: 'timeout_secs', label: 'Timeout (s)', type: 'number', min: 1, defaultValue: 30, description: 'Default: 30 (request timeout)' },
+    ],
+  },
+
   // ── Local Context ─────────────────────────────────────────────────
   {
     path: 'local_context',

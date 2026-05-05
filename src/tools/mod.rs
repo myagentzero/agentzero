@@ -22,12 +22,14 @@ pub mod bg_run;
 pub mod browser;
 pub mod calculator;
 pub mod composio;
+pub mod confluence_tool;
 pub mod content_search;
 pub mod cron_add;
 pub mod cron_list;
 pub mod cron_remove;
 pub mod delegate;
 pub mod delegate_coordination_status;
+pub mod ess_query;
 pub mod file_edit;
 pub mod file_read;
 pub mod file_remove;
@@ -42,7 +44,6 @@ pub mod hardware_memory_map;
 pub mod hardware_memory_read;
 pub mod http_request;
 pub mod jira_tool;
-pub mod confluence_tool;
 pub mod local_context;
 pub mod mcp_client;
 pub mod mcp_protocol;
@@ -75,12 +76,14 @@ pub use bg_run::{BgJobStore, BgRunTool, BgStatusTool};
 pub use browser::{BrowserTool, ComputerUseConfig};
 pub use calculator::CalculatorTool;
 pub use composio::ComposioTool;
+pub use confluence_tool::ConfluenceTool;
 pub use content_search::ContentSearchTool;
 pub use cron_add::CronAddTool;
 pub use cron_list::CronListTool;
 pub use cron_remove::CronRemoveTool;
 pub use delegate::DelegateTool;
 pub use delegate_coordination_status::DelegateCoordinationStatusTool;
+pub use ess_query::EssQueryTool;
 pub use file_edit::FileEditTool;
 pub use file_read::FileReadTool;
 pub use file_remove::FileRemoveTool;
@@ -95,7 +98,6 @@ pub use hardware_memory_map::HardwareMemoryMapTool;
 pub use hardware_memory_read::HardwareMemoryReadTool;
 pub use http_request::HttpRequestTool;
 pub use jira_tool::JiraTool;
-pub use confluence_tool::ConfluenceTool;
 pub use local_context::LocalContextTool;
 pub use mcp_client::McpRegistry;
 pub use mcp_tool::McpToolWrapper;
@@ -533,6 +535,30 @@ pub fn all_tools_with_runtime(
                 security.clone(),
                 root_config.atlassian.timeout_secs,
             )));
+        }
+    }
+
+    // Elasticsearch query tool (conditionally registered)
+    if root_config.elasticsearch.enabled {
+        let endpoint = root_config.elasticsearch.endpoint.trim();
+        let auth = root_config.elasticsearch.auth.trim();
+        let cluster_names = root_config.elasticsearch.cluster_names.clone();
+        if endpoint.is_empty() || auth.is_empty() || cluster_names.is_empty() {
+            tracing::warn!(
+                "Elasticsearch tool enabled but missing required config in [elasticsearch] section \
+                 (endpoint, auth, cluster_names)"
+            );
+        } else {
+            match EssQueryTool::new(
+                endpoint.to_string(),
+                auth.to_string(),
+                cluster_names,
+                security.clone(),
+                root_config.elasticsearch.timeout_secs,
+            ) {
+                Ok(tool) => tool_arcs.push(Arc::new(tool)),
+                Err(e) => tracing::warn!("Failed to build Elasticsearch tool: {e}"),
+            }
         }
     }
 

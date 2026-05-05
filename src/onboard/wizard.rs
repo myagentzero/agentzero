@@ -255,6 +255,7 @@ pub async fn run_wizard(force: bool) -> Result<Config> {
         model_support_vision: None,
         notion: crate::config::NotionConfig::default(),
         atlassian: crate::config::schema::AtlassianConfig::default(),
+        elasticsearch: crate::config::schema::ElasticsearchConfig::default(),
         ask_user: crate::config::AskUserConfig::default(),
         local_context: crate::config::schema::LocalContextConfig::default(),
     };
@@ -634,6 +635,7 @@ async fn run_quick_setup_with_home(
         model_support_vision: None,
         notion: crate::config::NotionConfig::default(),
         atlassian: crate::config::schema::AtlassianConfig::default(),
+        elasticsearch: crate::config::schema::ElasticsearchConfig::default(),
         ask_user: crate::config::AskUserConfig::default(),
         local_context: crate::config::schema::LocalContextConfig::default(),
     };

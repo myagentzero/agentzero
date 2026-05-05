@@ -414,7 +414,10 @@ fn is_heartbeat_acknowledgment(text: &str) -> bool {
         return false;
     }
     let lower = trimmed.to_lowercase();
-    lower.contains("heartbeat acknowledged") || lower.contains("operating within bounds")
+    lower.contains("heartbeat acknowledged")
+        || lower.contains("operating within bounds")
+        || lower.contains("heartbeat ack")
+        || lower.contains("operating within policy")
 }
 
 fn should_emit_verbose_progress(mode: ProgressMode) -> bool {
