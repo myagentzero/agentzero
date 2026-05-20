@@ -300,6 +300,7 @@ pub async fn handle_api_cron_list(
                         "last_run": job.last_run.map(|t| t.to_rfc3339()),
                         "last_status": job.last_status,
                         "enabled": job.enabled,
+                        "light_context": job.light_context,
                     })
                 })
                 .collect();

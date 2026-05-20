@@ -41,6 +41,7 @@ export interface CronJob {
   last_run: string | null;
   last_status: string | null;
   enabled: boolean;
+  light_context: boolean;
 }
 
 export interface Integration {

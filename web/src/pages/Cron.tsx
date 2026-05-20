@@ -243,6 +243,9 @@ export default function Cron() {
                 <th className="text-left px-4 py-3 text-gray-400 font-medium">
                   Enabled
                 </th>
+                <th className="text-left px-4 py-3 text-gray-400 font-medium">
+                  Light Context
+                </th>
                 <th className="text-right px-4 py-3 text-gray-400 font-medium">
                   Actions
                 </th>
@@ -283,6 +286,17 @@ export default function Cron() {
                       }`}
                     >
                       {job.enabled ? 'Enabled' : 'Disabled'}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3">
+                    <span
+                      className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+                        job.light_context
+                          ? 'bg-blue-900/40 text-blue-400 border border-blue-700/50'
+                          : 'bg-gray-800 text-gray-500 border border-gray-700'
+                      }`}
+                    >
+                      {job.light_context ? 'On' : 'Off'}
                     </span>
                   </td>
                   <td className="px-4 py-3 text-right">
