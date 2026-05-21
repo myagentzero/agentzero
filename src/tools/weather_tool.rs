@@ -236,17 +236,8 @@ impl Tool for WeatherTool {
         "Get weather forecast for US locations using the National Weather Service API. \
          Requires latitude and longitude coordinates. Returns up to 7 days of forecast \
          data including temperature, wind, and precipitation probability. \
-         No API key required. Coverage is limited to US locations only."
-    }
-
-    fn prompt_hint(&self) -> Option<&str> {
-        Some(
-            "Get weather forecast for US locations. Use when: user asks about weather. Requires lat/lon coordinates; US-only coverage.",
-        )
-    }
-
-    fn prompt_hint_compact(&self) -> &str {
-        "Get weather forecast for US locations."
+         No API key required. Coverage is limited to US locations only. \
+         Use local_context to get current location coordinates when user doesn't provide a location."
     }
 
     fn parameters_schema(&self) -> Value {

@@ -20,15 +20,13 @@ impl FileWriteTool {
 
 fn sensitive_file_write_block_message(path: &str) -> String {
     format!(
-        "Writing sensitive file '{path}' is blocked by policy. \
-Set [autonomy].allow_sensitive_file_writes = true only when strictly necessary."
+        "Writing sensitive file '{path}' is blocked by policy. Set [autonomy].allow_sensitive_file_writes = true only when strictly necessary."
     )
 }
 
 fn hard_link_write_block_message(path: &Path) -> String {
     format!(
-        "Writing multiply-linked file '{}' is blocked by policy \
-(potential hard-link escape).",
+        "Writing multiply-linked file '{}' is blocked by policy (potential hard-link escape).",
         path.display()
     )
 }
@@ -40,17 +38,7 @@ impl Tool for FileWriteTool {
     }
 
     fn description(&self) -> &str {
-        "Write contents to a file in the workspace. Sensitive files (for example .env and key material) are blocked by default."
-    }
-
-    fn prompt_hint(&self) -> Option<&str> {
-        Some(
-            "Write file contents. Use when: applying focused edits, scaffolding files, updating docs/code. Don't use when: side effects are unclear or file ownership is uncertain.",
-        )
-    }
-
-    fn prompt_hint_compact(&self) -> &str {
-        "Write file contents."
+        "Write contents to a file in the workspace. Sensitive files (for example .env and key material) are blocked by default. Use when: applying focused edits, scaffolding files, updating docs/code. Don't use when: side effects are unclear or file ownership is uncertain."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {

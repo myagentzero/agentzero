@@ -1,5 +1,8 @@
 use crate::config::Config;
-use crate::cron::{CronJob, CronJobPatch, DeliveryConfig, Schedule, SessionTarget, add_agent_job, list_jobs, remove_job, update_job};
+use crate::cron::{
+    CronJob, CronJobPatch, DeliveryConfig, Schedule, SessionTarget, add_agent_job, list_jobs,
+    remove_job, update_job,
+};
 use anyhow::Result;
 
 /// Default cron expression: 3:00 AM daily.
@@ -12,43 +15,32 @@ pub const CONSOLIDATION_JOB_NAME: &str = "__consolidate_nightly";
 /// The prompt instructs the agent to perform memory consolidation using
 /// existing tools (memory_recall, memory_store, file_write).
 const DEFAULT_CONSOLIDATION_PROMPT: &str = "\
-You are running a nightly memory consolidation job. Your goal is to distill \
-the past 24 hours of operational activity into a concise, actionable summary \
-stored in long-term memory.
+You are running a nightly memory consolidation job. Distill the past 24 hours \
+  of activity into an actionable summary.
 
-Follow these steps exactly:
+1. Recall today's activities:
+  - Call `memory_recall` with category=\"daily\" and category=\"conversation\".
 
-1. Use `memory_recall` with category 'daily' and since '24h' to retrieve today's \
-   session memories. Also recall category 'conversation' for today's chat observations. \
-   Look for patterns, discoveries, and progress toward goals.
+2. Analyze and classify:
+  - **Errors**: Problems repeated more than once.
+  - **Successes**: Approaches that worked well.
+  - **Discoveries**: New capabilities or information learned.
+  - **Blocked**: Uncompleted objectives and why.
 
-2. Identify and classify findings:
-   - **Recurring errors**: problems that appeared more than once
-   - **Successful strategies**: approaches that worked well
-   - **New discoveries**: information or capabilities learned
-   - **Blocked goals**: objectives that could not be completed and why
+3. Synthesize a concise consolidation summary (max 300 words). Focus strictly on \
+  actionable changes for going forward.
 
-3. Synthesize a concise summary (max 500 words) of actionable learnings. \
-   Focus on what should change going forward, not just what happened.
+4. If there is no meaningful activity to consolidate, respond with exactly: NO_REPLY
 
-4. Use `file_read` to read MEMORY.md in the workspace directory. \
-   Add today's dated section at the TOP with the top 2-3 learnings, then remove \
-   any sections older than 4-5 days (keep only recent entries). Use `file_write` \
-   to save the updated file. Format for new section:
-   ```
-   ## Learnings: YYYY-MM-DD
-   1. <learning 1>
-   2. <learning 2>
-   3. <learning 3> (optional)
-   ```
+5. Update MEMORY.md using `file_write` (Prepend the new block at the top and do not exceed 500 total tokens \
+  of recent history to save space).
+Format for the new section:
+#### Learnings: YYYY-MM-DD
+1. <learning 1>
+2. <learning 2>
+3. <learning 3>
 
-If there is no meaningful activity to consolidate (no conversations, no daily memories), \
-skip updating the MEMORY.md file.
-
-5. Output the full consolidation summary as your final response text. \
-   An external delivery system reads your response to announce the results. \
-   If there was no meaningful activity (step above), respond with exactly `NO_REPLY` \
-   and nothing else — the delivery system will skip the announcement.";
+6. Output the full consolidation summary as your final response text.";
 
 /// Load the consolidation prompt from the workspace file, falling back to the
 /// built-in default if the file doesn't exist or can't be read.
@@ -79,7 +71,11 @@ pub async fn ensure_consolidation_file(workspace_dir: &std::path::Path) -> anyho
 /// Build a delivery config for the consolidation job from config.
 /// Returns `None` when no delivery channel is configured (no announcement).
 fn resolve_delivery_config(config: &Config) -> Option<DeliveryConfig> {
-    let channel = config.consolidation.delivery_channel.as_deref()?.to_string();
+    let channel = config
+        .consolidation
+        .delivery_channel
+        .as_deref()?
+        .to_string();
 
     let to = if let Some(explicit) = config.consolidation.delivery_to.as_deref() {
         explicit.to_string()
@@ -105,7 +101,9 @@ fn resolve_default_target(config: &Config, channel: &str) -> Option<String> {
             }
             let id = sl.channel_id.as_deref()?;
             if id.is_empty() || id == "*" {
-                tracing::warn!("consolidation delivery_channel=slack but no usable channel_id found");
+                tracing::warn!(
+                    "consolidation delivery_channel=slack but no usable channel_id found"
+                );
                 return None;
             }
             Some(id.to_string())
@@ -115,7 +113,9 @@ fn resolve_default_target(config: &Config, channel: &str) -> Option<String> {
             dc.guild_id.clone()
         }
         other => {
-            tracing::warn!("consolidation: cannot auto-resolve delivery target for channel '{other}'");
+            tracing::warn!(
+                "consolidation: cannot auto-resolve delivery target for channel '{other}'"
+            );
             None
         }
     }
@@ -123,24 +123,24 @@ fn resolve_default_target(config: &Config, channel: &str) -> Option<String> {
 
 /// Create a nightly memory consolidation cron agent job.
 ///
-/// Pulls configuration from `config.consolidation` (schedule, timezone, light_context).
+/// Pulls configuration from `config.consolidation` (schedule, timezone).
 /// Job type: agent with `__consolidate_nightly` marker in the name.
 /// Session target: isolated (does not disturb main sessions).
+/// Always runs with `light_context = false` — the prompt assumes MEMORY.md
+/// is injected via the standard bootstrap files.
 pub fn create_consolidation_job(config: &Config) -> Result<CronJob> {
     create_consolidation_job_with_schedule(
         config,
         &config.consolidation.schedule,
         config.consolidation.timezone.clone(),
-        config.consolidation.light_context,
     )
 }
 
-/// Create a consolidation job with a custom cron expression, timezone, and light_context setting.
+/// Create a consolidation job with a custom cron expression and timezone.
 pub fn create_consolidation_job_with_schedule(
     config: &Config,
     cron_expr: &str,
     tz: Option<String>,
-    light_context: bool,
 ) -> Result<CronJob> {
     let schedule = Schedule::Cron {
         expr: cron_expr.into(),
@@ -156,16 +156,18 @@ pub fn create_consolidation_job_with_schedule(
         schedule,
         &prompt,
         SessionTarget::Isolated,
-        None,  // use default model
+        None, // use default model
         delivery,
         false, // recurring job — do not delete after run
-        light_context,
+        false, // consolidation always runs with full bootstrap context
     )
 }
 
 /// Ensure the consolidation cron job exists in the store.
-/// If a job named `__consolidate_nightly` already exists, update its schedule/prompt/light_context.
+/// If a job named `__consolidate_nightly` already exists, update its schedule/prompt.
 /// If it doesn't exist, create it.
+/// Always forces `light_context = false` so existing jobs persisted from older
+/// configs are corrected on startup.
 pub fn ensure_consolidation_job(config: &Config) -> Result<()> {
     let jobs = list_jobs(config)?;
     let existing = jobs
@@ -182,7 +184,7 @@ pub fn ensure_consolidation_job(config: &Config) -> Result<()> {
         let patch = CronJobPatch {
             schedule: Some(schedule),
             prompt: Some(prompt),
-            light_context: Some(config.consolidation.light_context),
+            light_context: Some(false),
             enabled: Some(true),
             delivery: resolve_delivery_config(config),
             ..Default::default()
@@ -265,10 +267,6 @@ mod tests {
             "prompt should instruct use of memory_recall"
         );
         assert!(
-            prompt.contains("file_read"),
-            "prompt should instruct use of file_read"
-        );
-        assert!(
             prompt.contains("file_write"),
             "prompt should instruct use of file_write"
         );
@@ -287,7 +285,6 @@ mod tests {
             &config,
             "0 4 * * *",
             Some("America/New_York".into()),
-            false,
         )
         .unwrap();
 
@@ -305,11 +302,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let config = test_config(&tmp);
         let custom_prompt = "Custom consolidation instructions here";
-        std::fs::write(
-            config.workspace_dir.join("CONSOLIDATION.md"),
-            custom_prompt,
-        )
-        .unwrap();
+        std::fs::write(config.workspace_dir.join("CONSOLIDATION.md"), custom_prompt).unwrap();
 
         let job = create_consolidation_job(&config).unwrap();
         assert_eq!(job.prompt.as_deref(), Some(custom_prompt));
@@ -328,13 +321,15 @@ mod tests {
     }
 
     #[test]
-    fn create_consolidation_job_respects_light_context_config() {
+    fn create_consolidation_job_always_uses_full_context() {
         let tmp = TempDir::new().unwrap();
-        let mut config = test_config(&tmp);
-        config.consolidation.light_context = true;
+        let config = test_config(&tmp);
 
         let job = create_consolidation_job(&config).unwrap();
-        assert!(job.light_context);
+        assert!(
+            !job.light_context,
+            "consolidation job must run with full bootstrap context so MEMORY.md is injected"
+        );
     }
 
     #[test]

@@ -321,18 +321,7 @@ impl Tool for HttpRequestTool {
     }
 
     fn description(&self) -> &str {
-        "Make HTTP requests to external APIs. Supports GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS methods. \
-         Security constraints: allowlist-only domains, no local/private hosts, configurable timeout and response size limits."
-    }
-
-    fn prompt_hint(&self) -> Option<&str> {
-        Some(
-            "Make HTTP requests to external APIs. Use when: fetching data from or interacting with REST APIs, webhooks, or web services. Don't use when: target domain is not on the allowlist, or a dedicated integration tool already covers the service.",
-        )
-    }
-
-    fn prompt_hint_compact(&self) -> &str {
-        "Make HTTP requests to external APIs."
+        "Make HTTP requests to external APIs. Use when: fetching data from or interacting with REST APIs, webhooks, or web services. Don't use when: target domain is not on the allowlist, or a dedicated integration tool already covers the service."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {

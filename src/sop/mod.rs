@@ -2,16 +2,10 @@ pub mod audit;
 pub mod condition;
 pub mod dispatch;
 pub mod engine;
-#[cfg(feature = "ampersona-gates")]
-pub mod gates;
-pub mod metrics;
 pub mod types;
 
 pub use audit::SopAuditLogger;
 pub use engine::SopEngine;
-#[cfg(feature = "ampersona-gates")]
-pub use gates::GateEvalState;
-pub use metrics::SopMetricsCollector;
 #[allow(unused_imports)]
 pub use types::{
     Sop, SopEvent, SopExecutionMode, SopPriority, SopRun, SopRunAction, SopRunStatus, SopStep,

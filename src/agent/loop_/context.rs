@@ -83,7 +83,7 @@ pub(super) async fn build_context(
 /// Build hardware datasheet context from RAG when peripherals are enabled.
 /// Includes pin-alias lookup (e.g. "red_led" → 13) when query matches, plus retrieved chunks.
 pub(super) fn build_hardware_context(
-    rag: &crate::rag::HardwareRag,
+    rag: &crate::hardware::datasheet::HardwareRag,
     user_msg: &str,
     boards: &[String],
     chunk_limit: usize,

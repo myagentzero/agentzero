@@ -68,10 +68,9 @@
 )]
 
 use anyhow::{Context, Result, bail};
-use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
+use clap::{Parser, Subcommand, ValueEnum};
 use dialoguer::{Input, Password};
 use serde::{Deserialize, Serialize};
-use std::io::Write;
 use tracing::{info, warn};
 use tracing_subscriber::{EnvFilter, fmt};
 
@@ -151,7 +150,6 @@ mod cron;
 mod daemon;
 mod doctor;
 mod gateway;
-mod goals;
 mod hardware;
 mod health;
 mod heartbeat;
@@ -165,11 +163,9 @@ mod onboard;
 mod peripherals;
 mod plugins;
 mod providers;
-mod rag;
 mod runtime;
 mod security;
 mod service;
-mod skillforge;
 mod skills;
 #[cfg(test)]
 mod test_locks;
@@ -185,19 +181,6 @@ pub use zeroclaw::{
     ServiceCommands, SkillCommands,
 };
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
-enum CompletionShell {
-    #[value(name = "bash")]
-    Bash,
-    #[value(name = "fish")]
-    Fish,
-    #[value(name = "zsh")]
-    Zsh,
-    #[value(name = "powershell")]
-    PowerShell,
-    #[value(name = "elvish")]
-    Elvish,
-}
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
 enum EstopLevelArg {
@@ -233,10 +216,6 @@ enum Commands {
         #[arg(long)]
         interactive: bool,
 
-        /// Run the full-screen TUI onboarding flow (ratatui)
-        #[arg(long)]
-        interactive_ui: bool,
-
         /// Overwrite existing config without confirmation
         #[arg(long)]
         force: bool,
@@ -245,7 +224,7 @@ enum Commands {
         #[arg(long)]
         channels_only: bool,
 
-        /// API key (used in quick mode, ignored with --interactive or --interactive-ui)
+        /// API key (used in quick mode, ignored with --interactive)
         #[arg(long)]
         api_key: Option<String>,
 
@@ -422,6 +401,10 @@ Examples:
         doctor_command: Option<DoctorCommands>,
     },
 
+    /// Open the interactive dashboard TUI (Costs, Memory, Cron, Logs, and Metrics)
+    #[command(visible_alias = "logs")]
+    Dashboard,
+
     /// Show system status (full details)
     Status,
 
@@ -545,7 +528,7 @@ Examples:
         channel_command: ChannelCommands,
     },
 
-    /// Browse 50+ integrations
+    /// View integration details and setup instructions
     Integrations {
         #[command(subcommand)]
         integration_command: IntegrationCommands,
@@ -635,22 +618,6 @@ Examples:
     Config {
         #[command(subcommand)]
         config_command: ConfigCommands,
-    },
-
-    /// Generate shell completion script to stdout
-    #[command(long_about = "\
-Generate shell completion scripts for `zeroclaw`.
-
-The script is printed to stdout so it can be sourced directly:
-
-Examples:
-  source <(zeroclaw completions bash)
-  zeroclaw completions zsh > ~/.zfunc/_zeroclaw
-  zeroclaw completions fish > ~/.config/fish/completions/zeroclaw.fish")]
-    Completions {
-        /// Target shell
-        #[arg(value_enum)]
-        shell: CompletionShell,
     },
 }
 
@@ -923,13 +890,6 @@ async fn main() -> Result<()> {
         unsafe { std::env::set_var("ZEROCLAW_CONFIG_DIR", config_dir) };
     }
 
-    // Completions must remain stdout-only and should not load config or initialize logging.
-    // This avoids warnings/log lines corrupting sourced completion scripts.
-    if let Commands::Completions { shell } = &cli.command {
-        let mut stdout = std::io::stdout().lock();
-        write_shell_completion(*shell, &mut stdout)?;
-        return Ok(());
-    }
 
     // Initialize logging - respects RUST_LOG env var, defaults to INFO
     // Detect if running under systemd (which adds its own timestamps)
@@ -957,14 +917,12 @@ async fn main() -> Result<()> {
             .expect("setting default subscriber failed");
     }
 
-    // Onboard runs quick setup by default, interactive wizard with --interactive,
-    // or full-screen TUI with --interactive-ui.
+    // Onboard runs quick setup by default or interactive wizard with --interactive.
     // The onboard wizard uses reqwest::blocking internally, which creates its own
     // Tokio runtime. To avoid "Cannot drop a runtime in a context where blocking is
     // not allowed", we run the wizard on a blocking thread via spawn_blocking.
     if let Commands::Onboard {
         interactive,
-        interactive_ui,
         force,
         channels_only,
         api_key,
@@ -975,7 +933,6 @@ async fn main() -> Result<()> {
     } = &cli.command
     {
         let interactive = *interactive;
-        let interactive_ui = *interactive_ui;
         let force = *force;
         let channels_only = *channels_only;
         let api_key = api_key.clone();
@@ -984,25 +941,8 @@ async fn main() -> Result<()> {
         let memory = memory.clone();
         let no_totp = *no_totp;
 
-        if interactive && interactive_ui {
-            bail!("Use either --interactive or --interactive-ui, not both");
-        }
         if interactive && channels_only {
             bail!("Use either --interactive or --channels-only, not both");
-        }
-        if interactive_ui && channels_only {
-            bail!("Use either --interactive-ui or --channels-only, not both");
-        }
-        if interactive_ui
-            && (api_key.is_some()
-                || provider.is_some()
-                || model.is_some()
-                || memory.is_some()
-                || no_totp)
-        {
-            bail!(
-                "--interactive-ui does not accept --api-key, --provider, --model, --memory, or --no-totp"
-            );
         }
         if channels_only
             && (api_key.is_some()
@@ -1020,8 +960,6 @@ async fn main() -> Result<()> {
         }
         let config = if channels_only {
             Box::pin(onboard::run_channels_repair_wizard()).await
-        } else if interactive_ui {
-            Box::pin(onboard::run_wizard_tui(force)).await
         } else if interactive {
             Box::pin(onboard::run_wizard(force)).await
         } else {
@@ -1061,7 +999,7 @@ async fn main() -> Result<()> {
     }
 
     match cli.command {
-        Commands::Onboard { .. } | Commands::Completions { .. } => unreachable!(),
+        Commands::Onboard { .. } => unreachable!(),
 
         Commands::Agent {
             message,
@@ -1360,6 +1298,8 @@ async fn main() -> Result<()> {
             let init_system = service_init.parse()?;
             service::handle_command(&service_command, &config, init_system)
         }
+
+        Commands::Dashboard => onboard::dashboard::run(&config).await,
 
         Commands::Doctor { doctor_command } => match doctor_command {
             Some(DoctorCommands::Models {
@@ -1716,26 +1656,6 @@ fn print_estop_status(state: &security::EstopState) {
     }
 }
 
-fn write_shell_completion<W: Write>(shell: CompletionShell, writer: &mut W) -> Result<()> {
-    use clap_complete::generate;
-    use clap_complete::shells;
-
-    let mut cmd = Cli::command();
-    let bin_name = cmd.get_name().to_string();
-
-    match shell {
-        CompletionShell::Bash => generate(shells::Bash, &mut cmd, bin_name.clone(), writer),
-        CompletionShell::Fish => generate(shells::Fish, &mut cmd, bin_name.clone(), writer),
-        CompletionShell::Zsh => generate(shells::Zsh, &mut cmd, bin_name.clone(), writer),
-        CompletionShell::PowerShell => {
-            generate(shells::PowerShell, &mut cmd, bin_name.clone(), writer);
-        }
-        CompletionShell::Elvish => generate(shells::Elvish, &mut cmd, bin_name, writer),
-    }
-
-    writer.flush()?;
-    Ok(())
-}
 
 async fn handle_security_command(
     config: &Config,
@@ -2552,18 +2472,6 @@ mod tests {
     }
 
     #[test]
-    fn completions_cli_parses_supported_shells() {
-        for shell in ["bash", "fish", "zsh", "powershell", "elvish"] {
-            let cli = Cli::try_parse_from(["zeroclaw", "completions", shell])
-                .expect("completions invocation should parse");
-            match cli.command {
-                Commands::Completions { .. } => {}
-                other => panic!("expected completions command, got {other:?}"),
-            }
-        }
-    }
-
-    #[test]
     fn gateway_help_includes_new_pairing_flag() {
         let cmd = Cli::command();
         let gateway = cmd
@@ -2655,18 +2563,6 @@ mod tests {
     }
 
     #[test]
-    fn completion_generation_mentions_binary_name() {
-        let mut output = Vec::new();
-        write_shell_completion(CompletionShell::Bash, &mut output)
-            .expect("completion generation should succeed");
-        let script = String::from_utf8(output).expect("completion output should be valid utf-8");
-        assert!(
-            script.contains("zeroclaw"),
-            "completion script should reference binary name"
-        );
-    }
-
-    #[test]
     fn onboard_cli_accepts_force_flag() {
         let cli = Cli::try_parse_from(["zeroclaw", "onboard", "--force"])
             .expect("onboard --force should parse");
@@ -2677,23 +2573,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn onboard_cli_accepts_interactive_ui_flag() {
-        let cli = Cli::try_parse_from(["zeroclaw", "onboard", "--interactive-ui"])
-            .expect("onboard --interactive-ui should parse");
-
-        match cli.command {
-            Commands::Onboard {
-                interactive,
-                interactive_ui,
-                ..
-            } => {
-                assert!(!interactive);
-                assert!(interactive_ui);
-            }
-            other => panic!("expected onboard command, got {other:?}"),
-        }
-    }
 
     #[test]
     fn onboard_cli_accepts_no_totp_flag() {

@@ -99,11 +99,6 @@ pub fn lookup_board(vid: u16, pid: u16) -> Option<&'static BoardInfo> {
     KNOWN_BOARDS.iter().find(|b| b.vid == vid && b.pid == pid)
 }
 
-/// Return all known board entries.
-pub fn known_boards() -> &'static [BoardInfo] {
-    KNOWN_BOARDS
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -118,11 +113,6 @@ mod tests {
     #[test]
     fn lookup_unknown_returns_none() {
         assert!(lookup_board(0x0000, 0x0000).is_none());
-    }
-
-    #[test]
-    fn known_boards_not_empty() {
-        assert!(!known_boards().is_empty());
     }
 
     #[test]

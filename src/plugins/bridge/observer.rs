@@ -17,6 +17,12 @@ impl ObserverBridge {
             inner: Arc::from(inner),
         }
     }
+
+    /// Borrow the wrapped observer so callers can descend through wrapper layers
+    /// (e.g. to locate a concrete backend like `PrometheusObserver` for `/metrics`).
+    pub fn inner(&self) -> &dyn Observer {
+        self.inner.as_ref()
+    }
 }
 
 impl Observer for ObserverBridge {

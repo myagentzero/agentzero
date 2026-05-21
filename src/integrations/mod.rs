@@ -20,11 +20,7 @@ pub enum IntegrationCategory {
     Chat,
     AiModel,
     Productivity,
-    MusicAudio,
-    SmartHome,
     ToolsAutomation,
-    MediaCreative,
-    Social,
     Platform,
 }
 
@@ -34,11 +30,7 @@ impl IntegrationCategory {
             Self::Chat => "Chat Providers",
             Self::AiModel => "AI Models",
             Self::Productivity => "Productivity",
-            Self::MusicAudio => "Music & Audio",
-            Self::SmartHome => "Smart Home",
             Self::ToolsAutomation => "Tools & Automation",
-            Self::MediaCreative => "Media & Creative",
-            Self::Social => "Social",
             Self::Platform => "Platforms",
         }
     }
@@ -48,11 +40,7 @@ impl IntegrationCategory {
             Self::Chat,
             Self::AiModel,
             Self::Productivity,
-            Self::MusicAudio,
-            Self::SmartHome,
             Self::ToolsAutomation,
-            Self::MediaCreative,
-            Self::Social,
             Self::Platform,
         ]
     }
@@ -151,17 +139,13 @@ mod tests {
     #[test]
     fn integration_category_all_includes_every_variant_once() {
         let all = IntegrationCategory::all();
-        assert_eq!(all.len(), 9);
+        assert_eq!(all.len(), 5);
 
         let labels: Vec<&str> = all.iter().map(|cat| cat.label()).collect();
         assert!(labels.contains(&"Chat Providers"));
         assert!(labels.contains(&"AI Models"));
         assert!(labels.contains(&"Productivity"));
-        assert!(labels.contains(&"Music & Audio"));
-        assert!(labels.contains(&"Smart Home"));
         assert!(labels.contains(&"Tools & Automation"));
-        assert!(labels.contains(&"Media & Creative"));
-        assert!(labels.contains(&"Social"));
         assert!(labels.contains(&"Platforms"));
     }
 

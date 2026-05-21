@@ -46,10 +46,7 @@ pub mod sensitive_paths;
 pub mod syscall_anomaly;
 pub mod traits;
 
-#[allow(unused_imports)]
-pub use audit::{AuditEvent, AuditEventType, AuditLogger};
 pub use canary_guard::CanaryGuard;
-#[allow(unused_imports)]
 pub use detect::create_sandbox;
 pub use domain_matcher::DomainMatcher;
 #[allow(unused_imports)]
@@ -58,23 +55,14 @@ pub use estop::{EstopLevel, EstopManager, EstopState, ResumeSelector};
 pub use otp::OtpValidator;
 #[allow(unused_imports)]
 pub use pairing::PairingGuard;
-#[allow(unused_imports)]
-pub use perplexity::{PerplexityAssessment, detect_adversarial_suffix};
+pub use perplexity::detect_adversarial_suffix;
 pub use policy::{AutonomyLevel, SecurityPolicy};
 #[allow(unused_imports)]
-pub use roles::{RoleRegistry, ToolAccess};
-#[allow(unused_imports)]
 pub use secrets::SecretStore;
-#[allow(unused_imports)]
-pub use semantic_guard::{GuardCorpusUpdateReport, SemanticGuard, SemanticGuardStartupStatus};
-#[allow(unused_imports)]
-pub use syscall_anomaly::{SyscallAnomalyAlert, SyscallAnomalyDetector, SyscallAnomalyKind};
-#[allow(unused_imports)]
-pub use traits::{NoopSandbox, Sandbox};
+pub use semantic_guard::SemanticGuard;
+pub use traits::NoopSandbox;
 // Prompt injection defense exports
-#[allow(unused_imports)]
 pub use leak_detector::{LeakDetector, LeakResult};
-#[allow(unused_imports)]
 pub use prompt_guard::{GuardAction, GuardResult, PromptGuard};
 
 /// Redact sensitive values for safe logging. Shows first 4 chars + "***" suffix.

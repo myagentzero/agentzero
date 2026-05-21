@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { ChevronDown, MessageCircleMore, Sparkles } from 'lucide-react';
 import {
-  CHAT_CHANNEL_NOTES,
   CHAT_CHANNEL_SUPPORT,
   type ChatChannelSupportLevel,
 } from '@/lib/chatChannels';
@@ -87,15 +86,6 @@ export default function ChatChannelsGuide() {
                 )}
               </article>
             ))}
-          </div>
-
-          <div className="mt-4 rounded-xl border border-[#1b3770] bg-[#061129]/85 p-3 md:p-4">
-            <h3 className="text-sm font-semibold text-white">Channel Notes</h3>
-            <ul className="mt-2 space-y-1.5 text-xs leading-relaxed text-[#9bbce8]">
-              {CHAT_CHANNEL_NOTES.map((note) => (
-                <li key={note}>• {note}</li>
-              ))}
-            </ul>
           </div>
         </div>
       )}

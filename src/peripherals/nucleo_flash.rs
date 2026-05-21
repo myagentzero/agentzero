@@ -11,7 +11,7 @@ const CHIP: &str = "STM32F401RETx";
 const TARGET: &str = "thumbv7em-none-eabihf";
 
 /// Check if probe-rs CLI is available (from probe-rs-tools).
-pub fn probe_rs_available() -> bool {
+fn probe_rs_available() -> bool {
     Command::new("probe-rs")
         .arg("--version")
         .output()

@@ -10,7 +10,7 @@ use chrono::{Duration, Local};
 use parking_lot::Mutex;
 use rusqlite::{Connection, params};
 use sha2::{Digest, Sha256};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 /// Response cache backed by a dedicated SQLite database.
 ///
@@ -18,8 +18,6 @@ use std::path::{Path, PathBuf};
 /// independently wiped without touching memories.
 pub struct ResponseCache {
     conn: Mutex<Connection>,
-    #[allow(dead_code)]
-    db_path: PathBuf,
     ttl_minutes: i64,
     max_entries: usize,
 }
@@ -55,7 +53,6 @@ impl ResponseCache {
 
         Ok(Self {
             conn: Mutex::new(conn),
-            db_path,
             ttl_minutes: i64::from(ttl_minutes),
             max_entries,
         })

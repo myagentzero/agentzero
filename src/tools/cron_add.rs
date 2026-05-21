@@ -56,22 +56,10 @@ impl Tool for CronAddTool {
     }
 
     fn description(&self) -> &str {
-        "Create a scheduled job. job_type='shell' runs a command; job_type='agent' runs the agent prompt \
-         Set delivery to route output to a channel (notion/slack/email). \
-         Set light_context=true for simple tasks that don't need workspace bootstrap files."
-    }
-
-    fn prompt_hint(&self) -> Option<&str> {
-        Some(
-            "Create a scheduled job (shell command or agent prompt). \
-             Use when: user wants reminders, scheduled tasks, delayed messages, or recurring automation. \
-             Prefer schedule.kind='at' for one-time tasks. Set light_context=true for simple self-contained jobs. \
-             Don't use when: the task should run immediately (just do it inline).",
-        )
-    }
-
-    fn prompt_hint_compact(&self) -> &str {
-        "Create a scheduled job (shell or agent)."
+        "Create a scheduled job (shell command or agent prompt). \
+         Use when: user wants reminders, scheduled tasks, delayed messages, or recurring automation. \
+         Prefer schedule.kind='at' for one-time tasks. Set light_context=true for simple self-contained jobs. \
+         Don't use when: the task should run immediately (just do it inline)."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {

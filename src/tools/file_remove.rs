@@ -7,12 +7,12 @@ use std::sync::Arc;
 
 const BOOTSTRAP_FILES: &[&str] = &[
     "AGENTS.md",
-    "BOOTSTRAP.md",
     "HEARTBEAT.md",
     "IDENTITY.md",
     "SOUL.md",
     "TOOLS.md",
     "USER.md",
+    "MEMORY.md",
 ];
 
 const PROTECTED_DIRS: &[&str] = &["memory", "state", "sessions", "cron"];
@@ -37,7 +37,9 @@ impl FileRemoveTool {
         };
 
         if let Some(file_name) = stripped.file_name().and_then(|n| n.to_str()) {
-            if (stripped.parent().map_or(false, |p| p.as_os_str().is_empty())
+            if (stripped
+                .parent()
+                .map_or(false, |p| p.as_os_str().is_empty())
                 || stripped.parent().is_none())
                 && BOOTSTRAP_FILES
                     .iter()
@@ -50,10 +52,7 @@ impl FileRemoveTool {
         for component in stripped.components() {
             if let std::path::Component::Normal(seg) = component {
                 if let Some(s) = seg.to_str() {
-                    if PROTECTED_DIRS
-                        .iter()
-                        .any(|d| d.eq_ignore_ascii_case(s))
-                    {
+                    if PROTECTED_DIRS.iter().any(|d| d.eq_ignore_ascii_case(s)) {
                         return true;
                     }
                 }
@@ -71,17 +70,7 @@ impl Tool for FileRemoveTool {
     }
 
     fn description(&self) -> &str {
-        "Remove a file from the workspace. Cannot remove directories, bootstrap files, or files in protected system directories (memory, state, sessions, cron)."
-    }
-
-    fn prompt_hint(&self) -> Option<&str> {
-        Some(
-            "Remove a file from the workspace. Use when: cleaning up generated or temporary files. Don't use when: removing system files, bootstrap configs, or directories.",
-        )
-    }
-
-    fn prompt_hint_compact(&self) -> &str {
-        "Remove a file from the workspace."
+        "Permanently remove a file from the workspace. Use when: cleaning up generated or temporary files. Don't use when: removing system files, bootstrap configs, or directories."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {
@@ -144,9 +133,7 @@ impl Tool for FileRemoveTool {
             return Ok(ToolResult {
                 success: false,
                 output: String::new(),
-                error: Some(
-                    self.security.resolved_path_violation_message(&resolved),
-                ),
+                error: Some(self.security.resolved_path_violation_message(&resolved)),
             });
         }
 
@@ -184,10 +171,7 @@ impl Tool for FileRemoveTool {
             return Ok(ToolResult {
                 success: false,
                 output: String::new(),
-                error: Some(format!(
-                    "Cannot remove protected file: {}",
-                    path
-                )),
+                error: Some(format!("Cannot remove protected file: {}", path)),
             });
         }
 
@@ -260,7 +244,9 @@ mod tests {
         let dir = std::env::temp_dir().join("zeroclaw_test_file_remove");
         let _ = tokio::fs::remove_dir_all(&dir).await;
         tokio::fs::create_dir_all(&dir).await.unwrap();
-        tokio::fs::write(dir.join("trash.txt"), "bye").await.unwrap();
+        tokio::fs::write(dir.join("trash.txt"), "bye")
+            .await
+            .unwrap();
 
         let tool = FileRemoveTool::new(test_security(dir.clone()));
         let result = tool.execute(json!({"path": "trash.txt"})).await.unwrap();
@@ -293,13 +279,7 @@ mod tests {
         let tool = FileRemoveTool::new(test_security(dir.clone()));
         let result = tool.execute(json!({"path": "subdir"})).await.unwrap();
         assert!(!result.success);
-        assert!(
-            result
-                .error
-                .as_deref()
-                .unwrap_or("")
-                .contains("directory")
-        );
+        assert!(result.error.as_deref().unwrap_or("").contains("directory"));
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
@@ -309,7 +289,9 @@ mod tests {
         let dir = std::env::temp_dir().join("zeroclaw_test_file_remove_readonly");
         let _ = tokio::fs::remove_dir_all(&dir).await;
         tokio::fs::create_dir_all(&dir).await.unwrap();
-        tokio::fs::write(dir.join("keep.txt"), "safe").await.unwrap();
+        tokio::fs::write(dir.join("keep.txt"), "safe")
+            .await
+            .unwrap();
 
         let tool =
             FileRemoveTool::new(test_security_with(dir.clone(), AutonomyLevel::ReadOnly, 20));
@@ -326,19 +308,18 @@ mod tests {
         let dir = std::env::temp_dir().join("zeroclaw_test_file_remove_rate");
         let _ = tokio::fs::remove_dir_all(&dir).await;
         tokio::fs::create_dir_all(&dir).await.unwrap();
-        tokio::fs::write(dir.join("keep.txt"), "safe").await.unwrap();
+        tokio::fs::write(dir.join("keep.txt"), "safe")
+            .await
+            .unwrap();
 
-        let tool =
-            FileRemoveTool::new(test_security_with(dir.clone(), AutonomyLevel::Supervised, 0));
+        let tool = FileRemoveTool::new(test_security_with(
+            dir.clone(),
+            AutonomyLevel::Supervised,
+            0,
+        ));
         let result = tool.execute(json!({"path": "keep.txt"})).await.unwrap();
         assert!(!result.success);
-        assert!(
-            result
-                .error
-                .as_deref()
-                .unwrap_or("")
-                .contains("Rate limit")
-        );
+        assert!(result.error.as_deref().unwrap_or("").contains("Rate limit"));
         assert!(dir.join("keep.txt").exists());
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
@@ -356,7 +337,13 @@ mod tests {
             .await
             .unwrap();
         assert!(!result.success);
-        assert!(result.error.as_deref().unwrap_or("").contains("not allowed"));
+        assert!(
+            result
+                .error
+                .as_deref()
+                .unwrap_or("")
+                .contains("not allowed")
+        );
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
@@ -374,21 +361,14 @@ mod tests {
         let tool = FileRemoveTool::new(test_security(dir.clone()));
 
         for name in BOOTSTRAP_FILES {
-            let result = tool
-                .execute(json!({"path": name}))
-                .await
-                .unwrap();
+            let result = tool.execute(json!({"path": name})).await.unwrap();
             assert!(
                 !result.success,
                 "should block removal of {name}: {:?}",
                 result.error
             );
             assert!(
-                result
-                    .error
-                    .as_deref()
-                    .unwrap_or("")
-                    .contains("protected"),
+                result.error.as_deref().unwrap_or("").contains("protected"),
                 "error for {name} should mention protected"
             );
             assert!(dir.join(name).exists(), "{name} must still exist");
@@ -422,11 +402,7 @@ mod tests {
                 result.error
             );
             assert!(
-                result
-                    .error
-                    .as_deref()
-                    .unwrap_or("")
-                    .contains("protected"),
+                result.error.as_deref().unwrap_or("").contains("protected"),
                 "error for {protected}/ should mention protected"
             );
             assert!(
@@ -457,10 +433,7 @@ mod tests {
         symlink(outside.join("target.txt"), workspace.join("linked.txt")).unwrap();
 
         let tool = FileRemoveTool::new(test_security(workspace.clone()));
-        let result = tool
-            .execute(json!({"path": "linked.txt"}))
-            .await
-            .unwrap();
+        let result = tool.execute(json!({"path": "linked.txt"})).await.unwrap();
 
         assert!(!result.success, "removing through symlink must be blocked");
         assert!(

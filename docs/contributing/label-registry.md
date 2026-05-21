@@ -69,7 +69,6 @@ Each channel gets a specific label in addition to the base `channel` label.
 | `channel:matrix` | `matrix.rs` |
 | `channel:mattermost` | `mattermost.rs` |
 | `channel:mochat` | `mochat.rs` |
-| `channel:mqtt` | `mqtt.rs` |
 | `channel:nextcloud-talk` | `nextcloud_talk.rs` |
 | `channel:nostr` | `nostr.rs` |
 | `channel:notion` | `notion.rs` |

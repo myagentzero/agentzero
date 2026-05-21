@@ -42,17 +42,8 @@ impl Tool for FileReadTool {
     }
 
     fn description(&self) -> &str {
-        "Read file contents with line numbers. Supports partial reading via offset and limit. Binary files are read with lossy UTF-8 conversion. Sensitive files are blocked by default."
-    }
-
-    fn prompt_hint(&self) -> Option<&str> {
-        Some(
-            "Read file contents. Use when: inspecting project files, configs, logs. Don't use when: when file may contain sensitive info (e.g. .env) unless necessary and policy allows.",
-        )
-    }
-
-    fn prompt_hint_compact(&self) -> &str {
-        "Read file contents."
+        "Read file contents with line numbers. Supports partial reading via offset and limit. Binary files are read with lossy UTF-8 conversion. \
+         Don't use when: when file may contain sensitive info (e.g. .env) unless necessary and policy allows."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {

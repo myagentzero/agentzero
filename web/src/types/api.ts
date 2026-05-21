@@ -37,9 +37,16 @@ export interface CronJob {
   id: string;
   name: string | null;
   command: string;
+  expression: string;
+  prompt: string | null;
+  job_type: 'shell' | 'agent';
+  session_target: 'isolated' | 'main';
+  model: string | null;
+  created_at: string;
   next_run: string;
   last_run: string | null;
   last_status: string | null;
+  last_output: string | null;
   enabled: boolean;
   light_context: boolean;
 }

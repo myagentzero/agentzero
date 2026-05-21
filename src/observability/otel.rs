@@ -204,6 +204,7 @@ impl Observer for OtelObserver {
                 error_message: _,
                 input_tokens: _,
                 output_tokens: _,
+                cached_input_tokens: _,
                 channel: _,
             } => {
                 let secs = duration.as_secs_f64();

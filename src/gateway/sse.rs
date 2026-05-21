@@ -255,6 +255,12 @@ impl BroadcastObserver {
     ) -> Self {
         Self { inner, tx }
     }
+
+    /// Borrow the wrapped observer so callers can descend through wrapper layers
+    /// (e.g. to locate a concrete backend like `PrometheusObserver` for `/metrics`).
+    pub fn inner(&self) -> &dyn crate::observability::Observer {
+        self.inner.as_ref()
+    }
 }
 
 impl crate::observability::Observer for BroadcastObserver {
@@ -265,7 +271,9 @@ impl crate::observability::Observer for BroadcastObserver {
         // Broadcast to SSE subscribers
         let json = match event {
             crate::observability::ObserverEvent::LlmRequest {
-                provider, model, messages_count,
+                provider,
+                model,
+                messages_count,
             } => serde_json::json!({
                 "type": "llm_request",
                 "provider": provider,

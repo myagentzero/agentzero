@@ -141,24 +141,6 @@ impl AuthService {
         Ok(data.profiles.get(&profile_id).cloned())
     }
 
-    pub async fn get_provider_bearer_token(
-        &self,
-        provider: &str,
-        profile_override: Option<&str>,
-    ) -> Result<Option<String>> {
-        let profile = self.get_profile(provider, profile_override).await?;
-        let Some(profile) = profile else {
-            return Ok(None);
-        };
-
-        let credential = match profile.kind {
-            AuthProfileKind::Token => profile.token,
-            AuthProfileKind::OAuth => profile.token_set.map(|t| t.access_token),
-        };
-
-        Ok(credential.filter(|t| !t.trim().is_empty()))
-    }
-
     pub async fn get_valid_openai_access_token(
         &self,
         profile_override: Option<&str>,

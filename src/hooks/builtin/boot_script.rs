@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 
-use crate::hooks::traits::{HookHandler, HookResult};
+use crate::hooks::traits::HookHandler;
 
 /// Built-in hook for startup prompt boot-script mutation.
 ///
@@ -16,22 +16,15 @@ impl HookHandler for BootScriptHook {
     fn priority(&self) -> i32 {
         10
     }
-
-    async fn before_prompt_build(&self, prompt: String) -> HookResult<String> {
-        HookResult::Continue(prompt)
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[tokio::test]
-    async fn boot_script_hook_passes_prompt_through() {
+    #[test]
+    fn boot_script_hook_has_priority() {
         let hook = BootScriptHook;
-        match hook.before_prompt_build("prompt".into()).await {
-            HookResult::Continue(next) => assert_eq!(next, "prompt"),
-            HookResult::Cancel(reason) => panic!("unexpected cancel: {reason}"),
-        }
+        assert_eq!(hook.priority(), 10);
     }
 }

@@ -1,19 +1,17 @@
 //! Flash ZeroClaw Arduino firmware via arduino-cli.
 //!
-//! Ensures arduino-cli is available (installs via brew on macOS if missing),
-//! installs the AVR core, compiles and uploads the base firmware.
+//! Reads Arduino firmware from workspace/firmware/arduino/ at runtime and uses
+//! arduino-cli to compile and upload to the target board.
 
 use anyhow::{Context, Result};
+use std::path::Path;
 use std::process::Command;
-
-/// ZeroClaw Arduino Uno base firmware (capabilities, gpio_read, gpio_write).
-const FIRMWARE_INO: &str = include_str!("../../firmware/arduino/arduino.ino");
 
 const FQBN: &str = "arduino:avr:uno";
 const SKETCH_NAME: &str = "arduino";
 
 /// Check if arduino-cli is available.
-pub fn arduino_cli_available() -> bool {
+fn arduino_cli_available() -> bool {
     Command::new("arduino-cli")
         .arg("version")
         .output()
@@ -22,7 +20,7 @@ pub fn arduino_cli_available() -> bool {
 }
 
 /// Try to install arduino-cli. Returns Ok(()) if installed or already present.
-pub fn ensure_arduino_cli() -> Result<()> {
+fn ensure_arduino_cli() -> Result<()> {
     if arduino_cli_available() {
         return Ok(());
     }
@@ -89,17 +87,35 @@ fn ensure_avr_core() -> Result<()> {
     Ok(())
 }
 
+/// Read Arduino firmware from workspace/firmware/arduino/arduino.ino.
+fn read_firmware(workspace_dir: &Path) -> Result<String> {
+    let firmware_path = workspace_dir
+        .join("firmware")
+        .join("arduino")
+        .join("arduino.ino");
+
+    std::fs::read_to_string(&firmware_path).with_context(|| {
+        format!(
+            "Arduino firmware not found at {}\n\
+             Ensure firmware/arduino/arduino.ino exists in your workspace.",
+            firmware_path.display()
+        )
+    })
+}
+
 /// Flash ZeroClaw firmware to Arduino at the given port.
-pub fn flash_arduino_firmware(port: &str) -> Result<()> {
+pub fn flash_arduino_firmware(port: &str, workspace_dir: &Path) -> Result<()> {
     ensure_arduino_cli()?;
     ensure_avr_core()?;
+
+    let firmware_ino = read_firmware(workspace_dir)?;
 
     let temp_dir = std::env::temp_dir().join(format!("zeroclaw_flash_{}", uuid::Uuid::new_v4()));
     let sketch_dir = temp_dir.join(SKETCH_NAME);
     let ino_path = sketch_dir.join(format!("{}.ino", SKETCH_NAME));
 
     std::fs::create_dir_all(&sketch_dir).context("Failed to create sketch dir")?;
-    std::fs::write(&ino_path, FIRMWARE_INO).context("Failed to write firmware")?;
+    std::fs::write(&ino_path, firmware_ino).context("Failed to write firmware")?;
 
     let sketch_path = sketch_dir.to_string_lossy();
 

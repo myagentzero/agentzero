@@ -60,7 +60,7 @@ pub fn floor_utf8_char_boundary(s: &str, index: usize) -> usize {
 }
 
 /// Allowed serial device path prefixes shared across hardware transports.
-pub const ALLOWED_SERIAL_PATH_PREFIXES: &[&str] = &[
+const ALLOWED_SERIAL_PATH_PREFIXES: &[&str] = &[
     "/dev/ttyACM",
     "/dev/ttyUSB",
     "/dev/tty.usbmodem",
@@ -170,7 +170,7 @@ fn is_unicode_format_control(c: char) -> bool {
 }
 
 /// Utility enum for handling optional values.
-pub enum MaybeSet<T> {
+enum MaybeSet<T> {
     Set(T),
     Unset,
     Null,
@@ -505,8 +505,7 @@ fn get_version(name: &str, args: &[&str]) -> Option<String> {
         .spawn()
         .ok()?;
 
-    let deadline =
-        std::time::Instant::now() + std::time::Duration::from_secs(2);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
     loop {
         match child.try_wait() {
             Ok(Some(_)) => break,

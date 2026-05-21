@@ -14,7 +14,6 @@ pub mod sse;
 pub mod static_files;
 pub mod ws;
 
-use crate::channels::{Channel, GitHubChannel, SendMessage};
 use crate::config::Config;
 use crate::cost::CostTracker;
 use crate::memory::{self, Memory, MemoryCategory};
@@ -24,7 +23,6 @@ use crate::security::SecurityPolicy;
 use crate::security::pairing::{PairingGuard, constant_time_eq, is_public_bind};
 use crate::tools::traits::ToolSpec;
 use crate::tools::{self, Tool};
-use crate::util::truncate_with_ellipsis;
 use anyhow::{Context, Result};
 use axum::{
     Router,
@@ -79,10 +77,6 @@ async fn security_headers_middleware(req: axum::extract::Request, next: Next) ->
 
 fn webhook_memory_key() -> String {
     format!("webhook_msg_{}", Uuid::new_v4())
-}
-
-fn github_memory_key(msg: &crate::channels::traits::ChannelMessage) -> String {
-    format!("github_{}_{}", msg.sender, msg.id)
 }
 
 fn gateway_message_session_id(msg: &crate::channels::traits::ChannelMessage) -> String {
@@ -628,7 +622,6 @@ pub async fn run_gateway(
         .route("/metrics", get(handle_metrics))
         .route("/pair", post(handle_pair))
         .route("/webhook", get(handle_webhook_usage).post(handle_webhook))
-        .route("/github", post(handle_github_webhook))
         // ── OpenClaw migration: tools-enabled chat endpoint ──
         .route("/api/chat", post(openclaw_compat::handle_api_chat))
         // ── OpenAI-compatible endpoints ──
@@ -716,6 +709,50 @@ async fn handle_health(State(state): State<AppState>) -> impl IntoResponse {
     Json(body)
 }
 
+/// Find the PrometheusObserver through wrapper layers (BroadcastObserver, ObserverBridge, MultiObserver).
+fn find_prometheus_observer(
+    obs: &dyn crate::observability::Observer,
+) -> Option<&crate::observability::PrometheusObserver> {
+    let any = obs.as_any();
+
+    // Try direct downcast (if not wrapped)
+    if let Some(prom) = any.downcast_ref::<crate::observability::PrometheusObserver>() {
+        return Some(prom);
+    }
+
+    // Peel SharedPrometheusObserver (factory hands these out so every component
+    // shares the singleton registry).
+    if let Some(shared) =
+        any.downcast_ref::<crate::observability::SharedPrometheusObserver>()
+    {
+        return Some(shared.inner());
+    }
+
+    // Peel BroadcastObserver (used by the gateway to fan events to SSE).
+    if let Some(broadcast) = any.downcast_ref::<sse::BroadcastObserver>() {
+        return find_prometheus_observer(broadcast.inner());
+    }
+
+    // Peel ObserverBridge (used by the plugin hook layer).
+    if let Some(bridge) = any.downcast_ref::<crate::plugins::bridge::observer::ObserverBridge>() {
+        return find_prometheus_observer(bridge.inner());
+    }
+
+    // Recurse through MultiObserver children so we descend through any further
+    // wrapper layers (e.g. another `SharedPrometheusObserver`, nested
+    // `MultiObserver`) — `MultiObserver::find_observer::<T>` only handles
+    // direct downcasts and would miss the wrapped case.
+    if let Some(multi) = any.downcast_ref::<crate::observability::MultiObserver>() {
+        for child in multi.iter() {
+            if let Some(prom) = find_prometheus_observer(child) {
+                return Some(prom);
+            }
+        }
+    }
+
+    None
+}
+
 /// Prometheus content type for text exposition format.
 const PROMETHEUS_CONTENT_TYPE: &str = "text/plain; version=0.0.4; charset=utf-8";
 
@@ -750,18 +787,13 @@ async fn handle_metrics(
         );
     }
 
-    let body = if let Some(prom) = state
-        .observer
-        .as_ref()
-        .as_any()
-        .downcast_ref::<crate::observability::PrometheusObserver>()
-    {
-        prom.encode()
-    } else {
-        String::from(
-            "# Prometheus backend not enabled. Set [observability] backend = \"prometheus\" in config.\n",
-        )
-    };
+    let body = find_prometheus_observer(state.observer.as_ref())
+        .map(|prom| prom.encode())
+        .unwrap_or_else(|| {
+            String::from(
+                "# Prometheus backend not enabled. Set [observability] backend = \"prometheus\" in config.\n",
+            )
+        });
 
     (
         StatusCode::OK,
@@ -860,13 +892,18 @@ async fn prepare_gateway_messages_for_provider(
     // workspace-aware system context before model invocation.
     let system_prompt = {
         let config_guard = state.config.lock();
-        crate::channels::build_system_prompt(
+        crate::channels::build_system_prompt_with_mode(
             &config_guard.workspace_dir,
-            &state.model,
             &[], // tools - empty for simple chat
             &[], // skills
             Some(&config_guard.identity),
             None, // bootstrap_max_chars - use default
+            false,
+            config_guard.skills.prompt_injection_mode,
+            false,
+            None,
+            None,
+            Some(&config_guard.hardware),
         )
     };
 
@@ -1677,180 +1714,6 @@ async fn handle_webhook(
     }
 }
 
-/// POST /github — incoming GitHub webhook (issue/PR comments)
-#[allow(clippy::large_futures)]
-async fn handle_github_webhook(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    body: Bytes,
-) -> impl IntoResponse {
-    let github_cfg = {
-        let guard = state.config.lock();
-        guard.channels_config.github.clone()
-    };
-
-    let Some(github_cfg) = github_cfg else {
-        return (
-            StatusCode::NOT_FOUND,
-            Json(serde_json::json!({"error": "GitHub channel not configured"})),
-        );
-    };
-
-    let access_token = std::env::var("ZEROCLAW_GITHUB_TOKEN")
-        .ok()
-        .map(|v| v.trim().to_string())
-        .filter(|v| !v.is_empty())
-        .unwrap_or_else(|| github_cfg.access_token.trim().to_string());
-    if access_token.is_empty() {
-        tracing::error!(
-            "GitHub webhook received but no access token is configured. \
-             Set channels_config.github.access_token or ZEROCLAW_GITHUB_TOKEN."
-        );
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "GitHub access token is not configured"})),
-        );
-    }
-
-    let webhook_secret = std::env::var("ZEROCLAW_GITHUB_WEBHOOK_SECRET")
-        .ok()
-        .map(|v| v.trim().to_string())
-        .filter(|v| !v.is_empty())
-        .or_else(|| {
-            github_cfg
-                .webhook_secret
-                .as_deref()
-                .map(str::trim)
-                .filter(|v| !v.is_empty())
-                .map(ToOwned::to_owned)
-        });
-
-    let event_name = headers
-        .get("X-GitHub-Event")
-        .and_then(|v| v.to_str().ok())
-        .map(str::trim)
-        .filter(|v| !v.is_empty());
-    let Some(event_name) = event_name else {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({"error": "Missing X-GitHub-Event header"})),
-        );
-    };
-
-    if let Some(secret) = webhook_secret.as_deref() {
-        let signature = headers
-            .get("X-Hub-Signature-256")
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or("");
-
-        if !crate::channels::github::verify_github_signature(secret, &body, signature) {
-            tracing::warn!(
-                "GitHub webhook signature verification failed (signature: {})",
-                if signature.is_empty() {
-                    "missing"
-                } else {
-                    "invalid"
-                }
-            );
-            return (
-                StatusCode::UNAUTHORIZED,
-                Json(serde_json::json!({"error": "Invalid signature"})),
-            );
-        }
-    }
-
-    if let Some(delivery_id) = headers
-        .get("X-GitHub-Delivery")
-        .and_then(|v| v.to_str().ok())
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-    {
-        let key = format!("github:{delivery_id}");
-        if !state.idempotency_store.record_if_new(&key) {
-            tracing::info!("GitHub webhook duplicate ignored (delivery: {delivery_id})");
-            return (
-                StatusCode::OK,
-                Json(
-                    serde_json::json!({"status":"duplicate","idempotent":true,"delivery_id":delivery_id}),
-                ),
-            );
-        }
-    }
-
-    let Ok(payload) = serde_json::from_slice::<serde_json::Value>(&body) else {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({"error": "Invalid JSON payload"})),
-        );
-    };
-
-    let github = GitHubChannel::new(
-        access_token,
-        github_cfg.api_base_url.clone(),
-        github_cfg.allowed_repos.clone(),
-    );
-    let messages = github.parse_webhook_payload(event_name, &payload);
-    if messages.is_empty() {
-        return (
-            StatusCode::OK,
-            Json(serde_json::json!({"status": "ok", "handled": false})),
-        );
-    }
-
-    for msg in &messages {
-        tracing::info!(
-            "GitHub webhook message from {}: {}",
-            msg.sender,
-            truncate_with_ellipsis(&msg.content, 80)
-        );
-
-        if state.auto_save {
-            let key = github_memory_key(msg);
-            let _ = state
-                .mem
-                .store(&key, &msg.content, MemoryCategory::Conversation, None)
-                .await;
-        }
-
-        match run_gateway_chat_with_tools(&state, &msg.content, None).await {
-            Ok(response) => {
-                let leak_guard_cfg = gateway_outbound_leak_guard_snapshot(&state);
-                let safe_response = sanitize_gateway_response(
-                    &response,
-                    state.tools_registry_exec.as_ref(),
-                    &leak_guard_cfg,
-                );
-                if let Err(e) = github
-                    .send(
-                        &SendMessage::new(safe_response, &msg.reply_target)
-                            .in_thread(msg.thread_ts.clone()),
-                    )
-                    .await
-                {
-                    tracing::error!("Failed to send GitHub reply: {e}");
-                }
-            }
-            Err(e) => {
-                tracing::error!("LLM error for GitHub webhook message: {e:#}");
-                let _ = github
-                    .send(
-                        &SendMessage::new(
-                            "Sorry, I couldn't process your message right now.",
-                            &msg.reply_target,
-                        )
-                        .in_thread(msg.thread_ts.clone()),
-                    )
-                    .await;
-            }
-        }
-    }
-
-    (
-        StatusCode::OK,
-        Json(serde_json::json!({"status": "ok", "handled": true})),
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2011,6 +1874,300 @@ mod tests {
         let body = response.into_body().collect().await.unwrap().to_bytes();
         let text = String::from_utf8(body.to_vec()).unwrap();
         assert!(text.contains("zeroclaw_heartbeat_ticks_total 1"));
+    }
+
+    #[tokio::test]
+    async fn metrics_endpoint_unwraps_production_observer_chain() {
+        // Mirrors the wrapper stack built by `gateway::start`:
+        //   BroadcastObserver { ObserverBridge { MultiObserver { [PrometheusObserver, NoopObserver] } } }
+        // Regression guard: `find_prometheus_observer` must descend through every layer or `/metrics`
+        // silently returns the "not enabled" stub even though Prometheus is configured.
+        let prom = crate::observability::PrometheusObserver::new()
+            .expect("prometheus observer should initialize in tests");
+        crate::observability::Observer::record_event(
+            &prom,
+            &crate::observability::ObserverEvent::HeartbeatTick,
+        );
+        let multi = crate::observability::MultiObserver::new(vec![
+            Box::new(prom),
+            Box::new(crate::observability::NoopObserver),
+        ]);
+        let bridged =
+            crate::plugins::bridge::observer::ObserverBridge::new_box(Box::new(multi));
+        let (event_tx, _event_rx) = tokio::sync::broadcast::channel(16);
+        let observer: Arc<dyn crate::observability::Observer> = Arc::new(
+            sse::BroadcastObserver::new(Box::new(bridged), event_tx.clone()),
+        );
+
+        let state = AppState {
+            config: Arc::new(Mutex::new(Config::default())),
+            provider: Arc::new(MockProvider::default()),
+            model: "test-model".into(),
+            temperature: 0.0,
+            mem: Arc::new(MockMemory),
+            auto_save: false,
+            webhook_secret_hash: None,
+            pairing: Arc::new(PairingGuard::new(false, &[], None)),
+            trust_forwarded_headers: false,
+            rate_limiter: Arc::new(GatewayRateLimiter::new(100, 100, 100)),
+            idempotency_store: Arc::new(IdempotencyStore::new(Duration::from_secs(300), 1000)),
+            observer,
+            tools_registry: Arc::new(Vec::new()),
+            tools_registry_exec: Arc::new(Vec::new()),
+            multimodal: crate::config::MultimodalConfig::default(),
+            max_tool_iterations: 10,
+            cost_tracker: None,
+            event_tx,
+            runtime_trace_path: None,
+        };
+
+        let response = handle_metrics(State(state), test_connect_info(), HeaderMap::new())
+            .await
+            .into_response();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let text = String::from_utf8(body.to_vec()).unwrap();
+        assert!(
+            text.contains("zeroclaw_heartbeat_ticks_total 1"),
+            "expected Prometheus output through wrapped observer chain, got:\n{text}"
+        );
+        assert!(
+            !text.contains("Prometheus backend not enabled"),
+            "wrapper chain should not fall through to the disabled stub"
+        );
+    }
+
+    /// End-to-end test of the singleton: build TWO independent factory chains
+    /// (mirroring the real daemon: gateway + heartbeat worker), record events
+    /// on the heartbeat-style chain only, and verify they show up in the
+    /// gateway's `/metrics` output.
+    ///
+    /// If this fails, the singleton is not actually being shared across the
+    /// process and `/metrics` will look frozen at zero from the dashboard.
+    #[tokio::test]
+    async fn metrics_endpoint_sees_events_recorded_by_other_factory_chains() {
+        use std::sync::Arc;
+        let observability = crate::config::ObservabilityConfig {
+            backend: "prometheus".into(),
+            ..crate::config::ObservabilityConfig::default()
+        };
+        let cost_config = crate::config::schema::CostConfig::default();
+
+        // ── Heartbeat-worker style chain (no SSE wrapper). Mirrors `daemon::run_heartbeat_worker`.
+        let heartbeat_observer: Arc<dyn crate::observability::Observer> = Arc::from(
+            crate::observability::create_observer_with_cost_tracking(
+                &observability,
+                None,
+                &cost_config,
+            ),
+        );
+
+        // ── Gateway-style chain (Broadcast + Bridge wrappers). Mirrors `gateway::run_gateway`.
+        let gateway_base = crate::observability::create_observer_with_cost_tracking(
+            &observability,
+            None,
+            &cost_config,
+        );
+        let bridged = crate::plugins::bridge::observer::ObserverBridge::new_box(gateway_base);
+        let (event_tx, _event_rx) = tokio::sync::broadcast::channel(16);
+        let gateway_observer: Arc<dyn crate::observability::Observer> = Arc::new(
+            sse::BroadcastObserver::new(Box::new(bridged), event_tx.clone()),
+        );
+
+        // Record on the heartbeat chain only.
+        for _ in 0..3 {
+            heartbeat_observer
+                .record_event(&crate::observability::ObserverEvent::HeartbeatTick);
+        }
+
+        // Read /metrics through the gateway chain — must see the heartbeat events.
+        let state = AppState {
+            config: Arc::new(Mutex::new(Config::default())),
+            provider: Arc::new(MockProvider::default()),
+            model: "test-model".into(),
+            temperature: 0.0,
+            mem: Arc::new(MockMemory),
+            auto_save: false,
+            webhook_secret_hash: None,
+            pairing: Arc::new(PairingGuard::new(false, &[], None)),
+            trust_forwarded_headers: false,
+            rate_limiter: Arc::new(GatewayRateLimiter::new(100, 100, 100)),
+            idempotency_store: Arc::new(IdempotencyStore::new(Duration::from_secs(300), 1000)),
+            observer: gateway_observer,
+            tools_registry: Arc::new(Vec::new()),
+            tools_registry_exec: Arc::new(Vec::new()),
+            multimodal: crate::config::MultimodalConfig::default(),
+            max_tool_iterations: 10,
+            cost_tracker: None,
+            event_tx,
+            runtime_trace_path: None,
+        };
+
+        let response = handle_metrics(State(state), test_connect_info(), HeaderMap::new())
+            .await
+            .into_response();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let text = String::from_utf8(body.to_vec()).unwrap();
+        let line = text
+            .lines()
+            .find(|l| l.starts_with("zeroclaw_heartbeat_ticks_total "))
+            .unwrap_or_else(|| panic!("counter line missing in:\n{text}"));
+        let value: u64 = line
+            .split_whitespace()
+            .nth(1)
+            .and_then(|v| v.parse().ok())
+            .unwrap_or_else(|| panic!("counter value did not parse: {line}"));
+        // Other tests in the same binary may have already incremented the
+        // process-wide singleton, so assert ≥ 3 (the events written above)
+        // rather than == 3.
+        assert!(
+            value >= 3,
+            "gateway /metrics did not see heartbeat events from the other factory chain — \
+             expected counter ≥ 3, got {value}. Singleton is not shared."
+        );
+    }
+
+    /// Same as `metrics_endpoint_renders_through_real_factory_chain` but with
+    /// cost tracking enabled, which wraps the prometheus observer in a
+    /// `MultiObserver` alongside `CostObserver`. Catches the case where
+    /// `MultiObserver::find_observer::<PrometheusObserver>` cannot peek through
+    /// the `SharedPrometheusObserver` wrapper.
+    #[tokio::test]
+    async fn metrics_endpoint_renders_through_real_factory_chain_with_cost_tracking() {
+        use std::sync::Arc;
+        let observability = crate::config::ObservabilityConfig {
+            backend: "prometheus".into(),
+            ..crate::config::ObservabilityConfig::default()
+        };
+        let cost_config = crate::config::schema::CostConfig {
+            enabled: true,
+            ..crate::config::schema::CostConfig::default()
+        };
+        let tmp = tempfile::tempdir().expect("tempdir for cost storage");
+        let cost_tracker = Arc::new(
+            crate::cost::CostTracker::new(cost_config.clone(), tmp.path())
+                .expect("CostTracker::new should succeed for tests"),
+        );
+        let base = crate::observability::create_observer_with_cost_tracking(
+            &observability,
+            Some(Arc::clone(&cost_tracker)),
+            &cost_config,
+        );
+        crate::observability::Observer::record_event(
+            base.as_ref(),
+            &crate::observability::ObserverEvent::HeartbeatTick,
+        );
+
+        let bridged = crate::plugins::bridge::observer::ObserverBridge::new_box(base);
+        let (event_tx, _event_rx) = tokio::sync::broadcast::channel(16);
+        let observer: Arc<dyn crate::observability::Observer> = Arc::new(
+            sse::BroadcastObserver::new(Box::new(bridged), event_tx.clone()),
+        );
+
+        let state = AppState {
+            config: Arc::new(Mutex::new(Config::default())),
+            provider: Arc::new(MockProvider::default()),
+            model: "test-model".into(),
+            temperature: 0.0,
+            mem: Arc::new(MockMemory),
+            auto_save: false,
+            webhook_secret_hash: None,
+            pairing: Arc::new(PairingGuard::new(false, &[], None)),
+            trust_forwarded_headers: false,
+            rate_limiter: Arc::new(GatewayRateLimiter::new(100, 100, 100)),
+            idempotency_store: Arc::new(IdempotencyStore::new(Duration::from_secs(300), 1000)),
+            observer,
+            tools_registry: Arc::new(Vec::new()),
+            tools_registry_exec: Arc::new(Vec::new()),
+            multimodal: crate::config::MultimodalConfig::default(),
+            max_tool_iterations: 10,
+            cost_tracker: Some(cost_tracker),
+            event_tx,
+            runtime_trace_path: None,
+        };
+
+        let response = handle_metrics(State(state), test_connect_info(), HeaderMap::new())
+            .await
+            .into_response();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let text = String::from_utf8(body.to_vec()).unwrap();
+        assert!(
+            text.contains("zeroclaw_heartbeat_ticks_total"),
+            "expected heartbeat metric inside MultiObserver chain, got:\n{text}"
+        );
+        assert!(
+            !text.contains("Prometheus backend not enabled"),
+            "factory chain with cost tracking must not fall through to the disabled stub:\n{text}"
+        );
+    }
+
+    /// Builds the production observer chain by going through the *real* factory
+    /// (`create_observer_with_cost_tracking`), so it covers `SharedPrometheusObserver`
+    /// — the wrapper the factory now hands out so every component shares one
+    /// `Registry`. Regression guard for the dashboard metrics tab.
+    #[tokio::test]
+    async fn metrics_endpoint_renders_through_real_factory_chain() {
+        let observability = crate::config::ObservabilityConfig {
+            backend: "prometheus".into(),
+            ..crate::config::ObservabilityConfig::default()
+        };
+        let cost_config = crate::config::schema::CostConfig::default();
+        let base = crate::observability::create_observer_with_cost_tracking(
+            &observability,
+            None,
+            &cost_config,
+        );
+        // Drive a heartbeat tick through the factory-built chain so the singleton
+        // registry has something to expose.
+        crate::observability::Observer::record_event(
+            base.as_ref(),
+            &crate::observability::ObserverEvent::HeartbeatTick,
+        );
+
+        let bridged = crate::plugins::bridge::observer::ObserverBridge::new_box(base);
+        let (event_tx, _event_rx) = tokio::sync::broadcast::channel(16);
+        let observer: Arc<dyn crate::observability::Observer> = Arc::new(
+            sse::BroadcastObserver::new(Box::new(bridged), event_tx.clone()),
+        );
+
+        let state = AppState {
+            config: Arc::new(Mutex::new(Config::default())),
+            provider: Arc::new(MockProvider::default()),
+            model: "test-model".into(),
+            temperature: 0.0,
+            mem: Arc::new(MockMemory),
+            auto_save: false,
+            webhook_secret_hash: None,
+            pairing: Arc::new(PairingGuard::new(false, &[], None)),
+            trust_forwarded_headers: false,
+            rate_limiter: Arc::new(GatewayRateLimiter::new(100, 100, 100)),
+            idempotency_store: Arc::new(IdempotencyStore::new(Duration::from_secs(300), 1000)),
+            observer,
+            tools_registry: Arc::new(Vec::new()),
+            tools_registry_exec: Arc::new(Vec::new()),
+            multimodal: crate::config::MultimodalConfig::default(),
+            max_tool_iterations: 10,
+            cost_tracker: None,
+            event_tx,
+            runtime_trace_path: None,
+        };
+
+        let response = handle_metrics(State(state), test_connect_info(), HeaderMap::new())
+            .await
+            .into_response();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let text = String::from_utf8(body.to_vec()).unwrap();
+        assert!(
+            text.contains("zeroclaw_heartbeat_ticks_total"),
+            "expected the heartbeat metric line in factory-built chain output, got:\n{text}"
+        );
+        assert!(
+            !text.contains("Prometheus backend not enabled"),
+            "factory-built chain must not fall through to the disabled stub:\n{text}"
+        );
     }
 
     #[tokio::test]
@@ -2301,16 +2458,16 @@ mod tests {
         assert_ne!(key1, key2);
     }
 
-    struct MockScheduleTool;
+    struct MockBrowserTool;
 
     #[async_trait]
-    impl Tool for MockScheduleTool {
+    impl Tool for MockBrowserTool {
         fn name(&self) -> &str {
-            "schedule"
+            "browser"
         }
 
         fn description(&self) -> &str {
-            "Mock schedule tool"
+            "Mock browser tool"
         }
 
         fn parameters_schema(&self) -> serde_json::Value {
@@ -2339,7 +2496,7 @@ mod tests {
     fn sanitize_gateway_response_removes_tool_call_tags() {
         let input = r#"Before
 <tool_call>
-{"name":"schedule","arguments":{"action":"create"}}
+{"name":"browser","arguments":{"action":"screenshot"}}
 </tool_call>
 After"#;
 
@@ -2352,20 +2509,20 @@ After"#;
             .join("\n");
         assert_eq!(normalized, "Before\nAfter");
         assert!(!result.contains("<tool_call>"));
-        assert!(!result.contains("\"name\":\"schedule\""));
+        assert!(!result.contains("\"name\":\"browser\""));
     }
 
     #[test]
     fn sanitize_gateway_response_removes_isolated_tool_json_artifacts() {
-        let tools: Vec<Box<dyn Tool>> = vec![Box::new(MockScheduleTool)];
-        let input = r#"{"name":"schedule","parameters":{"action":"create"}}
-{"result":{"status":"scheduled"}}
-Reminder set successfully."#;
+        let tools: Vec<Box<dyn Tool>> = vec![Box::new(MockBrowserTool)];
+        let input = r#"{"name":"browser","parameters":{"action":"screenshot"}}
+{"result":{"status":"captured"}}
+Screenshot captured successfully."#;
 
         let leak_guard = crate::config::OutboundLeakGuardConfig::default();
         let result = sanitize_gateway_response(input, &tools, &leak_guard);
-        assert_eq!(result, "Reminder set successfully.");
-        assert!(!result.contains("\"name\":\"schedule\""));
+        assert_eq!(result, "Screenshot captured successfully.");
+        assert!(!result.contains("\"name\":\"browser\""));
         assert!(!result.contains("\"result\""));
     }
 
@@ -3105,177 +3262,6 @@ Reminder set successfully."#;
         let mut mac = Hmac::<Sha256>::new_from_slice(secret.as_bytes()).unwrap();
         mac.update(payload.as_bytes());
         hex::encode(mac.finalize().into_bytes())
-    }
-
-    fn compute_github_signature_header(secret: &str, body: &str) -> String {
-        use hmac::{Hmac, Mac};
-        use sha2::Sha256;
-
-        let mut mac = Hmac::<Sha256>::new_from_slice(secret.as_bytes()).unwrap();
-        mac.update(body.as_bytes());
-        format!("sha256={}", hex::encode(mac.finalize().into_bytes()))
-    }
-
-    #[tokio::test]
-    async fn github_webhook_returns_not_found_when_not_configured() {
-        let provider: Arc<dyn Provider> = Arc::new(MockProvider::default());
-        let memory: Arc<dyn Memory> = Arc::new(MockMemory);
-
-        let state = AppState {
-            config: Arc::new(Mutex::new(Config::default())),
-            provider,
-            model: "test-model".into(),
-            temperature: 0.0,
-            mem: memory,
-            auto_save: false,
-            webhook_secret_hash: None,
-            pairing: Arc::new(PairingGuard::new(false, &[], None)),
-            trust_forwarded_headers: false,
-            rate_limiter: Arc::new(GatewayRateLimiter::new(100, 100, 100)),
-            idempotency_store: Arc::new(IdempotencyStore::new(Duration::from_secs(300), 1000)),
-            observer: Arc::new(crate::observability::NoopObserver),
-            tools_registry: Arc::new(Vec::new()),
-            tools_registry_exec: Arc::new(Vec::new()),
-            multimodal: crate::config::MultimodalConfig::default(),
-            max_tool_iterations: 10,
-            cost_tracker: None,
-            event_tx: tokio::sync::broadcast::channel(16).0,
-            runtime_trace_path: None,
-        };
-
-        let response = handle_github_webhook(
-            State(state),
-            HeaderMap::new(),
-            Bytes::from_static(br#"{"action":"created"}"#),
-        )
-        .await
-        .into_response();
-        assert_eq!(response.status(), StatusCode::NOT_FOUND);
-    }
-
-    #[tokio::test]
-    async fn github_webhook_rejects_invalid_signature() {
-        let provider_impl = Arc::new(MockProvider::default());
-        let provider: Arc<dyn Provider> = provider_impl.clone();
-        let memory: Arc<dyn Memory> = Arc::new(MockMemory);
-        let mut config = Config::default();
-        config.channels_config.github = Some(crate::config::schema::GitHubConfig {
-            access_token: "ghp_test_token".into(),
-            webhook_secret: Some("github-secret".into()),
-            api_base_url: None,
-            allowed_repos: vec!["myagentzero/zeroclaw".into()],
-        });
-
-        let state = AppState {
-            config: Arc::new(Mutex::new(config)),
-            provider,
-            model: "test-model".into(),
-            temperature: 0.0,
-            mem: memory,
-            auto_save: false,
-            webhook_secret_hash: None,
-            pairing: Arc::new(PairingGuard::new(false, &[], None)),
-            trust_forwarded_headers: false,
-            rate_limiter: Arc::new(GatewayRateLimiter::new(100, 100, 100)),
-            idempotency_store: Arc::new(IdempotencyStore::new(Duration::from_secs(300), 1000)),
-            observer: Arc::new(crate::observability::NoopObserver),
-            tools_registry: Arc::new(Vec::new()),
-            tools_registry_exec: Arc::new(Vec::new()),
-            multimodal: crate::config::MultimodalConfig::default(),
-            max_tool_iterations: 10,
-            cost_tracker: None,
-            event_tx: tokio::sync::broadcast::channel(16).0,
-            runtime_trace_path: None,
-        };
-
-        let body = r#"{
-            "action":"created",
-            "repository":{"full_name":"myagentzero/zeroclaw"},
-            "issue":{"number":2079,"title":"x"},
-            "comment":{"id":1,"body":"hello","user":{"login":"alice","type":"User"}}
-        }"#;
-        let mut headers = HeaderMap::new();
-        headers.insert("X-GitHub-Event", HeaderValue::from_static("issue_comment"));
-        headers.insert(
-            "X-Hub-Signature-256",
-            HeaderValue::from_static("sha256=deadbeef"),
-        );
-
-        let response = handle_github_webhook(State(state), headers, Bytes::from(body))
-            .await
-            .into_response();
-        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-        assert_eq!(provider_impl.calls.load(Ordering::SeqCst), 0);
-    }
-
-    #[tokio::test]
-    async fn github_webhook_duplicate_delivery_returns_duplicate_status() {
-        let provider_impl = Arc::new(MockProvider::default());
-        let provider: Arc<dyn Provider> = provider_impl.clone();
-        let memory: Arc<dyn Memory> = Arc::new(MockMemory);
-        let secret = "github-secret";
-        let mut config = Config::default();
-        config.channels_config.github = Some(crate::config::schema::GitHubConfig {
-            access_token: "ghp_test_token".into(),
-            webhook_secret: Some(secret.into()),
-            api_base_url: None,
-            allowed_repos: vec!["myagentzero/zeroclaw".into()],
-        });
-
-        let state = AppState {
-            config: Arc::new(Mutex::new(config)),
-            provider,
-            model: "test-model".into(),
-            temperature: 0.0,
-            mem: memory,
-            auto_save: false,
-            webhook_secret_hash: None,
-            pairing: Arc::new(PairingGuard::new(false, &[], None)),
-            trust_forwarded_headers: false,
-            rate_limiter: Arc::new(GatewayRateLimiter::new(100, 100, 100)),
-            idempotency_store: Arc::new(IdempotencyStore::new(Duration::from_secs(300), 1000)),
-            observer: Arc::new(crate::observability::NoopObserver),
-            tools_registry: Arc::new(Vec::new()),
-            tools_registry_exec: Arc::new(Vec::new()),
-            multimodal: crate::config::MultimodalConfig::default(),
-            max_tool_iterations: 10,
-            cost_tracker: None,
-            event_tx: tokio::sync::broadcast::channel(16).0,
-            runtime_trace_path: None,
-        };
-
-        let body = r#"{
-            "action":"created",
-            "repository":{"full_name":"myagentzero/zeroclaw"},
-            "issue":{"number":2079,"title":"x"},
-            "comment":{"id":1,"body":"hello","user":{"login":"alice","type":"User"}}
-        }"#;
-        let signature = compute_github_signature_header(secret, body);
-        let mut headers = HeaderMap::new();
-        headers.insert("X-GitHub-Event", HeaderValue::from_static("issue_comment"));
-        headers.insert(
-            "X-Hub-Signature-256",
-            HeaderValue::from_str(&signature).unwrap(),
-        );
-        headers.insert("X-GitHub-Delivery", HeaderValue::from_static("delivery-1"));
-
-        let first = handle_github_webhook(
-            State(state.clone()),
-            headers.clone(),
-            Bytes::from(body.to_string()),
-        )
-        .await
-        .into_response();
-        assert_eq!(first.status(), StatusCode::OK);
-
-        let second = handle_github_webhook(State(state), headers, Bytes::from(body.to_string()))
-            .await
-            .into_response();
-        assert_eq!(second.status(), StatusCode::OK);
-        let payload = second.into_body().collect().await.unwrap().to_bytes();
-        let parsed: serde_json::Value = serde_json::from_slice(&payload).unwrap();
-        assert_eq!(parsed["status"], "duplicate");
-        assert_eq!(provider_impl.calls.load(Ordering::SeqCst), 0);
     }
 
     // ══════════════════════════════════════════════════════════

@@ -26,19 +26,6 @@ pub trait Tool: Send + Sync {
     /// Human-readable description
     fn description(&self) -> &str;
 
-    /// Contextual usage guidance for the system prompt (full mode).
-    /// Return `Some("Use when: ... Don't use when: ...")` to include this tool
-    /// in the system prompt tool-guidance section. Return `None` to omit it.
-    fn prompt_hint(&self) -> Option<&str> {
-        None
-    }
-
-    /// Short description for compact system prompts.
-    /// Falls back to `description()` if not overridden.
-    fn prompt_hint_compact(&self) -> &str {
-        self.description()
-    }
-
     /// JSON schema for parameters
     fn parameters_schema(&self) -> serde_json::Value;
 

@@ -108,13 +108,211 @@ fn unicode_emoji_to_slack_name(emoji: &str) -> &str {
         "\u{1F389}" => "tada",                        // 🎉
         "\u{1F914}" => "thinking_face",               // 🤔
         "\u{1F525}" => "fire",                        // 🔥
-        _ => emoji.trim_matches(':'),
+        "\u{26A1}" => "zap",                          // ⚡
+        // Weather
+        "\u{26C5}" => "partly_sunny",                      // ⛅
+        "\u{1F327}\u{FE0F}" | "\u{1F327}" => "rain_cloud", // 🌧️
+        "\u{2600}\u{FE0F}" | "\u{2600}" => "sunny",        // ☀️
+        "\u{2744}\u{FE0F}" | "\u{2744}" => "snowflake",    // ❄️
+        "\u{26C8}\u{FE0F}" | "\u{26C8}" => "thunder_cloud_and_rain", // ⛈️
+        "\u{1F324}\u{FE0F}" | "\u{1F324}" => "mostly_sunny", // 🌤️
+        "\u{1F321}\u{FE0F}" | "\u{1F321}" => "thermometer", // 🌡️
+        // News
+        "\u{1F4F0}" => "newspaper",                                 // 📰
+        "\u{1F5DE}\u{FE0F}" | "\u{1F5DE}" => "rolled_up_newspaper", // 🗞️
+        "\u{1F4E2}" => "loudspeaker",                               // 📢
+        // Work
+        "\u{1F4BB}" => "computer",                               // 💻
+        "\u{1F5A5}\u{FE0F}" | "\u{1F5A5}" => "desktop_computer", // 🖥️
+        "\u{2328}\u{FE0F}" | "\u{2328}" => "keyboard",           // ⌨️
+        // Calendar
+        "\u{1F4C5}" => "date",                                      // 📅
+        "\u{1F5D3}\u{FE0F}" | "\u{1F5D3}" => "spiral_calendar_pad", // 🗓️
+        "\u{1F4C6}" => "calendar",                                  // 📆
+        "\u{23F0}" => "alarm_clock",                                // ⏰
+        // Travel
+        "\u{2708}\u{FE0F}" | "\u{2708}" => "airplane", // ✈️
+        "\u{1F697}" => "automobile",                   // 🚗
+        "\u{1F68C}" => "bus",                          // 🚌
+        "\u{1F9F3}" => "luggage",                      // 🧳
+        "\u{1F5FA}\u{FE0F}" | "\u{1F5FA}" => "world_map", // 🗺️
+        // Office
+        "\u{1F3E2}" => "office",           // 🏢
+        "\u{1F4BC}" => "briefcase",        // 💼
+        "\u{1F3EC}" => "department_store", // 🏬
+        // Money
+        "\u{1F4B0}" => "moneybag",         // 💰
+        "\u{1F4B5}" => "money_with_wings", // 💵
+        "\u{1F4B3}" => "credit_card",      // 💳
+        "\u{1F4CA}" => "bar_chart",        // 📊
+        _ => {
+            tracing::warn!(
+                "Slack: no shortcode mapping for emoji {emoji:?}; reactions.add will likely fail"
+            );
+            emoji.trim_matches(':')
+        }
     }
 }
 const SLACK_ATTACHMENT_RENDER_CONCURRENCY: usize = 3;
 const SLACK_POLL_ACTIVE_THREAD_MAX: usize = 50;
 const SLACK_POLL_THREAD_EXPIRE_SECS: u64 = 24 * 60 * 60;
 const SLACK_ACK_REACTIONS: &[&str] = &["⚡", "👀", "🔥", "👍", "🎉"];
+
+fn slack_default_ack_config() -> &'static crate::config::AckReactionConfig {
+    use crate::config::{AckReactionConfig, AckReactionRuleConfig};
+    use std::sync::OnceLock;
+    static CONFIG: OnceLock<AckReactionConfig> = OnceLock::new();
+    CONFIG.get_or_init(|| AckReactionConfig {
+        rules: vec![
+            AckReactionRuleConfig {
+                contains_any: vec![
+                    "weather".into(),
+                    "forecast".into(),
+                    "temperature".into(),
+                    "rain".into(),
+                    "snow".into(),
+                    "storm".into(),
+                    "sunny".into(),
+                    "cloudy".into(),
+                    "wind".into(),
+                    "humidity".into(),
+                    "climate".into(),
+                ],
+                emojis: vec![
+                    "⛅".into(),
+                    "🌧️".into(),
+                    "☀️".into(),
+                    "❄️".into(),
+                    "⛈️".into(),
+                    "🌤️".into(),
+                    "🌡️".into(),
+                ],
+                ..AckReactionRuleConfig::default()
+            },
+            AckReactionRuleConfig {
+                contains_any: vec![
+                    "news".into(),
+                    "headline".into(),
+                    "report".into(),
+                    "article".into(),
+                    "announcement".into(),
+                ],
+                emojis: vec!["📰".into(), "🗞️".into()],
+                ..AckReactionRuleConfig::default()
+            },
+            AckReactionRuleConfig {
+                contains_any: vec![
+                    "jira".into(),
+                    "confluence".into(),
+                    "ticket".into(),
+                    "sprint".into(),
+                    "standup".into(),
+                    "scrum".into(),
+                    "kanban".into(),
+                    "backlog".into(),
+                    "pull request".into(),
+                    "code review".into(),
+                    "github".into(),
+                    "gitlab".into(),
+                    "bitbucket".into(),
+                    "repo".into(),
+                    "repository".into(),
+                    "codebase".into(),
+                    "spreadsheet".into(),
+                    "document".into(),
+                    "workspace".into(),
+                ],
+                emojis: vec!["💻".into(), "🖥️".into(), "⌨️".into()],
+                ..AckReactionRuleConfig::default()
+            },
+            AckReactionRuleConfig {
+                contains_any: vec![
+                    "calendar".into(),
+                    "agenda".into(),
+                    "schedule".into(),
+                    "meeting".into(),
+                    "appointment".into(),
+                    "event".into(),
+                    "deadline".into(),
+                    "reminder".into(),
+                    "booking".into(),
+                ],
+                emojis: vec!["📅".into(), "🗓️".into(), "📆".into(), "⏰".into()],
+                ..AckReactionRuleConfig::default()
+            },
+            AckReactionRuleConfig {
+                contains_any: vec![
+                    "travel".into(),
+                    "driving".into(),
+                    "bus".into(),
+                    "car".into(),
+                    "train".into(),
+                    "flight".into(),
+                    "airport".into(),
+                    "ticket".into(),
+                    "transit".into(),
+                    "commute".into(),
+                    "road".into(),
+                    "highway".into(),
+                    "trip".into(),
+                    "journey".into(),
+                    "metro".into(),
+                ],
+                emojis: vec![
+                    "✈️".into(),
+                    "🚗".into(),
+                    "🚌".into(),
+                    "🧳".into(),
+                    "🗺️".into(),
+                ],
+                ..AckReactionRuleConfig::default()
+            },
+            AckReactionRuleConfig {
+                contains_any: vec![
+                    "office".into(),
+                    "workplace".into(),
+                    "building".into(),
+                    "desk".into(),
+                    "cubicle".into(),
+                    "company".into(),
+                ],
+                emojis: vec!["🏢".into(), "💼".into(), "🏬".into()],
+                ..AckReactionRuleConfig::default()
+            },
+            AckReactionRuleConfig {
+                contains_any: vec![
+                    "money".into(),
+                    "spend".into(),
+                    "dollar".into(),
+                    "cost".into(),
+                    "price".into(),
+                    "payment".into(),
+                    "invoice".into(),
+                    "bill".into(),
+                    "expense".into(),
+                    "budget".into(),
+                    "credit".into(),
+                    "debit".into(),
+                    "transaction".into(),
+                    "cash".into(),
+                    "profit".into(),
+                    "revenue".into(),
+                    "fee".into(),
+                    "shopping".into(),
+                    "salary".into(),
+                ],
+                emojis: vec![
+                    "💰".into(),
+                    "💵".into(),
+                    "💳".into(),
+                    "📊".into(),
+                ],
+                ..AckReactionRuleConfig::default()
+            },
+        ],
+        ..AckReactionConfig::default()
+    })
+}
 const SLACK_MEDIA_REDIRECT_MAX_HOPS: usize = 5;
 const SLACK_ALLOWED_MEDIA_HOST_SUFFIXES: &[&str] =
     &["slack.com", "slack-edge.com", "slack-files.com"];
@@ -163,11 +361,19 @@ impl SlackChannel {
     }
 
     /// Configure ACK reaction policy for incoming messages.
+    ///
+    /// User-supplied rules are evaluated first, then the built-in contextual
+    /// rules (weather, news, work, calendar) are appended so user config
+    /// extends the defaults instead of replacing them.
     pub fn with_ack_reaction(
         mut self,
         ack_reaction: Option<crate::config::AckReactionConfig>,
     ) -> Self {
-        self.ack_reaction = ack_reaction;
+        self.ack_reaction = ack_reaction.map(|mut cfg| {
+            cfg.rules
+                .extend(slack_default_ack_config().rules.iter().cloned());
+            cfg
+        });
         self
     }
 
@@ -1543,7 +1749,10 @@ impl SlackChannel {
         let bytes = match resp.bytes().await {
             Ok(bytes) => bytes,
             Err(err) => {
-                tracing::warn!("Slack document body read failed for {}: {err}", redacted_url);
+                tracing::warn!(
+                    "Slack document body read failed for {}: {err}",
+                    redacted_url
+                );
                 return None;
             }
         };
@@ -1565,7 +1774,11 @@ impl SlackChannel {
         let saved_path = self
             .persist_document_attachment(file, &file_name, bytes.as_ref())
             .await?;
-        Some(format!("[Document: {}] {}", file_name, saved_path.display()))
+        Some(format!(
+            "[Document: {}] {}",
+            file_name,
+            saved_path.display()
+        ))
     }
 
     fn detect_image_mime(
@@ -1785,8 +1998,8 @@ impl SlackChannel {
         bytes: &[u8],
     ) -> Option<PathBuf> {
         let workspace = self.workspace_dir.as_ref()?;
-        let safe_name = Self::sanitize_attachment_filename(file_name)
-            .unwrap_or_else(|| "document".to_string());
+        let safe_name =
+            Self::sanitize_attachment_filename(file_name).unwrap_or_else(|| "document".to_string());
         let file_id = Self::slack_file_id(file)
             .map(Self::sanitize_file_id)
             .unwrap_or_else(|| "file".to_string());
@@ -2119,8 +2332,18 @@ impl SlackChannel {
     fn is_document_filetype(filetype: &str) -> bool {
         matches!(
             filetype,
-            "pdf" | "docx" | "doc" | "pptx" | "ppt" | "xlsx" | "xls" | "epub" | "rtf" | "odt"
-                | "ods" | "odp"
+            "pdf"
+                | "docx"
+                | "doc"
+                | "pptx"
+                | "ppt"
+                | "xlsx"
+                | "xls"
+                | "epub"
+                | "rtf"
+                | "odt"
+                | "ods"
+                | "odp"
         )
     }
 
@@ -2646,11 +2869,13 @@ impl SlackChannel {
                         },
                         locale_hint: None,
                     };
-                    if let Some(emoji) = select_ack_reaction(
-                        self.ack_reaction.as_ref(),
-                        SLACK_ACK_REACTIONS,
-                        &ack_ctx,
-                    ) {
+                    let ack_policy = self
+                        .ack_reaction
+                        .as_ref()
+                        .unwrap_or_else(|| slack_default_ack_config());
+                    if let Some(emoji) =
+                        select_ack_reaction(Some(ack_policy), SLACK_ACK_REACTIONS, &ack_ctx)
+                    {
                         self.spawn_ack_reaction(&channel_id, ts, &emoji);
                     }
                 }
@@ -3372,11 +3597,13 @@ impl Channel for SlackChannel {
                                 },
                                 locale_hint: None,
                             };
-                            if let Some(emoji) = select_ack_reaction(
-                                self.ack_reaction.as_ref(),
-                                SLACK_ACK_REACTIONS,
-                                &ack_ctx,
-                            ) {
+                            let ack_policy = self
+                                .ack_reaction
+                                .as_ref()
+                                .unwrap_or_else(|| slack_default_ack_config());
+                            if let Some(emoji) =
+                                select_ack_reaction(Some(ack_policy), SLACK_ACK_REACTIONS, &ack_ctx)
+                            {
                                 self.spawn_ack_reaction(&channel_id, ts, &emoji);
                             }
                         }

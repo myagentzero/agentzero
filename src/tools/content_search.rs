@@ -37,18 +37,7 @@ impl Tool for ContentSearchTool {
     }
 
     fn description(&self) -> &str {
-        "Search file contents by regex pattern within the workspace."
-    }
-
-    fn prompt_hint(&self) -> Option<&str> {
-        Some(
-            "Search file contents by regex. Use when: finding code patterns, definitions, usages across the workspace. \
-             Don't use when: you know the exact file (use file_read) or need file paths only (use glob_search).",
-        )
-    }
-
-    fn prompt_hint_compact(&self) -> &str {
-        "Search file contents by regex pattern."
+        "Search file contents by regex. Use when: finding code patterns, definitions, usages across the workspace. Don't use when: you know the exact file (use file_read) or need file paths only (use glob_search)."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {

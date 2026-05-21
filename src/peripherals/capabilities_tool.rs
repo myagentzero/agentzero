@@ -28,16 +28,6 @@ impl Tool for HardwareCapabilitiesTool {
         "Query connected hardware for reported GPIO pins and LED pin. Use when: user asks what pins are available."
     }
 
-    fn prompt_hint(&self) -> Option<&str> {
-        Some(
-            "Query connected hardware for reported GPIO pins and LED pin. Use when: user asks what pins are available.",
-        )
-    }
-
-    fn prompt_hint_compact(&self) -> &str {
-        "Query connected hardware for reported GPIO pins and LED pin. Use when user asks what pins are available."
-    }
-
     fn parameters_schema(&self) -> serde_json::Value {
         json!({
             "type": "object",

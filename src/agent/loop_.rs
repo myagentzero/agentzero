@@ -2569,45 +2569,6 @@ pub async fn run_tool_call_loop(
 
 /// Build the tool instruction block for the system prompt from concrete tool
 /// specs so the LLM knows how to invoke tools.
-pub(crate) fn build_tool_instructions(tools_registry: &[Box<dyn Tool>]) -> String {
-    let specs: Vec<crate::tools::ToolSpec> =
-        tools_registry.iter().map(|tool| tool.spec()).collect();
-    build_tool_instructions_from_specs(&specs)
-}
-
-/// Build the tool instruction block for the system prompt from concrete tool
-/// specs so the LLM knows how to invoke tools.
-pub(crate) fn build_tool_instructions_from_specs(tool_specs: &[crate::tools::ToolSpec]) -> String {
-    let mut instructions = String::new();
-    instructions.push_str("\n## Tool Use Protocol\n\n");
-    instructions.push_str("To use a tool, wrap a JSON object in <tool_call></tool_call> tags:\n\n");
-    instructions.push_str("```\n<tool_call>\n{\"name\": \"tool_name\", \"arguments\": {\"param\": \"value\"}}\n</tool_call>\n```\n\n");
-    instructions.push_str(
-        "CRITICAL: Output actual <tool_call> tags—never describe steps or give examples.\n\n",
-    );
-    instructions.push_str(
-        "When a tool is needed, emit a real call (not prose), for example:\n\
-<tool_call>\n\
-{\"name\":\"tool_name\",\"arguments\":{}}\n\
-</tool_call>\n\n",
-    );
-    instructions.push_str("You may use multiple tool calls in a single response. ");
-    instructions.push_str("After tool execution, results appear in <tool_result> tags. ");
-    instructions
-        .push_str("Continue reasoning with the results until you can give a final answer.\n\n");
-    instructions.push_str("### Available Tools\n\n");
-
-    for tool in tool_specs {
-        let _ = writeln!(
-            instructions,
-            "**{}**: {}\nParameters: `{}`\n",
-            tool.name, tool.description, tool.parameters
-        );
-    }
-
-    instructions
-}
-
 /// Build shell-policy instructions for the system prompt so the model is aware
 /// of command-level execution constraints before it emits tool calls.
 pub(crate) fn build_shell_policy_instructions(autonomy: &crate::config::AutonomyConfig) -> String {
@@ -2854,14 +2815,14 @@ pub async fn run(
     });
 
     // ── Hardware RAG (datasheet retrieval when peripherals + datasheet_dir) ──
-    let hardware_rag: Option<crate::rag::HardwareRag> = config
+    let hardware_rag: Option<crate::hardware::datasheet::HardwareRag> = config
         .peripherals
         .datasheet_dir
         .as_ref()
         .filter(|d| !d.trim().is_empty())
-        .map(|dir| crate::rag::HardwareRag::load(&config.workspace_dir, dir.trim()))
+        .map(|dir| crate::hardware::datasheet::HardwareRag::load(&config.workspace_dir, dir.trim()))
         .and_then(Result::ok)
-        .filter(|r: &crate::rag::HardwareRag| !r.is_empty());
+        .filter(|r: &crate::hardware::datasheet::HardwareRag| !r.is_empty());
     if let Some(ref rag) = hardware_rag {
         tracing::info!(chunks = rag.len(), "Hardware RAG loaded");
     }
@@ -2875,10 +2836,10 @@ pub async fn run(
 
     // ── Build system prompt from workspace MD files (OpenClaw framework) ──
     let skills = crate::skills::load_skills_with_config(&config.workspace_dir, &config);
-    // Build tool descriptions from the registry (each tool provides its own prompt_hint).
-    let tool_descs: Vec<(&str, &str)> = tools_registry
+    // Build tool specs from the registry.
+    let tool_specs: Vec<crate::tools::ToolSpec> = tools_registry
         .iter()
-        .filter_map(|t| t.prompt_hint().map(|h| (t.name(), h)))
+        .map(|t| t.spec())
         .collect();
     let bootstrap_max_chars = if config.agent.compact_context {
         Some(6000)
@@ -2889,8 +2850,7 @@ pub async fn run(
     let security_summary_str = security.prompt_summary();
     let mut system_prompt = crate::channels::build_system_prompt_with_mode(
         &config.workspace_dir,
-        &model_name,
-        &tool_descs,
+        &tool_specs,
         &skills,
         Some(&config.identity),
         bootstrap_max_chars,
@@ -2899,12 +2859,8 @@ pub async fn run(
         config.skip_bootstrap_files,
         config.local_context.timezone.as_deref(),
         Some(&security_summary_str),
+        Some(&config.hardware),
     );
-
-    // Append structured tool-use instructions with schemas (only for non-native providers)
-    if !native_tools {
-        system_prompt.push_str(&build_tool_instructions(&tools_registry));
-    }
     system_prompt.push_str(&build_shell_policy_instructions(&config.autonomy));
 
     let configured_hooks = crate::hooks::create_runner_from_config(&config.hooks);
@@ -2935,7 +2891,10 @@ pub async fn run(
 
     if let Some(msg) = message {
         // Auto-save user message to memory (skip short/trivial messages)
-        if config.memory.auto_save && msg.chars().count() >= AUTOSAVE_MIN_MESSAGE_CHARS {
+        if config.memory.auto_save
+            && !config.skip_input_autosave
+            && msg.chars().count() >= AUTOSAVE_MIN_MESSAGE_CHARS
+        {
             let user_key = autosave_memory_key("user_msg");
             let _ = mem
                 .store(&user_key, &msg, MemoryCategory::Conversation, None)
@@ -2943,47 +2902,46 @@ pub async fn run(
         }
 
         // ── Research phase ──────────────────────────────────────
-        let research_context =
-            if crate::agent::research::should_trigger(&config.research, &msg) {
-                if config.research.show_progress {
-                    println!("[Research] Gathering information...");
-                }
-                match crate::agent::research::run_research_phase(
-                    &config.research,
-                    provider.as_ref(),
-                    &tools_registry,
-                    &msg,
-                    &model_name,
-                    temperature,
-                    observer.clone(),
-                )
-                .await
-                {
-                    Ok(result) => {
-                        if config.research.show_progress {
-                            println!(
-                                "[Research] Complete: {} tool calls, {} chars context",
-                                result.tool_call_count,
-                                result.context.len()
-                            );
-                            for summary in &result.tool_summaries {
-                                println!("  - {}: {}", summary.tool_name, summary.result_preview);
-                            }
-                        }
-                        if result.context.is_empty() {
-                            None
-                        } else {
-                            Some(result.context)
+        let research_context = if crate::agent::research::should_trigger(&config.research, &msg) {
+            if config.research.show_progress {
+                println!("[Research] Gathering information...");
+            }
+            match crate::agent::research::run_research_phase(
+                &config.research,
+                provider.as_ref(),
+                &tools_registry,
+                &msg,
+                &model_name,
+                temperature,
+                observer.clone(),
+            )
+            .await
+            {
+                Ok(result) => {
+                    if config.research.show_progress {
+                        println!(
+                            "[Research] Complete: {} tool calls, {} chars context",
+                            result.tool_call_count,
+                            result.context.len()
+                        );
+                        for summary in &result.tool_summaries {
+                            println!("  - {}: {}", summary.tool_name, summary.result_preview);
                         }
                     }
-                    Err(e) => {
-                        tracing::warn!("Research phase failed: {}", e);
+                    if result.context.is_empty() {
                         None
+                    } else {
+                        Some(result.context)
                     }
                 }
-            } else {
-                None
-            };
+                Err(e) => {
+                    tracing::warn!("Research phase failed: {}", e);
+                    None
+                }
+            }
+        } else {
+            None
+        };
 
         // Inject memory + hardware RAG context into user message
         let mem_context =
@@ -3578,14 +3536,14 @@ pub async fn process_message_with_session(
         &provider_runtime_options,
     )?;
 
-    let hardware_rag: Option<crate::rag::HardwareRag> = config
+    let hardware_rag: Option<crate::hardware::datasheet::HardwareRag> = config
         .peripherals
         .datasheet_dir
         .as_ref()
         .filter(|d| !d.trim().is_empty())
-        .map(|dir| crate::rag::HardwareRag::load(&config.workspace_dir, dir.trim()))
+        .map(|dir| crate::hardware::datasheet::HardwareRag::load(&config.workspace_dir, dir.trim()))
         .and_then(Result::ok)
-        .filter(|r: &crate::rag::HardwareRag| !r.is_empty());
+        .filter(|r: &crate::hardware::datasheet::HardwareRag| !r.is_empty());
     let board_names: Vec<String> = config
         .peripherals
         .boards
@@ -3594,20 +3552,10 @@ pub async fn process_message_with_session(
         .collect();
 
     let skills = crate::skills::load_skills_with_config(&config.workspace_dir, &config);
-    // Build compact tool descriptions from the registry.
-    let tool_descs: Vec<(&str, &str)> = tools_registry
+    // Build tool specs from the registry.
+    let tool_specs: Vec<crate::tools::ToolSpec> = tools_registry
         .iter()
-        .filter_map(|t| {
-            let hint = t.prompt_hint_compact();
-            // Only include tools that have a non-default compact hint
-            // (i.e. tools that define prompt_hint, since prompt_hint_compact
-            // defaults to description() which is always present).
-            if t.prompt_hint().is_some() {
-                Some((t.name(), hint))
-            } else {
-                None
-            }
-        })
+        .map(|t| t.spec())
         .collect();
     let bootstrap_max_chars = if config.agent.compact_context {
         Some(6000)
@@ -3618,8 +3566,7 @@ pub async fn process_message_with_session(
     let security_summary_str = security.prompt_summary();
     let mut system_prompt = crate::channels::build_system_prompt_with_mode(
         &config.workspace_dir,
-        &model_name,
-        &tool_descs,
+        &tool_specs,
         &skills,
         Some(&config.identity),
         bootstrap_max_chars,
@@ -3628,32 +3575,29 @@ pub async fn process_message_with_session(
         config.skip_bootstrap_files,
         config.local_context.timezone.as_deref(),
         Some(&security_summary_str),
+        Some(&config.hardware),
     );
-    if !native_tools {
-        system_prompt.push_str(&build_tool_instructions(&tools_registry));
-    }
     system_prompt.push_str(&build_shell_policy_instructions(&config.autonomy));
 
     // ── Research phase ──────────────────────────────────────────
-    let research_context =
-        if crate::agent::research::should_trigger(&config.research, message) {
-            match crate::agent::research::run_research_phase(
-                &config.research,
-                provider.as_ref(),
-                &tools_registry,
-                message,
-                &model_name,
-                config.default_temperature,
-                observer.clone(),
-            )
-            .await
-            {
-                Ok(result) if !result.context.is_empty() => Some(result.context),
-                _ => None,
-            }
-        } else {
-            None
-        };
+    let research_context = if crate::agent::research::should_trigger(&config.research, message) {
+        match crate::agent::research::run_research_phase(
+            &config.research,
+            provider.as_ref(),
+            &tools_registry,
+            message,
+            &model_name,
+            config.default_temperature,
+            observer.clone(),
+        )
+        .await
+        {
+            Ok(result) if !result.context.is_empty() => Some(result.context),
+            _ => None,
+        }
+    } else {
+        None
+    };
 
     let mem_context = build_context(
         mem.as_ref(),
@@ -6612,9 +6556,10 @@ Tail"#;
             std::path::Path::new("/tmp"),
         ));
         let tools = tools::default_tools(security);
-        let instructions = build_tool_instructions(&tools);
+        let specs = tools.iter().map(|tool| tool.spec()).collect::<Vec<_>>();
+        let instructions = crate::channels::build_tool_instructions_from_specs(&specs);
 
-        assert!(instructions.contains("## Tool Use Protocol"));
+        assert!(instructions.contains("Tool Use Protocol"));
         assert!(instructions.contains("<tool_call>"));
         assert!(instructions.contains("shell"));
         assert!(instructions.contains("file_read"));
@@ -7023,14 +6968,14 @@ Done."#;
     #[test]
     fn parse_tool_call_value_accepts_top_level_parameters_alias() {
         let value = serde_json::json!({
-            "name": "schedule",
-            "parameters": {"action": "create", "message": "test"}
+            "name": "shell",
+            "parameters": {"command": "echo test"}
         });
         let result = parse_tool_call_value(&value).expect("tool call should parse");
-        assert_eq!(result.name, "schedule");
+        assert_eq!(result.name, "shell");
         assert_eq!(
-            result.arguments.get("action").and_then(|v| v.as_str()),
-            Some("create")
+            result.arguments.get("command").and_then(|v| v.as_str()),
+            Some("echo test")
         );
     }
 
@@ -7416,29 +7361,31 @@ Let me check the result."#;
         assert_eq!(history[1].content, "new msg");
     }
 
-    /// When `build_system_prompt_with_mode` is called with `native_tools = true`,
-    /// the output must contain ZERO XML protocol artifacts. In the native path
-    /// `build_tool_instructions` is never called, so the system prompt alone
-    /// must be clean of XML tool-call protocol.
     #[test]
     fn native_tools_system_prompt_contains_zero_xml() {
-        use crate::channels::build_system_prompt_with_mode;
-
-        let tool_summaries: Vec<(&str, &str)> = vec![
-            ("shell", "Execute shell commands"),
-            ("file_read", "Read files"),
+        let tool_specs = vec![
+            crate::tools::ToolSpec {
+                name: "shell".to_string(),
+                description: "Execute shell commands".to_string(),
+                parameters: serde_json::json!({}),
+            },
+            crate::tools::ToolSpec {
+                name: "file_read".to_string(),
+                description: "Read files".to_string(),
+                parameters: serde_json::json!({}),
+            },
         ];
 
-        let system_prompt = build_system_prompt_with_mode(
+        let system_prompt = crate::channels::build_system_prompt_with_mode(
             std::path::Path::new("/tmp"),
-            "test-model",
-            &tool_summaries,
+            &tool_specs,
             &[],  // no skills
             None, // no identity config
             None, // no bootstrap_max_chars
             true, // native_tools
             crate::config::SkillsPromptInjectionMode::Full,
             false,
+            None,
             None,
             None,
         );

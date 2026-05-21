@@ -23,17 +23,7 @@ impl Tool for CalculatorTool {
     }
 
     fn description(&self) -> &str {
-        "Perform arithmetic, statistical, and quantitative calculations. Supports 27 functions for any numeric computation."
-    }
-
-    fn prompt_hint(&self) -> Option<&str> {
-        Some(
-            "Perform math calculations. Use when: any numeric computation is needed. Don't use when: the answer is trivially obvious.",
-        )
-    }
-
-    fn prompt_hint_compact(&self) -> &str {
-        "Perform math calculations."
+        "Perform arithmetic, statistical, and quantitative calculations. Supports 27 functions for any numeric computation. Use when: any numeric computation is needed. Don't use when: the answer is trivially obvious."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {

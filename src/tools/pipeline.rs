@@ -229,18 +229,8 @@ impl Tool for PipelineTool {
 
     fn description(&self) -> &str {
         "Execute a multi-step tool pipeline in a single call. Steps run sequentially by default with result interpolation \
-        (use {{step[N].result}} to reference prior outputs), or in parallel when 'parallel: true' is set. \
+         (use {{step[N].result}} to reference prior outputs), or in parallel when 'parallel: true' is set. \
          Consider using bg_run for long-running operations that don't require interpolation."
-    }
-
-    fn prompt_hint(&self) -> Option<&str> {
-        Some(
-            "Run multiple tool steps in a single call. Use when: chaining dependent tool calls or batching independent steps. Don't use when: a single tool call suffices.",
-        )
-    }
-
-    fn prompt_hint_compact(&self) -> &str {
-        "Run multiple tool steps in a single call."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {

@@ -25,8 +25,6 @@ pub enum DeviceRuntime {
     Arduino,
     /// STM32 / probe-rs based flashing and debugging (future).
     Nucleus,
-    /// Linux / Raspberry Pi — ssh/shell execution (future).
-    Linux,
 }
 
 impl DeviceRuntime {
@@ -47,7 +45,6 @@ impl std::fmt::Display for DeviceRuntime {
             Self::CircuitPython => write!(f, "CircuitPython"),
             Self::Arduino => write!(f, "Arduino"),
             Self::Nucleus => write!(f, "Nucleus"),
-            Self::Linux => write!(f, "Linux"),
         }
     }
 }
@@ -105,12 +102,6 @@ impl std::fmt::Display for DeviceKind {
 #[derive(Debug, Clone, Default)]
 pub struct DeviceCapabilities {
     pub gpio: bool,
-    pub i2c: bool,
-    pub spi: bool,
-    pub swd: bool,
-    pub uart: bool,
-    pub adc: bool,
-    pub pwm: bool,
 }
 
 /// A discovered and registered hardware device.
@@ -133,8 +124,6 @@ pub struct Device {
     pub device_path: Option<String>,
     /// Architecture description (e.g. `"ARM Cortex-M0+"`).
     pub architecture: Option<String>,
-    /// Firmware identifier reported by device during ping handshake.
-    pub firmware: Option<String>,
 }
 
 impl Device {
@@ -219,7 +208,6 @@ impl DeviceRegistry {
             pid,
             device_path,
             architecture,
-            firmware: None,
         });
 
         self.devices.insert(
@@ -672,12 +660,6 @@ mod tests {
     fn device_capabilities_default_all_false() {
         let caps = DeviceCapabilities::default();
         assert!(!caps.gpio);
-        assert!(!caps.i2c);
-        assert!(!caps.spi);
-        assert!(!caps.swd);
-        assert!(!caps.uart);
-        assert!(!caps.adc);
-        assert!(!caps.pwm);
     }
 
     #[test]

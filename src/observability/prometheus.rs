@@ -3,6 +3,7 @@ use anyhow::Context as _;
 use prometheus::{
     Encoder, GaugeVec, Histogram, HistogramOpts, HistogramVec, IntCounterVec, Registry, TextEncoder,
 };
+use std::sync::Arc;
 
 /// Prometheus-backed observer — exposes metrics for scraping via `/metrics`.
 pub struct PrometheusObserver {
@@ -323,6 +324,50 @@ impl Observer for PrometheusObserver {
                     .set(*d as f64);
             }
         }
+    }
+
+    fn name(&self) -> &str {
+        "prometheus"
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
+
+/// Process-wide handle to the singleton `PrometheusObserver`.
+///
+/// Every daemon component (gateway, channels, heartbeat worker, agent loop)
+/// constructs its observer independently. Wrapping the shared `Arc` here lets
+/// each call site keep handing out a `Box<dyn Observer>` while every event
+/// lands in the same `Registry` — which is what `/metrics` actually scrapes.
+pub struct SharedPrometheusObserver {
+    inner: Arc<PrometheusObserver>,
+}
+
+impl SharedPrometheusObserver {
+    pub fn new(inner: Arc<PrometheusObserver>) -> Self {
+        Self { inner }
+    }
+
+    /// Borrow the underlying `PrometheusObserver` so `/metrics` can encode
+    /// the shared registry after descending through the wrapper chain.
+    pub fn inner(&self) -> &PrometheusObserver {
+        self.inner.as_ref()
+    }
+}
+
+impl Observer for SharedPrometheusObserver {
+    fn record_event(&self, event: &ObserverEvent) {
+        self.inner.record_event(event);
+    }
+
+    fn record_metric(&self, metric: &ObserverMetric) {
+        self.inner.record_metric(metric);
+    }
+
+    fn flush(&self) {
+        self.inner.flush();
     }
 
     fn name(&self) -> &str {

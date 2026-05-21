@@ -545,7 +545,6 @@ export const CONFIG_SECTIONS: SectionDef[] = [
       { key: 'enabled', label: 'Enabled', type: 'toggle', defaultValue: false },
       { key: 'schedule', label: 'Schedule (cron)', type: 'text', defaultValue: '0 3 * * *', description: 'Default: 0 3 * * * (3:00 AM daily)' },
       { key: 'timezone', label: 'Timezone', type: 'text', description: 'e.g. America/New_York (empty = system local)' },
-      { key: 'light_context', label: 'Light Context', type: 'toggle', defaultValue: false, description: 'Run with compact context and skip bootstrap files' },
       { key: 'prompt_file', label: 'Prompt File', type: 'text', description: 'Custom prompt file relative to workspace (default: CONSOLIDATION.md)' },
       { key: 'delivery_channel', label: 'Delivery Channel', type: 'text', description: 'e.g. slack, discord — post summary after each run' },
       { key: 'delivery_to', label: 'Delivery Recipient', type: 'text', description: 'Channel ID (auto-resolved from channel config if empty)' },
@@ -628,22 +627,6 @@ export const CONFIG_SECTIONS: SectionDef[] = [
       { key: 'app_token', label: 'App Token', type: 'password', sensitive: true, description: 'e.g. xapp-1-...' },
       { key: 'channel_id', label: 'Channel ID', type: 'text', description: 'e.g. C0123456789' },
       { key: 'allowed_users', label: 'Allowed Users', type: 'tag-list', tagPlaceholder: 'e.g. U0123456789' },
-    ],
-  },
-
-  // ── GitHub ───────────────────────────────────────────────────────
-  {
-    path: 'channels_config.github',
-    category: 'channels',
-    title: 'GitHub',
-    description: 'GitHub issues & PR comments via webhook + REST API',
-    icon: Github,
-    defaultCollapsed: true,
-    fields: [
-      { key: 'access_token', label: 'Access Token', type: 'password', sensitive: true, description: 'Fine-grained PAT or installation token with issues:write / pull_requests:write' },
-      { key: 'webhook_secret', label: 'Webhook Secret', type: 'password', sensitive: true, description: 'Used to verify X-Hub-Signature-256' },
-      { key: 'api_base_url', label: 'API Base URL', type: 'text', description: 'For GHES. Defaults to https://api.github.com' },
-      { key: 'allowed_repos', label: 'Allowed Repos', type: 'tag-list', tagPlaceholder: 'e.g. owner/repo or owner/*' },
     ],
   },
 
@@ -873,6 +856,24 @@ export const CONFIG_SECTIONS: SectionDef[] = [
       { key: 'jira_allowed_actions', label: 'Jira Allowed Actions', type: 'tag-list', tagPlaceholder: 'e.g. get_ticket', description: 'Default: get_ticket. Options: get_ticket, search_tickets, comment_ticket, watch_ticket, unwatch_ticket, list_projects, myself' },
       { key: 'confluence_enabled', label: 'Confluence Enabled', type: 'toggle', defaultValue: false },
       { key: 'confluence_allowed_actions', label: 'Confluence Allowed Actions', type: 'tag-list', tagPlaceholder: 'e.g. get_page', description: 'Default: get_page, search_pages. Options: get_page, search_pages, list_spaces, get_space' },
+    ],
+  },
+
+  // ── GitHub ─────────────────────────────────────────────────────────
+  {
+    path: 'github',
+    category: 'tools',
+    title: 'GitHub',
+    description: 'Read/write GitHub issues and PRs as an agent tool',
+    icon: Github,
+    defaultCollapsed: true,
+    fields: [
+      { key: 'enabled', label: 'Enabled', type: 'toggle', defaultValue: false },
+      { key: 'access_token', label: 'Access Token', type: 'password', sensitive: true, description: 'Fine-grained PAT or installation token. Falls back to ZEROCLAW_GITHUB_TOOL_TOKEN, then GITHUB_TOKEN, when blank.' },
+      { key: 'api_base_url', label: 'API Base URL', type: 'text', description: 'For GHES. Defaults to https://api.github.com' },
+      { key: 'allowed_repos', label: 'Allowed Repos', type: 'tag-list', tagPlaceholder: 'e.g. owner/repo or owner/*' },
+      { key: 'allowed_actions', label: 'Allowed Actions', type: 'tag-list', tagPlaceholder: 'e.g. get_issue', description: 'Options: get_issue, get_pr, list_comments, list_pr_review_comments, add_comment, create_pull_request, close_pr, merge_pr, request_review' },
+      { key: 'timeout_secs', label: 'Timeout (s)', type: 'number', min: 1, defaultValue: 30, description: 'Default: 30 (request timeout)' },
     ],
   },
 

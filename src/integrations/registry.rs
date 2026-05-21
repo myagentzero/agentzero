@@ -53,15 +53,13 @@ pub fn all_integrations() -> Vec<IntegrationEntry> {
                 }
             },
         },
-
         // ── AI Models ───────────────────────────────────────────
         IntegrationEntry {
             name: "Custom",
             description: "Custom LLM with API URL and key",
             category: IntegrationCategory::AiModel,
             status_fn: |c| {
-                if c
-                    .default_provider
+                if c.default_provider
                     .as_deref()
                     .is_some_and(|provider| provider.starts_with("custom"))
                     && c.api_key.is_some()
@@ -147,14 +145,13 @@ pub fn all_integrations() -> Vec<IntegrationEntry> {
                 }
             },
         },
-
         // ── Productivity ────────────────────────────────────────
         IntegrationEntry {
             name: "GitHub",
             description: "Code, issues, PRs",
             category: IntegrationCategory::Productivity,
             status_fn: |c| {
-                if c.channels_config.github.is_some() {
+                if c.github.enabled {
                     IntegrationStatus::Active
                 } else {
                     IntegrationStatus::Available

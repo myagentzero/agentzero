@@ -2,9 +2,6 @@
 //!
 //! Implementations:
 //! - `serial::HardwareSerialTransport` — lazy-open newline-delimited JSON over USB CDC (Phase 2)
-//! - `SWDTransport` — memory read/write via probe-rs (Phase 7)
-//! - `UF2Transport` — firmware flashing via UF2 mass storage (Phase 6)
-//! - `NativeTransport` — direct Linux GPIO/I2C/SPI via rppal/sysfs (later)
 
 use super::protocol::{ZcCommand, ZcResponse};
 use async_trait::async_trait;
@@ -35,28 +32,16 @@ pub enum TransportError {
 }
 
 /// Transport kind discriminator.
-///
-/// Used for capability matching — some tools require a specific transport
-/// (e.g. `pico_flash` requires UF2, `memory_read` prefers SWD).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TransportKind {
     /// Newline-delimited JSON over USB CDC serial.
     Serial,
-    /// SWD debug probe (probe-rs).
-    Swd,
-    /// UF2 mass storage firmware flashing.
-    Uf2,
-    /// Direct Linux GPIO/I2C/SPI (rppal, sysfs).
-    Native,
 }
 
 impl std::fmt::Display for TransportKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Serial => write!(f, "serial"),
-            Self::Swd => write!(f, "swd"),
-            Self::Uf2 => write!(f, "uf2"),
-            Self::Native => write!(f, "native"),
         }
     }
 }
@@ -84,9 +69,6 @@ mod tests {
     #[test]
     fn transport_kind_display() {
         assert_eq!(TransportKind::Serial.to_string(), "serial");
-        assert_eq!(TransportKind::Swd.to_string(), "swd");
-        assert_eq!(TransportKind::Uf2.to_string(), "uf2");
-        assert_eq!(TransportKind::Native.to_string(), "native");
     }
 
     #[test]
@@ -107,6 +89,5 @@ mod tests {
     #[test]
     fn transport_kind_equality() {
         assert_eq!(TransportKind::Serial, TransportKind::Serial);
-        assert_ne!(TransportKind::Serial, TransportKind::Swd);
     }
 }

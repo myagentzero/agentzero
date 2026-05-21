@@ -485,9 +485,7 @@ impl Memory for SqliteMemory {
             Ok(Some(emb)) => Some(vector::vec_to_bytes(&emb)),
             Ok(None) => None,
             Err(e) => {
-                tracing::warn!(
-                    "embedding failed for key '{key}'; storing without vector: {e}"
-                );
+                tracing::warn!("embedding failed for key '{key}'; storing without vector: {e}");
                 None
             }
         };

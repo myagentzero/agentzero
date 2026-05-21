@@ -3242,7 +3242,6 @@ mod tests {
         assert!(summary.contains(SAFETY_REMINDER));
     }
 
-
     // ══════════════════════════════════════════════════════════
     // SECURITY CHECKLIST TESTS
     // Checklist: gateway not public, pairing required,

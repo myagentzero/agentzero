@@ -296,9 +296,16 @@ pub async fn handle_api_cron_list(
                         "id": job.id,
                         "name": job.name,
                         "command": job.command,
+                        "expression": job.expression,
+                        "prompt": job.prompt,
+                        "job_type": <&'static str>::from(job.job_type.clone()),
+                        "session_target": job.session_target.as_str(),
+                        "model": job.model,
+                        "created_at": job.created_at.to_rfc3339(),
                         "next_run": job.next_run.to_rfc3339(),
                         "last_run": job.last_run.map(|t| t.to_rfc3339()),
                         "last_status": job.last_status,
+                        "last_output": job.last_output,
                         "enabled": job.enabled,
                         "light_context": job.light_context,
                     })
@@ -1009,14 +1016,12 @@ pub async fn handle_api_cli_tools(
         return e.into_response();
     }
 
-    let tools = tokio::task::spawn_blocking(|| {
-        crate::util::discover_cli_tools(&[], &[])
-    })
-    .await
-    .unwrap_or_else(|e| {
-        tracing::error!("CLI tool discovery task panicked: {}", e);
-        Vec::new()
-    });
+    let tools = tokio::task::spawn_blocking(|| crate::util::discover_cli_tools(&[], &[]))
+        .await
+        .unwrap_or_else(|e| {
+            tracing::error!("CLI tool discovery task panicked: {}", e);
+            Vec::new()
+        });
 
     Json(serde_json::json!({"cli_tools": tools})).into_response()
 }
@@ -1200,6 +1205,7 @@ fn mask_sensitive_fields(config: &crate::config::Config) -> crate::config::Confi
     mask_required_secret(&mut masked.atlassian.base_url);
     mask_required_secret(&mut masked.elasticsearch.auth);
     mask_required_secret(&mut masked.elasticsearch.endpoint);
+    mask_required_secret(&mut masked.github.access_token);
 
     if let Some(discord) = masked.channels_config.discord.as_mut() {
         mask_required_secret(&mut discord.bot_token);
@@ -1210,10 +1216,6 @@ fn mask_sensitive_fields(config: &crate::config::Config) -> crate::config::Confi
     }
     if let Some(webhook) = masked.channels_config.webhook.as_mut() {
         mask_optional_secret(&mut webhook.secret);
-    }
-    if let Some(github) = masked.channels_config.github.as_mut() {
-        mask_required_secret(&mut github.access_token);
-        mask_optional_secret(&mut github.webhook_secret);
     }
     if let Some(email) = masked.channels_config.email.as_mut() {
         mask_required_secret(&mut email.password);
@@ -1288,11 +1290,27 @@ fn restore_masked_sensitive_fields(
         &current.gateway.paired_tokens,
     );
     restore_required_secret(&mut incoming.notion.api_key, &current.notion.api_key);
-    restore_required_secret(&mut incoming.atlassian.api_token, &current.atlassian.api_token);
+    restore_required_secret(
+        &mut incoming.atlassian.api_token,
+        &current.atlassian.api_token,
+    );
     restore_required_secret(&mut incoming.atlassian.email, &current.atlassian.email);
-    restore_required_secret(&mut incoming.atlassian.base_url, &current.atlassian.base_url);
-    restore_required_secret(&mut incoming.elasticsearch.auth, &current.elasticsearch.auth);
-    restore_required_secret(&mut incoming.elasticsearch.endpoint, &current.elasticsearch.endpoint);
+    restore_required_secret(
+        &mut incoming.atlassian.base_url,
+        &current.atlassian.base_url,
+    );
+    restore_required_secret(
+        &mut incoming.elasticsearch.auth,
+        &current.elasticsearch.auth,
+    );
+    restore_required_secret(
+        &mut incoming.elasticsearch.endpoint,
+        &current.elasticsearch.endpoint,
+    );
+    restore_required_secret(
+        &mut incoming.github.access_token,
+        &current.github.access_token,
+    );
 
     if let (Some(incoming_ch), Some(current_ch)) = (
         incoming.channels_config.discord.as_mut(),
@@ -1312,13 +1330,6 @@ fn restore_masked_sensitive_fields(
         current.channels_config.webhook.as_ref(),
     ) {
         restore_optional_secret(&mut incoming_ch.secret, &current_ch.secret);
-    }
-    if let (Some(incoming_ch), Some(current_ch)) = (
-        incoming.channels_config.github.as_mut(),
-        current.channels_config.github.as_ref(),
-    ) {
-        restore_required_secret(&mut incoming_ch.access_token, &current_ch.access_token);
-        restore_optional_secret(&mut incoming_ch.webhook_secret, &current_ch.webhook_secret);
     }
     if let (Some(incoming_ch), Some(current_ch)) = (
         incoming.channels_config.email.as_mut(),

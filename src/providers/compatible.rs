@@ -439,15 +439,16 @@ impl OpenAiCompatibleProvider {
         }
     }
 
-    fn tool_specs_to_openai_format(tools: &[crate::tools::ToolSpec], model: &str) -> Vec<serde_json::Value> {
+    fn tool_specs_to_openai_format(
+        tools: &[crate::tools::ToolSpec],
+        model: &str,
+    ) -> Vec<serde_json::Value> {
         let strategy = Self::select_cleaning_strategy(model);
         tools
             .iter()
             .map(|tool| {
-                let cleaned_params = crate::tools::SchemaCleanr::clean(
-                    tool.parameters.clone(),
-                    strategy,
-                );
+                let cleaned_params =
+                    crate::tools::SchemaCleanr::clean(tool.parameters.clone(), strategy);
                 serde_json::json!({
                     "type": "function",
                     "function": {
@@ -1060,8 +1061,7 @@ fn build_responses_prompt(
 
         if message.role == "assistant" {
             if let Ok(value) = serde_json::from_str::<serde_json::Value>(&message.content) {
-                if let Some(tool_calls) =
-                    OpenAiCompatibleProvider::parse_history_tool_calls(&value)
+                if let Some(tool_calls) = OpenAiCompatibleProvider::parse_history_tool_calls(&value)
                 {
                     let text = value
                         .get("content")
@@ -1871,7 +1871,10 @@ impl OpenAiCompatibleProvider {
     fn select_cleaning_strategy(model: &str) -> crate::tools::CleaningStrategy {
         let model_lower = model.to_lowercase();
 
-        if model_lower.starts_with("gpt-") || model_lower.starts_with("o1-") || model_lower.starts_with("o3-") {
+        if model_lower.starts_with("gpt-")
+            || model_lower.starts_with("o1-")
+            || model_lower.starts_with("o3-")
+        {
             crate::tools::CleaningStrategy::OpenAI
         } else if model_lower.starts_with("gemini-") || model_lower.contains("gemini") {
             crate::tools::CleaningStrategy::Gemini
@@ -1891,10 +1894,8 @@ impl OpenAiCompatibleProvider {
             items
                 .iter()
                 .map(|tool| {
-                    let cleaned_params = crate::tools::SchemaCleanr::clean(
-                        tool.parameters.clone(),
-                        strategy,
-                    );
+                    let cleaned_params =
+                        crate::tools::SchemaCleanr::clean(tool.parameters.clone(), strategy);
                     serde_json::json!({
                         "type": "function",
                         "function": {
@@ -2444,7 +2445,10 @@ impl Provider for OpenAiCompatibleProvider {
             .await
         {
             Ok(ChatSendResult::Success(response)) => response,
-            Ok(ChatSendResult::NonSuccess { status, body: error }) => {
+            Ok(ChatSendResult::NonSuccess {
+                status,
+                body: error,
+            }) => {
                 let sanitized = super::sanitize_api_error(&error);
 
                 if status == reqwest::StatusCode::NOT_FOUND && self.supports_responses_fallback {
@@ -2568,7 +2572,10 @@ impl Provider for OpenAiCompatibleProvider {
             .await
         {
             Ok(ChatSendResult::Success(response)) => response,
-            Ok(ChatSendResult::NonSuccess { status, body: error }) => {
+            Ok(ChatSendResult::NonSuccess {
+                status,
+                body: error,
+            }) => {
                 // Mirror chat_with_system: 404 may mean this provider uses the Responses API
                 if status == reqwest::StatusCode::NOT_FOUND && self.supports_responses_fallback {
                     tracing::warn!(
@@ -2708,7 +2715,10 @@ impl Provider for OpenAiCompatibleProvider {
             .await
         {
             Ok(ChatSendResult::Success(response)) => response,
-            Ok(ChatSendResult::NonSuccess { status, body: error }) => {
+            Ok(ChatSendResult::NonSuccess {
+                status,
+                body: error,
+            }) => {
                 let sanitized = super::sanitize_api_error(&error);
 
                 if Self::is_native_tool_schema_unsupported(status, &error) {
@@ -2873,7 +2883,10 @@ impl Provider for OpenAiCompatibleProvider {
             .await
         {
             Ok(ChatSendResult::Success(response)) => response,
-            Ok(ChatSendResult::NonSuccess { status, body: error }) => {
+            Ok(ChatSendResult::NonSuccess {
+                status,
+                body: error,
+            }) => {
                 let sanitized = super::sanitize_api_error(&error);
 
                 if Self::is_native_tool_schema_unsupported(status, &error) {
@@ -3769,12 +3782,7 @@ mod tests {
         assert_eq!(json[2]["type"], "function_call");
         assert_eq!(json[2]["call_id"], "call_abc");
         assert_eq!(json[2]["name"], "browser");
-        assert!(
-            json[2]["arguments"]
-                .as_str()
-                .unwrap()
-                .contains("get_text")
-        );
+        assert!(json[2]["arguments"].as_str().unwrap().contains("get_text"));
         assert!(json[2].get("role").is_none());
 
         assert_eq!(json[3]["type"], "function_call_output");
@@ -3871,16 +3879,28 @@ mod tests {
         ];
 
         let (instructions_full, input_full) = build_responses_prompt(&messages, None);
-        let (instructions_chained, input_chained) = build_responses_prompt(&messages, Some("response_123"));
+        let (instructions_chained, input_chained) =
+            build_responses_prompt(&messages, Some("response_123"));
 
         // Full history should include all messages
-        assert_eq!(input_full.len(), 3, "full context should include all non-system messages");
+        assert_eq!(
+            input_full.len(),
+            3,
+            "full context should include all non-system messages"
+        );
 
         // Chaining should only include the last user message (no prior context)
-        assert_eq!(input_chained.len(), 1, "chained context should only include last user message");
+        assert_eq!(
+            input_chained.len(),
+            1,
+            "chained context should only include last user message"
+        );
 
         // Both should preserve system instructions
-        assert_eq!(instructions_chained.as_deref(), instructions_full.as_deref());
+        assert_eq!(
+            instructions_chained.as_deref(),
+            instructions_full.as_deref()
+        );
         assert_eq!(instructions_chained.as_deref(), Some("system context"));
     }
 

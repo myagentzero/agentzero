@@ -34,18 +34,6 @@ impl Tool for ReactionTool {
          the platform message ID, and the emoji (Unicode character or platform shortcode)."
     }
 
-    fn prompt_hint(&self) -> Option<&str> {
-        Some(
-            "Add or remove emoji reactions on messages in active channels (Slack, Discord, GitHub). \
-             Use when: acknowledging a message non-verbally, marking status (✅ done, 👀 reviewing, ⏳ in progress), \
-             showing quick feedback without sending a full reply."
-        )
-    }
-
-    fn prompt_hint_compact(&self) -> &str {
-        "Add or remove emoji reactions on messages in active channels."
-    }
-
     fn parameters_schema(&self) -> serde_json::Value {
         json!({
             "type": "object",
@@ -182,8 +170,8 @@ impl Tool for ReactionTool {
 mod tests {
     use super::*;
     use crate::channels::traits::{Channel, ChannelMessage, SendMessage};
-    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Mutex;
+    use std::sync::atomic::{AtomicBool, Ordering};
 
     // Serialise tests that mutate the global live_channels registry.
     static REGISTRY_LOCK: std::sync::LazyLock<Mutex<()>> =

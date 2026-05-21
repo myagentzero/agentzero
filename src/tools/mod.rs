@@ -35,6 +35,7 @@ pub mod file_read;
 pub mod file_remove;
 pub mod file_write;
 pub mod git_operations;
+pub mod github_tool;
 pub mod glob_search;
 #[cfg(feature = "hardware")]
 pub mod hardware_board_info;
@@ -89,6 +90,7 @@ pub use file_read::FileReadTool;
 pub use file_remove::FileRemoveTool;
 pub use file_write::FileWriteTool;
 pub use git_operations::GitOperationsTool;
+pub use github_tool::GitHubTool;
 pub use glob_search::GlobSearchTool;
 #[cfg(feature = "hardware")]
 pub use hardware_board_info::HardwareBoardInfoTool;
@@ -559,6 +561,33 @@ pub fn all_tools_with_runtime(
                 Ok(tool) => tool_arcs.push(Arc::new(tool)),
                 Err(e) => tracing::warn!("Failed to build Elasticsearch tool: {e}"),
             }
+        }
+    }
+
+    // GitHub API tool (conditionally registered)
+    if root_config.github.enabled {
+        let token = if root_config.github.access_token.trim().is_empty() {
+            std::env::var("ZEROCLAW_GITHUB_TOOL_TOKEN")
+                .ok()
+                .or_else(|| std::env::var("GITHUB_TOKEN").ok())
+                .unwrap_or_default()
+        } else {
+            root_config.github.access_token.trim().to_string()
+        };
+
+        if token.trim().is_empty() {
+            tracing::warn!(
+                "GitHub tool enabled but no access_token configured (set [github].access_token, ZEROCLAW_GITHUB_TOOL_TOKEN, or GITHUB_TOKEN)"
+            );
+        } else {
+            tool_arcs.push(Arc::new(GitHubTool::new(
+                token,
+                root_config.github.api_base_url.clone(),
+                root_config.github.allowed_repos.clone(),
+                root_config.github.allowed_actions.clone(),
+                security.clone(),
+                root_config.github.timeout_secs,
+            )));
         }
     }
 

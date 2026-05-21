@@ -25,15 +25,13 @@ impl FileEditTool {
 
 fn sensitive_file_edit_block_message(path: &str) -> String {
     format!(
-        "Editing sensitive file '{path}' is blocked by policy. \
-Set [autonomy].allow_sensitive_file_writes = true only when strictly necessary."
+        "Editing sensitive file '{path}' is blocked by policy. Set [autonomy].allow_sensitive_file_writes = true only when strictly necessary."
     )
 }
 
 fn hard_link_edit_block_message(path: &Path) -> String {
     format!(
-        "Editing multiply-linked file '{}' is blocked by policy \
-(potential hard-link escape).",
+        "Editing multiply-linked file '{}' is blocked by policy (potential hard-link escape).",
         path.display()
     )
 }
@@ -208,18 +206,7 @@ impl Tool for FileEditTool {
     }
 
     fn description(&self) -> &str {
-        "Edit a file by replacing an exact string match with new content"
-    }
-
-    fn prompt_hint(&self) -> Option<&str> {
-        Some(
-            "Edit a file by exact string replacement. Use when: making targeted changes to existing files. \
-             Don't use when: creating new files (use file_write) or making large rewrites.",
-        )
-    }
-
-    fn prompt_hint_compact(&self) -> &str {
-        "Edit a file by exact string replacement."
+        "Edit a file by exact string replacement. Use when: making targeted changes to existing files. Don't use when: creating new files (use file_write)."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {

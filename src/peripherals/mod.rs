@@ -9,6 +9,9 @@ pub mod traits;
 pub mod serial;
 
 #[cfg(feature = "hardware")]
+pub mod uf2;
+
+#[cfg(feature = "hardware")]
 pub mod arduino_flash;
 #[cfg(feature = "hardware")]
 pub mod arduino_upload;
@@ -106,7 +109,7 @@ pub async fn handle_command(cmd: crate::PeripheralCommands, config: &Config) -> 
                 .ok_or_else(|| anyhow::anyhow!(
                     "No port specified. Use --port /dev/cu.usbmodem* or add arduino-uno to config.toml"
                 ))?;
-            arduino_flash::flash_arduino_firmware(&port_str)?;
+            arduino_flash::flash_arduino_firmware(&port_str, &config.workspace_dir)?;
         }
         #[cfg(not(feature = "hardware"))]
         crate::PeripheralCommands::Flash { .. } => {
@@ -115,7 +118,7 @@ pub async fn handle_command(cmd: crate::PeripheralCommands, config: &Config) -> 
         }
         #[cfg(feature = "hardware")]
         crate::PeripheralCommands::SetupUnoQ { host } => {
-            uno_q_setup::setup_uno_q_bridge(host.as_deref())?;
+            uno_q_setup::setup_uno_q_bridge(host.as_deref(), &config.workspace_dir)?;
         }
         #[cfg(not(feature = "hardware"))]
         crate::PeripheralCommands::SetupUnoQ { .. } => {

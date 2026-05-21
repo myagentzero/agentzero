@@ -49,19 +49,7 @@ impl Tool for AskUserTool {
     }
 
     fn description(&self) -> &str {
-        "Ask the user a question and wait for their response. \
-         Sends the question to a messaging channel and blocks until the user replies \
-         or the timeout expires. Optionally provide choices for structured responses."
-    }
-
-    fn prompt_hint(&self) -> Option<&str> {
-        Some(
-            "Ask the user a question and wait for a reply. Use when: you need clarification, confirmation, or input from the user. Don't use when: the answer is already in context.",
-        )
-    }
-
-    fn prompt_hint_compact(&self) -> &str {
-        "Ask the user a question and wait for a reply."
+        "Ask the user a question and wait for a reply. Use when: you need clarification, confirmation, or input from the user. Don't use when: the answer is already in context."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {
@@ -667,8 +655,7 @@ mod tests {
             ),
             (
                 "slack",
-                Arc::new(RespondingChannel::new("slack", "T_TG", "from slack"))
-                    as Arc<dyn Channel>,
+                Arc::new(RespondingChannel::new("slack", "T_TG", "from slack")) as Arc<dyn Channel>,
             ),
         ]);
         let config = crate::config::AskUserConfig {

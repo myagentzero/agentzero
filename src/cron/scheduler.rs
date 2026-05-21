@@ -150,6 +150,20 @@ async fn execute_and_persist_job(
     (job.id.clone(), success, output)
 }
 
+/// Build the per-run Config used when invoking `agent::run` for a cron job.
+/// Cron prompts are job templates, not user conversation — `skip_input_autosave`
+/// keeps them out of Conversation memory so the response (which IS valuable)
+/// can still be auto-saved without the prompt being repeated every run.
+fn build_agent_run_config(config: &Config, job: &CronJob) -> Config {
+    let mut run_config = config.clone();
+    run_config.skip_input_autosave = true;
+    if job.light_context {
+        run_config.agent.compact_context = true;
+        run_config.skip_bootstrap_files = true;
+    }
+    run_config
+}
+
 async fn run_agent_job(
     config: &Config,
     security: &SecurityPolicy,
@@ -180,12 +194,7 @@ async fn run_agent_job(
     let prefixed_prompt = format!("[cron:{} {name}] {prompt}", job.id);
     let model_override = job.model.clone();
 
-    let mut run_config = config.clone();
-
-    if job.light_context {
-        run_config.agent.compact_context = true;
-        run_config.skip_bootstrap_files = true;
-    }
+    let run_config = build_agent_run_config(config, job);
 
     let run_result = match job.session_target {
         SessionTarget::Main | SessionTarget::Isolated => {
@@ -563,6 +572,52 @@ mod tests {
 
     fn unique_component(prefix: &str) -> String {
         format!("{prefix}-{}", uuid::Uuid::new_v4())
+    }
+
+    #[tokio::test]
+    async fn build_agent_run_config_sets_skip_input_autosave() {
+        let tmp = TempDir::new().unwrap();
+        let config = test_config(&tmp).await;
+        let mut job = test_job("echo unused");
+        job.job_type = JobType::Agent;
+
+        let run_config = build_agent_run_config(&config, &job);
+
+        assert!(
+            run_config.skip_input_autosave,
+            "cron-driven agent runs must skip input autosave so the prompt is not stored every run"
+        );
+        assert!(
+            !config.skip_input_autosave,
+            "source config must remain unchanged"
+        );
+    }
+
+    #[tokio::test]
+    async fn build_agent_run_config_applies_light_context() {
+        let tmp = TempDir::new().unwrap();
+        let config = test_config(&tmp).await;
+        let mut job = test_job("echo unused");
+        job.job_type = JobType::Agent;
+        job.light_context = true;
+
+        let run_config = build_agent_run_config(&config, &job);
+
+        assert!(run_config.skip_input_autosave);
+        assert!(run_config.skip_bootstrap_files);
+        assert!(run_config.agent.compact_context);
+    }
+
+    #[tokio::test]
+    async fn build_agent_run_config_default_leaves_bootstrap_alone() {
+        let tmp = TempDir::new().unwrap();
+        let config = test_config(&tmp).await;
+        let mut job = test_job("echo unused");
+        job.job_type = JobType::Agent;
+
+        let run_config = build_agent_run_config(&config, &job);
+
+        assert!(!run_config.skip_bootstrap_files);
     }
 
     #[tokio::test]

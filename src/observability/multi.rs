@@ -10,6 +10,31 @@ impl MultiObserver {
     pub fn new(observers: Vec<Box<dyn Observer>>) -> Self {
         Self { observers }
     }
+
+    /// Find the first observer that can be downcast to the given type.
+    /// Searches recursively through nested MultiObservers.
+    pub fn find_observer<T: 'static>(&self) -> Option<&T> {
+        for obs in &self.observers {
+            // Try direct downcast
+            if let Some(found) = obs.as_any().downcast_ref::<T>() {
+                return Some(found);
+            }
+            // If it's another MultiObserver, search recursively
+            if let Some(multi) = obs.as_any().downcast_ref::<MultiObserver>() {
+                if let Some(found) = multi.find_observer::<T>() {
+                    return Some(found);
+                }
+            }
+        }
+        None
+    }
+
+    /// Borrow each child observer so callers can recurse through arbitrary
+    /// wrapper layers (e.g. `SharedPrometheusObserver`) that
+    /// `find_observer::<T>()` cannot peek through with a single downcast.
+    pub fn iter(&self) -> impl Iterator<Item = &dyn Observer> {
+        self.observers.iter().map(std::convert::AsRef::as_ref)
+    }
 }
 
 impl Observer for MultiObserver {

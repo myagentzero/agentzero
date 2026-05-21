@@ -10,11 +10,10 @@ pub use schema::{
     BrowserConfig, BuiltinHooksConfig, ChannelsConfig, ClassificationRule,
     CommandContextRuleAction, CommandContextRuleConfig, ComposioConfig, Config,
     ConsolidationConfig, CoordinationConfig, CostConfig, CronConfig, DEFAULT_MODEL_FALLBACK,
-    DelegateAgentConfig, DiscordConfig,
-    DockerRuntimeConfig, EconomicConfig, EconomicTokenPricing, EmbeddingRouteConfig, EstopConfig,
-    GatewayConfig, GroupReplyConfig, GroupReplyMode, HardwareConfig, HardwareTransport,
-    HeartbeatConfig, HooksConfig, HttpRequestConfig, HttpRequestCredentialProfile, IdentityConfig,
-    MemoryConfig, ModelRouteConfig, MultimodalConfig,
+    DelegateAgentConfig, DiscordConfig, DockerRuntimeConfig, EconomicConfig, EconomicTokenPricing,
+    EmbeddingRouteConfig, EstopConfig, GatewayConfig, GroupReplyConfig, GroupReplyMode,
+    HardwareConfig, HardwareTransport, HeartbeatConfig, HooksConfig, HttpRequestConfig,
+    HttpRequestCredentialProfile, IdentityConfig, MemoryConfig, ModelRouteConfig, MultimodalConfig,
     NonCliNaturalLanguageApprovalMode, NotionConfig, ObservabilityConfig, OtpChallengeDelivery,
     OtpConfig, OtpMethod, OutboundLeakGuardAction, OutboundLeakGuardConfig, PeripheralBoardConfig,
     PeripheralsConfig, PerplexityFilterConfig, PipelineConfig, PluginEntryConfig, PluginsConfig,
@@ -29,10 +28,6 @@ pub use schema::{
     build_runtime_proxy_client_with_timeouts, default_model_fallback_for_provider,
     resolve_default_model_id, runtime_proxy_config, set_runtime_proxy_config,
 };
-
-pub fn name_and_presence<T: traits::ChannelConfig>(channel: Option<&T>) -> (&'static str, bool) {
-    (T::name(), channel.is_some())
-}
 
 #[cfg(test)]
 mod tests {

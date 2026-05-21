@@ -1,32 +1,34 @@
 //! Deploy ZeroClaw Bridge app to Arduino Uno Q.
+//!
+//! Reads Bridge app from workspace/firmware/uno-q-bridge/ at runtime.
+//! If host is Some, scp from workspace and ssh to start.
+//! If host is None, assume we're ON the Uno Q — copy to local ArduinoApps and start.
 
 use anyhow::{Context, Result};
+use std::path::Path;
 use std::process::Command;
 
 const BRIDGE_APP_NAME: &str = "uno-q-bridge";
 
-/// Deploy the Bridge app. If host is Some, scp from repo and ssh to start.
-/// If host is None, assume we're ON the Uno Q — use embedded files and start.
-pub fn setup_uno_q_bridge(host: Option<&str>) -> Result<()> {
-    let bridge_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+/// Deploy the Bridge app from workspace. If host is Some, scp and start remotely.
+/// If host is None, copy to local ArduinoApps directory and start locally.
+pub fn setup_uno_q_bridge(host: Option<&str>, workspace_dir: &Path) -> Result<()> {
+    let bridge_dir = workspace_dir
         .join("firmware")
         .join("uno-q-bridge");
 
+    if !bridge_dir.exists() {
+        anyhow::bail!(
+            "Bridge app not found at {}\n\
+             Ensure firmware/uno-q-bridge exists in your workspace.",
+            bridge_dir.display()
+        );
+    }
+
     if let Some(h) = host {
-        if bridge_dir.exists() {
-            deploy_remote(h, &bridge_dir)?;
-        } else {
-            anyhow::bail!(
-                "Bridge app not found at {}. Run from zeroclaw repo root.",
-                bridge_dir.display()
-            );
-        }
+        deploy_remote(h, &bridge_dir)?;
     } else {
-        deploy_local(if bridge_dir.exists() {
-            Some(&bridge_dir)
-        } else {
-            None
-        })?;
+        deploy_local(&bridge_dir)?;
     }
     Ok(())
 }
@@ -81,20 +83,15 @@ fn deploy_remote(host: &str, bridge_dir: &std::path::Path) -> Result<()> {
     Ok(())
 }
 
-fn deploy_local(bridge_dir: Option<&std::path::Path>) -> Result<()> {
+fn deploy_local(bridge_dir: &std::path::Path) -> Result<()> {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/home/arduino".into());
     let apps_dir = std::path::Path::new(&home).join("ArduinoApps");
     let dest_dir = apps_dir.join(BRIDGE_APP_NAME);
 
     std::fs::create_dir_all(&dest_dir).context("create dest dir")?;
 
-    if let Some(src) = bridge_dir {
-        println!("Copying Bridge app from repo...");
-        copy_dir(src, &dest_dir)?;
-    } else {
-        println!("Writing embedded Bridge app...");
-        write_embedded_bridge(&dest_dir)?;
-    }
+    println!("Copying Bridge app from workspace...");
+    copy_dir(bridge_dir, &dest_dir)?;
 
     println!("Starting Bridge app...");
     let status = Command::new("arduino-app-cli")
@@ -106,23 +103,6 @@ fn deploy_local(bridge_dir: Option<&std::path::Path>) -> Result<()> {
     }
 
     println!("ZeroClaw Bridge app started.");
-    Ok(())
-}
-
-fn write_embedded_bridge(dest: &std::path::Path) -> Result<()> {
-    let app_yaml = include_str!("../../firmware/uno-q-bridge/app.yaml");
-    let sketch_ino = include_str!("../../firmware/uno-q-bridge/sketch/sketch.ino");
-    let sketch_yaml = include_str!("../../firmware/uno-q-bridge/sketch/sketch.yaml");
-    let main_py = include_str!("../../firmware/uno-q-bridge/python/main.py");
-    let requirements = include_str!("../../firmware/uno-q-bridge/python/requirements.txt");
-
-    std::fs::write(dest.join("app.yaml"), app_yaml)?;
-    std::fs::create_dir_all(dest.join("sketch"))?;
-    std::fs::write(dest.join("sketch").join("sketch.ino"), sketch_ino)?;
-    std::fs::write(dest.join("sketch").join("sketch.yaml"), sketch_yaml)?;
-    std::fs::create_dir_all(dest.join("python"))?;
-    std::fs::write(dest.join("python").join("main.py"), main_py)?;
-    std::fs::write(dest.join("python").join("requirements.txt"), requirements)?;
     Ok(())
 }
 

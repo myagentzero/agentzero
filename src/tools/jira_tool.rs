@@ -554,17 +554,7 @@ impl Tool for JiraTool {
     }
 
     fn description(&self) -> &str {
-        "Interact with Jira: get ticket details (summary, status, comments, changelog), search issues with JQL, list projects, verify credentials, add comments with @mention and formatting support, and watch/unwatch tickets."
-    }
-
-    fn prompt_hint(&self) -> Option<&str> {
-        Some(
-            "Interact with Jira: get ticket details, search with JQL, list projects, add comments, watch/unwatch tickets. Use when: user references Jira tickets, asks about project status, or wants to comment on or watch issues. Don't use when: user is discussing tickets conceptually without needing live data.",
-        )
-    }
-
-    fn prompt_hint_compact(&self) -> &str {
-        "Interact with Jira tickets, search, comment, and watch."
+        "Interact with Jira: get ticket/story/bug details (summary, status, comments, changelog), search issues with JQL, list projects, add comments with @mention and formatting support, and watch/unwatch tickets."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {
@@ -733,9 +723,7 @@ impl Tool for JiraTool {
                         return Ok(ToolResult {
                             success: false,
                             output: String::new(),
-                            error: Some(format!(
-                                "{action} requires issue_key parameter"
-                            )),
+                            error: Some(format!("{action} requires issue_key parameter")),
                         });
                     }
                 };

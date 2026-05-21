@@ -105,6 +105,42 @@ Host runs ZeroClaw; peripheral runs minimal firmware. Simple JSON over serial.
 
 ZeroClaw on Pi; GPIO via rppal or sysfs. No separate firmware.
 
+## 3.5 Module Architecture: Hardware vs. Peripherals
+
+The codebase separates hardware concerns into two complementary modules:
+
+### `hardware` Module (Discovery & Protocol)
+
+Responsible for **detecting and understanding** connected hardware:
+- **USB discovery:** Enumerate devices by VID/PID, identify known boards
+- **Device introspection:** Query connected hardware for capabilities, memory map, architecture
+- **Board registry:** Map device identifiers to board types
+- **Transport layers:** Serial, USB, debug probe communication
+- **GPIO abstractions:** Low-level hardware access protocols
+- **Datasheet retrieval:** RAG pipeline for hardware documentation
+
+**Example:** `zeroclaw hardware discover` lists connected USB devices; `zeroclaw hardware introspect /dev/ttyACM0` queries a device's memory map.
+
+### `peripherals` Module (Capabilities & Control)
+
+Responsible for **controlling and interacting** with connected hardware:
+- **Tool implementations:** GPIO control, analog read, sensor interfaces
+- **Board-specific flashing:** Arduino, Nucleo, ESP32 firmware upload
+- **Peripheral trait:** Abstraction for board-specific capabilities
+- **CLI command handlers:** `zeroclaw peripheral add/list/flash`
+- **Bridge implementations:** Uno Q, hardware-specific bridges
+
+**Example:** Once a board is discovered and configured as a peripheral, `peripherals` exposes tools like `gpio_write(pin, value)` or `flash_firmware(path)` that the agent can call.
+
+### Workflow
+
+1. **Hardware module** discovers a device via USB, identifies it as "Nucleo-F401RE"
+2. **Peripherals module** registers it as a configured board with available tools
+3. **Agent loop** calls tools exposed by the peripheral
+4. **Datasheet module** (in hardware) injects relevant docs into LLM context
+
+**TL;DR:** Hardware detects and understands; Peripherals control and extend.
+
 ## 4. Technical Requirements
 
 | Requirement | Description |

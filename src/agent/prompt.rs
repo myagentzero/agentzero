@@ -29,11 +29,15 @@ pub(crate) fn format_datetime(timezone_override: Option<&str>) -> String {
     if let Some(tz_name) = timezone_override {
         if let Ok(tz) = tz_name.parse::<chrono_tz::Tz>() {
             let now = Utc::now().with_timezone(&tz);
-            return format!("{} ({})", now.format("%Y-%m-%d %H:%M:%S"), tz_name);
+            return format!("{} ({})", now.format("%A, %Y-%m-%d %H:%M:%S"), tz_name);
         }
     }
     let now = Local::now();
-    format!("{} ({})", now.format("%Y-%m-%d %H:%M:%S"), now.format("%Z"))
+    format!(
+        "{} ({})",
+        now.format("%A, %Y-%m-%d %H:%M:%S"),
+        now.format("%Z")
+    )
 }
 
 pub(crate) fn inject_workspace_file(
@@ -63,7 +67,7 @@ pub(crate) fn inject_workspace_file(
                 prompt.push_str(truncated);
                 let _ = writeln!(
                     prompt,
-                    "\n\n[... truncated at {max_chars} chars — use `read` for full file]\n"
+                    "\n\n[... truncated at {max_chars} chars — use `file_read` tool for full file]\n"
                 );
             } else {
                 prompt.push_str(trimmed);
@@ -161,7 +165,8 @@ mod tests {
 
     #[test]
     fn inject_workspace_file_injects_content() {
-        let ws = std::env::temp_dir().join(format!("zeroclaw_inject_test_{}", uuid::Uuid::new_v4()));
+        let ws =
+            std::env::temp_dir().join(format!("zeroclaw_inject_test_{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&ws).unwrap();
         std::fs::write(ws.join("TEST.md"), "hello world").unwrap();
 

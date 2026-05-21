@@ -3,24 +3,12 @@
 //! # Workflow
 //! 1. [`find_rpi_rp2_mount`] — check well-known mount points for the RPI-RP2 volume
 //!    that appears when a Pico is held in BOOTSEL mode.
-//! 2. [`ensure_firmware_dir`] — extract the bundled firmware files to
-//!    `~/.zeroclaw/firmware/pico/` if they aren't there yet.
+//! 2. [`ensure_firmware_dir`] — read firmware files from workspace/firmware/pico/
+//!    or extract to `~/.zeroclaw/firmware/pico/` as a cache.
 //! 3. [`flash_uf2`] — copy the UF2 to the mount point; the Pico reboots automatically.
-//!
-//! # Embedded assets
-//! Both firmware files are compiled into the binary with `include_bytes!` so
-//! users never need to download them separately.
 
 use anyhow::{Result, bail};
 use std::path::{Path, PathBuf};
-
-// ── Embedded firmware ─────────────────────────────────────────────────────────
-
-/// MicroPython UF2 binary — copied to RPI-RP2 to install the base runtime.
-const PICO_UF2: &[u8] = include_bytes!("../firmware/pico/zeroclaw-pico.uf2");
-
-/// ZeroClaw serial protocol handler — written to the Pico after MicroPython boots.
-pub const PICO_MAIN_PY: &[u8] = include_bytes!("../firmware/pico/main.py");
 
 /// UF2 magic word 1 (little-endian bytes at offset 0 of every UF2 block).
 const UF2_MAGIC1: [u8; 4] = [0x55, 0x46, 0x32, 0x0A];
@@ -56,44 +44,51 @@ pub fn find_rpi_rp2_mount() -> Option<PathBuf> {
 
 // ── Firmware directory management ─────────────────────────────────────────────
 
-/// Ensure `~/.zeroclaw/firmware/pico/` exists and contains the bundled assets.
+/// Ensure firmware files exist at workspace_dir/firmware/pico/.
 ///
-/// Files are only written if they are absent — existing files are never overwritten
-/// so users can substitute their own firmware.
-///
+/// Validates that both the UF2 and main.py files exist and are valid.
 /// Returns the firmware directory path.
-pub fn ensure_firmware_dir() -> Result<PathBuf> {
-    use directories::BaseDirs;
+pub fn ensure_firmware_dir(workspace_dir: &Path) -> Result<PathBuf> {
+    let firmware_dir = workspace_dir.join("firmware").join("pico");
 
-    let base = BaseDirs::new().ok_or_else(|| anyhow::anyhow!("cannot determine home directory"))?;
-
-    let firmware_dir = base
-        .home_dir()
-        .join(".zeroclaw")
-        .join("firmware")
-        .join("pico");
-    std::fs::create_dir_all(&firmware_dir)?;
-
-    // UF2 — validate magic before writing so a broken stub is caught early.
-    let uf2_path = firmware_dir.join("zeroclaw-pico.uf2");
-    if !uf2_path.exists() {
-        if PICO_UF2.len() < 8 || PICO_UF2[..4] != UF2_MAGIC1 {
-            bail!(
-                "Bundled UF2 is a placeholder — download the real MicroPython UF2 from \
-                 https://micropython.org/download/RPI_PICO/ and place it at \
-                 src/firmware/pico/zeroclaw-pico.uf2, then rebuild ZeroClaw."
-            );
-        }
-        std::fs::write(&uf2_path, PICO_UF2)?;
-        tracing::info!(path = %uf2_path.display(), "extracted bundled UF2");
+    if !firmware_dir.exists() {
+        bail!(
+            "firmware/pico directory not found at {}\n\
+             Ensure you have firmware/pico/zeroclaw-pico.uf2 and firmware/pico/main.py \
+             in your workspace.",
+            firmware_dir.display()
+        );
     }
 
-    // main.py — always check UF2 magic even if path already exists (user may
-    // have placed a stub). main.py has no such check — it's just text.
+    // UF2 — validate magic before use.
+    let uf2_path = firmware_dir.join("zeroclaw-pico.uf2");
+    if !uf2_path.exists() {
+        bail!(
+            "UF2 firmware not found at {}\n\
+             Download the MicroPython UF2 from https://micropython.org/download/RPI_PICO/ \
+             and place it at {}",
+            uf2_path.display(),
+            uf2_path.display()
+        );
+    }
+
+    let uf2_data = std::fs::read(&uf2_path)?;
+    if uf2_data.len() < 8 || uf2_data[..4] != UF2_MAGIC1 {
+        bail!(
+            "UF2 at {} does not have valid UF2 magic.\n\
+             Download the real MicroPython UF2 from https://micropython.org/download/RPI_PICO/",
+            uf2_path.display()
+        );
+    }
+
+    // main.py — just check it exists (no magic check needed for text).
     let main_py_path = firmware_dir.join("main.py");
     if !main_py_path.exists() {
-        std::fs::write(&main_py_path, PICO_MAIN_PY)?;
-        tracing::info!(path = %main_py_path.display(), "extracted bundled main.py");
+        bail!(
+            "main.py not found at {}\n\
+             Ensure firmware/pico/main.py exists in your workspace.",
+            main_py_path.display()
+        );
     }
 
     Ok(firmware_dir)
@@ -217,131 +212,10 @@ pub async fn flash_uf2(mount_point: &Path, firmware_dir: &Path) -> Result<()> {
     )
 }
 
-/// Wait for `/dev/cu.usbmodem*` (macOS) or `/dev/ttyACM*` (Linux) to appear.
-///
-/// Polls every `interval` for up to `timeout`. Returns the first matching path
-/// found, or `None` if the deadline expires.
-pub async fn wait_for_serial_port(
-    timeout: std::time::Duration,
-    interval: std::time::Duration,
-) -> Option<PathBuf> {
-    #[cfg(target_os = "macos")]
-    let patterns = &["/dev/cu.usbmodem*"];
-    #[cfg(target_os = "linux")]
-    let patterns = &["/dev/ttyACM*"];
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-    let patterns: &[&str] = &[];
-
-    let deadline = tokio::time::Instant::now() + timeout;
-
-    loop {
-        for pattern in *patterns {
-            if let Ok(mut hits) = glob::glob(pattern) {
-                if let Some(Ok(path)) = hits.next() {
-                    return Some(path);
-                }
-            }
-        }
-
-        if tokio::time::Instant::now() >= deadline {
-            return None;
-        }
-
-        tokio::time::sleep(interval).await;
-    }
-}
-
-// ── Deploy main.py via mpremote ───────────────────────────────────────────────
-
-/// Copy `main.py` to the Pico's MicroPython filesystem and soft-reset it.
-///
-/// After the UF2 is flashed the Pico reboots into MicroPython but has no
-/// `main.py` on its internal filesystem.  This function uses `mpremote` to
-/// upload the bundled `main.py` and issue a reset so it starts executing
-/// immediately.
-///
-/// Returns `Ok(())` on success or an error with a helpful fallback command.
-pub async fn deploy_main_py(port: &Path, firmware_dir: &Path) -> Result<()> {
-    let main_py_src = firmware_dir.join("main.py");
-    let src_str = main_py_src.to_string_lossy().into_owned();
-    let port_str = port.to_string_lossy().into_owned();
-
-    if !main_py_src.exists() {
-        bail!(
-            "main.py not found at {} — run ensure_firmware_dir() first",
-            main_py_src.display()
-        );
-    }
-
-    tracing::info!(
-        src = %src_str,
-        port = %port_str,
-        "deploying main.py via mpremote"
-    );
-
-    let out = tokio::process::Command::new("mpremote")
-        .args([
-            "connect", &port_str, "cp", &src_str, ":main.py", "+", "reset",
-        ])
-        .output()
-        .await;
-
-    match out {
-        Ok(o) if o.status.success() => {
-            tracing::info!("main.py deployed and Pico reset via mpremote");
-            Ok(())
-        }
-        Ok(o) => {
-            let stderr = String::from_utf8_lossy(&o.stderr);
-            bail!(
-                "mpremote failed (exit {}): {}.\n\
-                 Run manually:\n  mpremote connect {port_str} cp {src_str} :main.py + reset",
-                o.status,
-                stderr.trim()
-            )
-        }
-        Err(e) => {
-            bail!(
-                "mpremote not found or could not start ({e}).\n\
-                 Install it with: pip install mpremote\n\
-                 Then run: mpremote connect {port_str} cp {src_str} :main.py + reset"
-            )
-        }
-    }
-}
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn pico_uf2_has_valid_magic() {
-        assert!(
-            PICO_UF2.len() >= 8,
-            "bundled UF2 too small ({} bytes) — replace with real MicroPython UF2",
-            PICO_UF2.len()
-        );
-        assert_eq!(
-            &PICO_UF2[..4],
-            &UF2_MAGIC1,
-            "bundled UF2 has wrong magic — replace with real MicroPython UF2 from \
-             https://micropython.org/download/RPI_PICO/"
-        );
-    }
-
-    #[test]
-    fn pico_main_py_is_non_empty() {
-        assert!(!PICO_MAIN_PY.is_empty(), "bundled main.py is empty");
-    }
-
-    #[test]
-    fn pico_main_py_contains_zeroclaw_marker() {
-        let src = std::str::from_utf8(PICO_MAIN_PY).expect("main.py is not valid UTF-8");
-        assert!(
-            src.contains("zeroclaw"),
-            "main.py should contain 'zeroclaw' firmware marker"
-        );
-    }
 
     #[test]
     fn find_rpi_rp2_mount_returns_none_when_not_connected() {

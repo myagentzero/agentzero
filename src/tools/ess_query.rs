@@ -76,18 +76,6 @@ impl Tool for EssQueryTool {
         &self.description
     }
 
-    fn prompt_hint(&self) -> Option<&str> {
-        Some(
-            "Query Elasticsearch Service (ESS) clusters to investigate application performance, throughput changes, errors, and log analysis. \n
-             Use when: investigating latency, searching application logs, debugging APM traces, analyzing error rates, comparing metrics across time periods, or querying Elasticsearch indices.
-             Don't use when: user is asking about Elasticsearch concepts generically, or wants to write/modify data — this tool is read-only (GET/POST only).",
-        )
-    }
-
-    fn prompt_hint_compact(&self) -> &str {
-        "Read-only Elasticsearch query by raw path + optional JSON body."
-    }
-
     fn parameters_schema(&self) -> Value {
         let default_name = self.cluster_names.first().map(String::as_str).unwrap_or("");
         let cluster_name_desc = format!(
@@ -313,7 +301,9 @@ mod tests {
         let methods = schema["properties"]["method"]["enum"].as_array().unwrap();
         let methods: Vec<&str> = methods.iter().map(|v| v.as_str().unwrap()).collect();
         assert_eq!(methods, vec!["GET", "POST"]);
-        let clusters = schema["properties"]["cluster_name"]["enum"].as_array().unwrap();
+        let clusters = schema["properties"]["cluster_name"]["enum"]
+            .as_array()
+            .unwrap();
         let clusters: Vec<&str> = clusters.iter().map(|v| v.as_str().unwrap()).collect();
         assert_eq!(clusters, vec!["prod", "staging", "*"]);
     }
@@ -352,9 +342,14 @@ mod tests {
     fn wildcard_always_in_cluster_names() {
         let tool = make_tool();
         let schema = tool.parameters_schema();
-        let clusters = schema["properties"]["cluster_name"]["enum"].as_array().unwrap();
+        let clusters = schema["properties"]["cluster_name"]["enum"]
+            .as_array()
+            .unwrap();
         let names: Vec<&str> = clusters.iter().map(|v| v.as_str().unwrap()).collect();
-        assert!(names.contains(&"*"), "* should always be in cluster_name enum");
+        assert!(
+            names.contains(&"*"),
+            "* should always be in cluster_name enum"
+        );
     }
 
     #[tokio::test]
@@ -366,9 +361,15 @@ mod tests {
             .unwrap();
         assert!(!res.success);
         let err = res.error.unwrap();
-        assert!(err.contains("unknown"), "error should mention the bad name: {err}");
+        assert!(
+            err.contains("unknown"),
+            "error should mention the bad name: {err}"
+        );
         assert!(err.contains("prod"), "error should list valid names: {err}");
-        assert!(err.contains("staging"), "error should list valid names: {err}");
+        assert!(
+            err.contains("staging"),
+            "error should list valid names: {err}"
+        );
     }
 
     #[tokio::test]
@@ -382,7 +383,10 @@ mod tests {
             .unwrap();
         // If there's an error it should be network-related, not a validation error.
         if let Some(err) = res.error {
-            assert!(!err.contains("Unknown cluster_name"), "should not be a validation error: {err}");
+            assert!(
+                !err.contains("Unknown cluster_name"),
+                "should not be a validation error: {err}"
+            );
         }
     }
 
@@ -394,7 +398,10 @@ mod tests {
         // assert there is no validation error by verifying any error isn't about cluster_name.
         let res = tool.execute(json!({ "path": "/" })).await.unwrap();
         if let Some(err) = res.error {
-            assert!(!err.contains("Unknown cluster_name"), "should not be a validation error: {err}");
+            assert!(
+                !err.contains("Unknown cluster_name"),
+                "should not be a validation error: {err}"
+            );
         }
     }
 }

@@ -115,17 +115,7 @@ impl Tool for ShellTool {
     }
 
     fn description(&self) -> &str {
-        "Execute a shell command in the workspace directory"
-    }
-
-    fn prompt_hint(&self) -> Option<&str> {
-        Some(
-            "Execute terminal commands. Use when: running local checks, build/test commands, diagnostics. Don't use when: a safer dedicated tool exists, or command is destructive without approval.",
-        )
-    }
-
-    fn prompt_hint_compact(&self) -> &str {
-        "Execute terminal commands."
+        "Execute terminal commands. Use when: running local checks, build/test commands, diagnostics. Don't use when: a safer dedicated tool exists, or command is destructive without approval."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {

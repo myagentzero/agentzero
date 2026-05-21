@@ -116,7 +116,6 @@ const SUPPORTED_PROXY_SERVICE_KEYS: &[&str] = &[
     "provider.openai",
     "provider.openrouter",
     "channel.discord",
-    "channel.github",
     "channel.slack",
     "tool.browser",
     "tool.composio",
@@ -183,6 +182,9 @@ pub struct Config {
     /// Runtime-only: skip workspace bootstrap file injection (set by cron light_context)
     #[serde(skip)]
     pub skip_bootstrap_files: bool,
+    /// Runtime-only: skip auto-saving the input message to Conversation memory (set by cron scheduler)
+    #[serde(skip)]
+    pub skip_input_autosave: bool,
     /// API key for the selected provider. Always overridden by `ZEROCLAW_API_KEY` env var.
     /// `API_KEY` env var is only used as fallback when no config key is set.
     pub api_key: Option<String>,
@@ -402,6 +404,10 @@ pub struct Config {
     /// Elasticsearch query tool (`[elasticsearch]`).
     #[serde(default)]
     pub elasticsearch: ElasticsearchConfig,
+
+    /// GitHub agent tool (`[github]`).
+    #[serde(default)]
+    pub github: GitHubToolConfig,
 }
 
 /// Named provider profile definition compatible with Codex app-server style config.
@@ -548,7 +554,6 @@ impl std::fmt::Debug for Config {
             self.channels_config.discord.is_some(),
             self.channels_config.slack.is_some(),
             self.channels_config.webhook.is_some(),
-            self.channels_config.github.is_some(),
             self.channels_config.email.is_some(),
             self.channels_config.irc.is_some(),
         ]
@@ -2368,7 +2373,8 @@ impl Default for LocalContextConfig {
 }
 
 /// Default HTTP User-Agent sent with outbound requests.
-pub const DEFAULT_USER_AGENT: &str = "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36";
+pub const DEFAULT_USER_AGENT: &str =
+    "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36";
 
 fn default_user_agent() -> String {
     DEFAULT_USER_AGENT.into()
@@ -3555,7 +3561,6 @@ fn default_auto_approve() -> Vec<String> {
         "calculator".into(),
         "glob_search".into(),
         "content_search".into(),
-        "schedule".into(),
         "weather".into(),
         "reaction".into(),
         "local_context".into(),
@@ -4168,9 +4173,6 @@ pub struct ConsolidationConfig {
     /// Optional IANA timezone for schedule evaluation (e.g. "America/New_York").
     #[serde(default)]
     pub timezone: Option<String>,
-    /// Run consolidation with light context (compact_context + skip_bootstrap_files). Default: `false`.
-    #[serde(default)]
-    pub light_context: bool,
     /// Optional custom path to the consolidation prompt file (relative to workspace_dir).
     /// Defaults to `CONSOLIDATION.md` in workspace root.
     #[serde(default)]
@@ -4198,7 +4200,6 @@ impl Default for ConsolidationConfig {
             enabled: false,
             schedule: default_consolidation_schedule(),
             timezone: None,
-            light_context: false,
             prompt_file: None,
             delivery_channel: None,
             delivery_to: None,
@@ -4373,8 +4374,6 @@ pub struct ChannelsConfig {
     pub slack: Option<SlackConfig>,
     /// Webhook channel configuration.
     pub webhook: Option<WebhookConfig>,
-    /// GitHub channel configuration.
-    pub github: Option<GitHubConfig>,
     /// Email channel configuration.
     pub email: Option<crate::channels::email_channel::EmailConfig>,
     /// IRC channel configuration.
@@ -4408,10 +4407,6 @@ impl ChannelsConfig {
                 self.slack.is_some(),
             ),
             (
-                Box::new(ConfigWrapper::new(self.github.as_ref())),
-                self.github.is_some(),
-            ),
-            (
                 Box::new(ConfigWrapper::new(self.email.as_ref())),
                 self.email.is_some(),
             ),
@@ -4443,7 +4438,6 @@ impl Default for ChannelsConfig {
             discord: None,
             slack: None,
             webhook: None,
-            github: None,
             email: None,
             irc: None,
             ack_reaction: AckReactionChannelsConfig::default(),
@@ -4803,35 +4797,6 @@ impl ChannelConfig for WebhookConfig {
     }
     fn desc() -> &'static str {
         "HTTP endpoint"
-    }
-}
-
-/// GitHub channel configuration (webhook receive + issue/PR comment send).
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct GitHubConfig {
-    /// GitHub token used for outbound API calls.
-    ///
-    /// Supports fine-grained PAT or installation token with `issues:write` / `pull_requests:write`.
-    pub access_token: String,
-    /// Optional webhook secret to verify `X-Hub-Signature-256`.
-    #[serde(default)]
-    pub webhook_secret: Option<String>,
-    /// Optional GitHub API base URL (for GHES).
-    /// Defaults to `https://api.github.com` when omitted.
-    #[serde(default)]
-    pub api_base_url: Option<String>,
-    /// Allowed repositories (`owner/repo`), `owner/*`, or `*`.
-    /// Empty list denies all repositories.
-    #[serde(default)]
-    pub allowed_repos: Vec<String>,
-}
-
-impl ChannelConfig for GitHubConfig {
-    fn name() -> &'static str {
-        "GitHub"
-    }
-    fn desc() -> &'static str {
-        "issues/PR comments via webhook + REST API"
     }
 }
 
@@ -5711,6 +5676,54 @@ impl Default for ElasticsearchConfig {
     }
 }
 
+// -- GitHub agent tool --
+
+/// GitHub agent tool configuration (`[github]`).
+///
+/// Exposes read/write actions against GitHub issues and pull requests
+/// (gated by `allowed_actions` and the security policy's Read/Act split).
+///
+/// Token resolution: explicit `access_token` > `ZEROCLAW_GITHUB_TOOL_TOKEN`
+/// env var > `GITHUB_TOKEN` env var. Note that the `http_request` tool's
+/// `github` credential profile also reads `GITHUB_TOKEN`; both share the
+/// fallback when no explicit token is set.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct GitHubToolConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub access_token: String,
+    /// Optional API base URL override for GitHub Enterprise Server.
+    /// Defaults to `https://api.github.com` when blank.
+    #[serde(default)]
+    pub api_base_url: Option<String>,
+    /// Wildcard repo allowlist: `*`, `owner/*`, or `owner/repo`.
+    #[serde(default)]
+    pub allowed_repos: Vec<String>,
+    /// Action allowlist (e.g. `get_issue`, `add_comment`, `create_pull_request`).
+    #[serde(default)]
+    pub allowed_actions: Vec<String>,
+    #[serde(default = "default_github_tool_timeout_secs")]
+    pub timeout_secs: u64,
+}
+
+fn default_github_tool_timeout_secs() -> u64 {
+    30
+}
+
+impl Default for GitHubToolConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            access_token: String::new(),
+            api_base_url: None,
+            allowed_repos: Vec::new(),
+            allowed_actions: Vec::new(),
+            timeout_secs: default_github_tool_timeout_secs(),
+        }
+    }
+}
+
 // -- Notion --
 
 /// Notion integration configuration (`[notion]`).
@@ -5787,6 +5800,7 @@ impl Default for Config {
             workspace_dir: zeroclaw_dir.join("workspace"),
             config_path: zeroclaw_dir.join("config.toml"),
             skip_bootstrap_files: false,
+            skip_input_autosave: false,
             api_key: None,
             api_url: None,
             default_provider: Some(DEFAULT_PROVIDER_NAME.to_string()),
@@ -5841,6 +5855,7 @@ impl Default for Config {
             notion: NotionConfig::default(),
             atlassian: AtlassianConfig::default(),
             elasticsearch: ElasticsearchConfig::default(),
+            github: GitHubToolConfig::default(),
             ask_user: AskUserConfig::default(),
             local_context: LocalContextConfig::default(),
         }
@@ -6336,18 +6351,6 @@ fn decrypt_channel_secrets(
             "config.channels_config.webhook.secret",
         )?;
     }
-    if let Some(ref mut github) = channels.github {
-        decrypt_secret(
-            store,
-            &mut github.access_token,
-            "config.channels_config.github.access_token",
-        )?;
-        decrypt_optional_secret(
-            store,
-            &mut github.webhook_secret,
-            "config.channels_config.github.webhook_secret",
-        )?;
-    }
     if let Some(ref mut irc) = channels.irc {
         decrypt_optional_secret(
             store,
@@ -6396,18 +6399,6 @@ fn encrypt_channel_secrets(
             store,
             &mut webhook.secret,
             "config.channels_config.webhook.secret",
-        )?;
-    }
-    if let Some(ref mut github) = channels.github {
-        encrypt_secret(
-            store,
-            &mut github.access_token,
-            "config.channels_config.github.access_token",
-        )?;
-        encrypt_optional_secret(
-            store,
-            &mut github.webhook_secret,
-            "config.channels_config.github.webhook_secret",
         )?;
     }
     if let Some(ref mut irc) = channels.irc {
@@ -6682,23 +6673,52 @@ impl Config {
 
             // Atlassian secrets (shared by Jira and Confluence)
             if !config.atlassian.base_url.is_empty() {
-                decrypt_secret(&store, &mut config.atlassian.base_url, "config.atlassian.base_url")?;
+                decrypt_secret(
+                    &store,
+                    &mut config.atlassian.base_url,
+                    "config.atlassian.base_url",
+                )?;
             }
             if !config.atlassian.email.is_empty() {
-                decrypt_secret(&store, &mut config.atlassian.email, "config.atlassian.email")?;
+                decrypt_secret(
+                    &store,
+                    &mut config.atlassian.email,
+                    "config.atlassian.email",
+                )?;
             }
             if !config.atlassian.api_token.is_empty() {
-                decrypt_secret(&store, &mut config.atlassian.api_token, "config.atlassian.api_token")?;
+                decrypt_secret(
+                    &store,
+                    &mut config.atlassian.api_token,
+                    "config.atlassian.api_token",
+                )?;
             }
 
             // Elasticsearch secret (base64 API key)
             if !config.elasticsearch.auth.is_empty() {
-                decrypt_secret(&store, &mut config.elasticsearch.auth, "config.elasticsearch.auth")?;
+                decrypt_secret(
+                    &store,
+                    &mut config.elasticsearch.auth,
+                    "config.elasticsearch.auth",
+                )?;
             }
 
             // Elasticsearch endpoint (encrypted URL)
             if !config.elasticsearch.endpoint.is_empty() {
-                decrypt_secret(&store, &mut config.elasticsearch.endpoint, "config.elasticsearch.endpoint")?;
+                decrypt_secret(
+                    &store,
+                    &mut config.elasticsearch.endpoint,
+                    "config.elasticsearch.endpoint",
+                )?;
+            }
+
+            // GitHub tool access token
+            if !config.github.access_token.is_empty() {
+                decrypt_secret(
+                    &store,
+                    &mut config.github.access_token,
+                    "config.github.access_token",
+                )?;
             }
 
             config.apply_env_overrides();
@@ -8385,7 +8405,11 @@ impl Config {
             )?;
         }
         if !config_to_save.atlassian.email.is_empty() {
-            encrypt_secret(&store, &mut config_to_save.atlassian.email, "config.atlassian.email")?;
+            encrypt_secret(
+                &store,
+                &mut config_to_save.atlassian.email,
+                "config.atlassian.email",
+            )?;
         }
         if !config_to_save.atlassian.api_token.is_empty() {
             encrypt_secret(
@@ -8410,6 +8434,15 @@ impl Config {
                 &store,
                 &mut config_to_save.elasticsearch.endpoint,
                 "config.elasticsearch.endpoint",
+            )?;
+        }
+
+        // GitHub tool access token
+        if !config_to_save.github.access_token.is_empty() {
+            encrypt_secret(
+                &store,
+                &mut config_to_save.github.access_token,
+                "config.github.access_token",
             )?;
         }
 
@@ -8945,6 +8978,7 @@ default_temperature = 0.7
             workspace_dir: PathBuf::from("/tmp/test/workspace"),
             config_path: PathBuf::from("/tmp/test/config.toml"),
             skip_bootstrap_files: false,
+            skip_input_autosave: false,
             api_key: Some("sk-test-key".into()),
             api_url: None,
             default_provider: Some("openrouter".into()),
@@ -9019,7 +9053,6 @@ default_temperature = 0.7
                 }),
                 slack: None,
                 webhook: None,
-                github: None,
 
                 email: None,
                 irc: None,
@@ -9054,6 +9087,7 @@ default_temperature = 0.7
             notion: NotionConfig::default(),
             atlassian: AtlassianConfig::default(),
             elasticsearch: ElasticsearchConfig::default(),
+            github: GitHubToolConfig::default(),
             ask_user: AskUserConfig::default(),
             local_context: LocalContextConfig::default(),
         };
@@ -9287,6 +9321,7 @@ denied_tools = ["shell"]
             workspace_dir: dir.join("workspace"),
             config_path: config_path.clone(),
             skip_bootstrap_files: false,
+            skip_input_autosave: false,
             api_key: Some("sk-roundtrip".into()),
             api_url: None,
             default_provider: Some("openrouter".into()),
@@ -9341,6 +9376,7 @@ denied_tools = ["shell"]
             notion: NotionConfig::default(),
             atlassian: AtlassianConfig::default(),
             elasticsearch: ElasticsearchConfig::default(),
+            github: GitHubToolConfig::default(),
             ask_user: AskUserConfig::default(),
             local_context: LocalContextConfig::default(),
         };
@@ -9394,6 +9430,7 @@ denied_tools = ["shell"]
         config.atlassian.base_url = "https://mycompany.atlassian.net".into();
         config.atlassian.email = "user@example.com".into();
         config.atlassian.api_token = "jira-api-token-secret".into();
+        config.github.access_token = "github-pat-secret".into();
 
         config.agents.insert(
             "worker".into(),
@@ -9535,6 +9572,14 @@ denied_tools = ["shell"]
         assert_eq!(
             store.decrypt(&stored.atlassian.api_token).unwrap(),
             "jira-api-token-secret"
+        );
+
+        assert!(crate::security::SecretStore::is_encrypted(
+            &stored.github.access_token
+        ));
+        assert_eq!(
+            store.decrypt(&stored.github.access_token).unwrap(),
+            "github-pat-secret"
         );
 
         let _ = fs::remove_dir_all(&dir).await;

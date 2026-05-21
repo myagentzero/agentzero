@@ -77,10 +77,9 @@ impl ConfluenceTool {
         let url = format!("{}/wiki/api/v2/pages/{}", self.base_url, page_id);
 
         let query_params: Vec<(&str, &str)> = match &level {
-            ContentDetailLevel::Basic => vec![
-                ("include-labels", "false"),
-                ("include-version", "true"),
-            ],
+            ContentDetailLevel::Basic => {
+                vec![("include-labels", "false"), ("include-version", "true")]
+            }
             ContentDetailLevel::Standard => vec![
                 ("include-labels", "true"),
                 ("include-version", "true"),
@@ -262,11 +261,7 @@ impl ConfluenceTool {
         })
     }
 
-    async fn get_space(
-        &self,
-        space_key: &str,
-        include_pages: bool,
-    ) -> anyhow::Result<ToolResult> {
+    async fn get_space(&self, space_key: &str, include_pages: bool) -> anyhow::Result<ToolResult> {
         validate_space_key(space_key)?;
 
         let url = format!("{}/wiki/api/v2/spaces/{}", self.base_url, space_key);
@@ -335,19 +330,9 @@ impl Tool for ConfluenceTool {
     }
 
     fn description(&self) -> &str {
-        "Interact with Confluence: read pages, search content with CQL, list spaces, and view documentation. Supports page content retrieval with multiple detail levels."
-    }
-
-    fn prompt_hint(&self) -> Option<&str> {
-        Some(
-            "Interact with Confluence: read documentation pages, search with CQL, explore spaces. \
-             Use when: user asks about work related documentation or references Confluence pages/spaces. \
-             Don't use when: user is discussing documentation conceptually or when referencing content from the web.",
-        )
-    }
-
-    fn prompt_hint_compact(&self) -> &str {
-        "Read Confluence documentation, search pages, and explore spaces."
+        "Interact with Confluence: read documentation pages, search with CQL, explore spaces. \
+         Use when: user asks about work related documentation or references Confluence pages/spaces. \
+         Don't use when: user is discussing documentation conceptually or when referencing content from the web."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {
@@ -444,7 +429,10 @@ impl Tool for ConfluenceTool {
             _ => unreachable!(),
         };
 
-        if let Err(error) = self.security.enforce_tool_operation(operation, "confluence") {
+        if let Err(error) = self
+            .security
+            .enforce_tool_operation(operation, "confluence")
+        {
             return Ok(ToolResult {
                 success: false,
                 output: String::new(),
@@ -894,7 +882,10 @@ mod tests {
         assert_eq!(shaped["createdAt"], "2024-01-15");
         assert_eq!(shaped["lastModified"], "2024-03-01");
         assert_eq!(shaped["authorId"], "user-123");
-        assert_eq!(shaped["excerpt"], "This page describes the API endpoints...");
+        assert_eq!(
+            shaped["excerpt"],
+            "This page describes the API endpoints..."
+        );
     }
 
     #[test]

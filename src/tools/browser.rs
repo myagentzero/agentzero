@@ -900,19 +900,9 @@ impl Tool for BrowserTool {
     }
 
     fn description(&self) -> &str {
-        "Web Browser automation for rendering web pages and interacting with dynamic content."
-    }
-
-    fn prompt_hint(&self) -> Option<&str> {
-        Some(
-            "Automate browsers via webdriver: open, snapshot, click/fill/type, screenshot. \
-             Use when you need browser automation to load a website, interact with dynamic content, or take screenshots. \
-             Don't use for tasks like calling an API (use http_request) or searching for web content (use web_search)."
-        )
-    }
-
-    fn prompt_hint_compact(&self) -> &str {
-        "Automate browsers: open, snapshot, click/fill/type, screenshot."
+        "Web Browser automation for rendering web pages and interacting with dynamic content. \
+         Use when you need browser automation to load a website, interact with dynamic content, or take screenshots. \
+         Don't use for tasks like calling an API (use http_request) or searching for web content (use web_search)."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -2470,13 +2460,11 @@ mod tests {
     }
 
     #[cfg(feature = "browser-native")]
-    #[test]
-    fn reset_session_is_idempotent_without_client() {
-        tokio_test::block_on(async {
-            let mut state = native_backend::NativeBrowserState::default();
-            state.reset_session().await;
-            state.reset_session().await;
-        });
+    #[tokio::test]
+    async fn reset_session_is_idempotent_without_client() {
+        let mut state = native_backend::NativeBrowserState::default();
+        state.reset_session().await;
+        state.reset_session().await;
     }
 
     #[test]

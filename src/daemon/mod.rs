@@ -318,7 +318,7 @@ async fn run_heartbeat_worker(config: Config) -> Result<()> {
     let engine = crate::heartbeat::engine::HeartbeatEngine::new(
         config.heartbeat.clone(),
         config.workspace_dir.clone(),
-        observer,
+        std::sync::Arc::clone(&observer),
     );
     let delivery = heartbeat_delivery_target(&config)?;
 
@@ -329,6 +329,12 @@ async fn run_heartbeat_worker(config: Config) -> Result<()> {
 
     loop {
         interval.tick().await;
+
+        // The daemon has its own heartbeat loop instead of calling
+        // `HeartbeatEngine::run` (which is the only other code path that
+        // records this event), so the counter must be ticked here or it
+        // stays at zero in `/metrics` forever.
+        observer.record_event(&crate::observability::ObserverEvent::HeartbeatTick);
 
         let file_tasks = engine.collect_tasks().await?;
         let candidate_tasks =

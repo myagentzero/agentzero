@@ -7,25 +7,47 @@ pub mod otel;
 pub mod prometheus;
 pub mod runtime_trace;
 pub mod traits;
-pub mod verbose;
 
-#[allow(unused_imports)]
-pub use self::log::LogObserver;
-#[allow(unused_imports)]
-pub use self::multi::MultiObserver;
 pub use cost::CostObserver;
+pub use log::LogObserver;
+pub use multi::MultiObserver;
 pub use noop::NoopObserver;
 #[cfg(feature = "observability-otel")]
 pub use otel::OtelObserver;
-pub use prometheus::PrometheusObserver;
+pub use prometheus::{PrometheusObserver, SharedPrometheusObserver};
 pub use traits::{Observer, ObserverEvent};
-#[allow(unused_imports)]
-pub use verbose::VerboseObserver;
 
 use crate::config::ObservabilityConfig;
 use crate::config::schema::CostConfig;
 use crate::cost::CostTracker;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
+
+/// Process-wide singleton holding the live Prometheus `Registry`.
+///
+/// Each daemon component (gateway, channels, heartbeat worker, agent loop)
+/// builds its observer independently via `create_observer*`. Without sharing,
+/// each instance would own a private registry and the gateway's `/metrics`
+/// endpoint would only see events emitted by the gateway itself. Threading
+/// every callsite through `daemon::run` would be a much larger change.
+static PROMETHEUS_SINGLETON: OnceLock<Arc<PrometheusObserver>> = OnceLock::new();
+
+fn shared_prometheus_observer() -> Option<Arc<PrometheusObserver>> {
+    if let Some(existing) = PROMETHEUS_SINGLETON.get() {
+        return Some(Arc::clone(existing));
+    }
+    match PrometheusObserver::new() {
+        Ok(obs) => {
+            // `set` returns Err if another thread won the race; either way the
+            // value in `PROMETHEUS_SINGLETON` is the canonical one to hand out.
+            let _ = PROMETHEUS_SINGLETON.set(Arc::new(obs));
+            PROMETHEUS_SINGLETON.get().map(Arc::clone)
+        }
+        Err(e) => {
+            tracing::error!("Failed to create Prometheus observer: {e}. Falling back to noop.");
+            None
+        }
+    }
+}
 
 /// Factory: create the right observer from config
 pub fn create_observer(config: &ObservabilityConfig) -> Box<dyn Observer> {
@@ -58,15 +80,12 @@ pub fn create_observer_with_cost_tracking(
 fn create_observer_internal(config: &ObservabilityConfig) -> Box<dyn Observer> {
     match config.backend.as_str() {
         "log" => Box::new(LogObserver::new()),
-        "prometheus" => match PrometheusObserver::new() {
-            Ok(obs) => {
-                tracing::info!("Prometheus observer initialized");
-                Box::new(obs)
+        "prometheus" => match shared_prometheus_observer() {
+            Some(arc) => {
+                tracing::debug!("Prometheus observer (shared singleton) handed out");
+                Box::new(SharedPrometheusObserver::new(arc))
             }
-            Err(e) => {
-                tracing::error!("Failed to create Prometheus observer: {e}. Falling back to noop.");
-                Box::new(NoopObserver)
-            }
+            None => Box::new(NoopObserver),
         },
         "otel" | "opentelemetry" | "otlp" => {
             #[cfg(feature = "observability-otel")]
@@ -221,5 +240,50 @@ mod tests {
             ..ObservabilityConfig::default()
         };
         assert_eq!(create_observer(&cfg).name(), "noop");
+    }
+
+    /// Regression: every daemon component (gateway, channels, heartbeat worker,
+    /// agent loop) calls `create_observer*` independently. They must all share
+    /// one Prometheus `Registry` or `/metrics` shows zeros for events emitted
+    /// outside the gateway.
+    #[test]
+    fn factory_prometheus_observers_share_one_registry() {
+        let cfg = ObservabilityConfig {
+            backend: "prometheus".into(),
+            ..ObservabilityConfig::default()
+        };
+
+        let writer = create_observer(&cfg);
+        let reader = create_observer(&cfg);
+
+        // Heartbeat ticks fired by component A must be visible to component B.
+        writer.record_event(&ObserverEvent::HeartbeatTick);
+        writer.record_event(&ObserverEvent::HeartbeatTick);
+
+        let reader_any = reader.as_any();
+        let shared = reader_any
+            .downcast_ref::<SharedPrometheusObserver>()
+            .expect("factory should hand out SharedPrometheusObserver for the prometheus backend");
+        let output = shared.inner().encode();
+        assert!(
+            output.contains("zeroclaw_heartbeat_ticks_total"),
+            "encoded output missing heartbeat metric:\n{output}"
+        );
+        // Counter must reflect *both* events recorded through the other handle.
+        // (The singleton is process-wide, so other tests in the same binary may
+        // have already incremented it; assert ≥ 2 rather than == 2.)
+        let line = output
+            .lines()
+            .find(|line| line.starts_with("zeroclaw_heartbeat_ticks_total "))
+            .expect("counter line must be present once any event has been recorded");
+        let value: u64 = line
+            .split_whitespace()
+            .nth(1)
+            .and_then(|v| v.parse().ok())
+            .expect("counter value must parse as integer");
+        assert!(
+            value >= 2,
+            "expected counter to reflect ≥ 2 events recorded via the writer handle, got {value}"
+        );
     }
 }

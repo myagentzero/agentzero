@@ -67,6 +67,8 @@ pub struct Agent {
     timezone_override: Option<String>,
     /// Autonomy config for shell policy instructions.
     autonomy_config: crate::config::AutonomyConfig,
+    /// Hardware configuration for hardware tool access.
+    hardware_config: crate::config::HardwareConfig,
 }
 
 pub struct AgentBuilder {
@@ -92,6 +94,7 @@ pub struct AgentBuilder {
     security_summary: Option<String>,
     timezone_override: Option<String>,
     autonomy_config: Option<crate::config::AutonomyConfig>,
+    hardware_config: Option<crate::config::HardwareConfig>,
 }
 
 impl AgentBuilder {
@@ -119,6 +122,7 @@ impl AgentBuilder {
             security_summary: None,
             timezone_override: None,
             autonomy_config: None,
+            hardware_config: None,
         }
     }
 
@@ -283,6 +287,7 @@ impl AgentBuilder {
             security_summary: self.security_summary,
             timezone_override: self.timezone_override,
             autonomy_config: self.autonomy_config.unwrap_or_default(),
+            hardware_config: self.hardware_config.unwrap_or_default(),
         })
     }
 }
@@ -484,16 +489,15 @@ impl Agent {
     }
 
     fn build_system_prompt(&self) -> Result<String> {
-        let tool_descs: Vec<(&str, &str)> = self
+        let tool_specs: Vec<crate::tools::ToolSpec> = self
             .tools
             .iter()
-            .filter_map(|t| t.prompt_hint().map(|h| (t.name(), h)))
+            .map(|t| t.spec())
             .collect();
         let native_tools = self.provider.supports_native_tools();
-        let mut prompt = crate::channels::build_system_prompt_with_mode(
+        let prompt = crate::channels::build_system_prompt_with_mode(
             &self.workspace_dir,
-            &self.model_name,
-            &tool_descs,
+            &tool_specs,
             &self.skills,
             Some(&self.identity_config),
             None,
@@ -502,14 +506,13 @@ impl Agent {
             false,
             self.timezone_override.as_deref(),
             self.security_summary.as_deref(),
+            Some(&self.hardware_config),
         );
-        if !native_tools {
-            prompt.push_str(&crate::agent::loop_::build_tool_instructions(&self.tools));
-        }
-        prompt.push_str(&crate::agent::loop_::build_shell_policy_instructions(
+        let mut result = prompt;
+        result.push_str(&crate::agent::loop_::build_shell_policy_instructions(
             &self.autonomy_config,
         ));
-        Ok(prompt)
+        Ok(result)
     }
 
     async fn execute_tool_call(&self, call: &ParsedToolCall) -> ToolExecutionResult {

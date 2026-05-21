@@ -88,7 +88,6 @@ non_cli_excluded_tools = [
     "git_operations",
     "browser",
     "http_request",
-    "schedule",
     "cron_add",
     "cron_remove",
     "memory_store",
@@ -295,15 +294,8 @@ fallback_providers = []
 api_keys = []
 channel_initial_backoff_secs = 2
 channel_max_backoff_secs = 60
-scheduler_poll_secs = 15
-scheduler_retries = 2
 
 [reliability.model_fallbacks]
-
-[scheduler]
-enabled = true
-max_tasks = 64
-max_concurrent = 4
 
 [agent]
 compact_context = true

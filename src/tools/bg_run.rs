@@ -248,18 +248,7 @@ impl Tool for BgRunTool {
     }
 
     fn description(&self) -> &str {
-        "Run a tool in the background such as long running shell commands. Don't use for getting around security rules. \
-         Check results with bg_status. Background tasks have a 600-second maximum timeout."
-    }
-
-    fn prompt_hint(&self) -> Option<&str> {
-        Some(
-            "Run a tool in the background. Use when: the operation is long-running and you can continue other work. Don't use when: the operation is short or trivial.",
-        )
-    }
-
-    fn prompt_hint_compact(&self) -> &str {
-        "Run a tool in the background."
+        "Run a tool in the background. Use when: the operation is long-running and you can continue other work. Don't use when: the operation is short or trivial. Check results with bg_status. Background tasks have a 600-second maximum timeout."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {
@@ -326,7 +315,12 @@ impl Tool for BgRunTool {
         // Enforce concurrent job limit to prevent resource exhaustion
         let running_count = self.job_store.running_count().await;
         if running_count >= MAX_CONCURRENT_JOBS {
-            tracing::warn!(tool_name, running_count, max = MAX_CONCURRENT_JOBS, "⚠️ bg_run job limit reached");
+            tracing::warn!(
+                tool_name,
+                running_count,
+                max = MAX_CONCURRENT_JOBS,
+                "⚠️ bg_run job limit reached"
+            );
             return Ok(ToolResult {
                 success: false,
                 output: String::new(),
@@ -471,16 +465,6 @@ impl Tool for BgStatusTool {
     fn description(&self) -> &str {
         "Query the status of a background job by job_id, or list all jobs if no job_id provided. \
          Returns job status (running/complete/failed), result output, and elapsed time. Hard limit of 5 concurrent jobs."
-    }
-
-    fn prompt_hint(&self) -> Option<&str> {
-        Some(
-            "Query the status of a background job. Use when: you need to monitor bg_run tasks. Don't use when: you only need immediate results.",
-        )
-    }
-
-    fn prompt_hint_compact(&self) -> &str {
-        "Query the status of a background job."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {

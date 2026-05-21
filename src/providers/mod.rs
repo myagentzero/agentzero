@@ -1012,14 +1012,6 @@ fn resolve_provider_credential(name: &str, credential_override: Option<&str>) ->
     None
 }
 
-/// Check whether a provider credential can be resolved from override/env fallbacks.
-///
-/// This mirrors provider credential resolution while avoiding exposing the
-/// resolved secret value to callers that only need presence/absence.
-pub fn has_provider_credential(name: &str, credential_override: Option<&str>) -> bool {
-    resolve_provider_credential(name, credential_override).is_some()
-}
-
 /// Returns true if the provider can resolve any credential from the given override and/or
 /// its supported environment/cached sources.
 ///
@@ -1199,7 +1191,6 @@ fn create_provider_with_url_and_options(
                 options.max_tokens_override,
             ),
         )),
-        // Ollama uses api_url for custom base URL (e.g. remote Ollama instance)
         "ollama" => Ok(Box::new(ollama::OllamaProvider::new_with_reasoning(
             api_url,
             key,
@@ -2531,7 +2522,6 @@ mod tests {
     #[test]
     fn factory_ollama() {
         assert!(create_provider("ollama", None).is_ok());
-        // Ollama may use API key when a remote endpoint is configured.
         assert!(create_provider("ollama", Some("dummy")).is_ok());
         assert!(create_provider("ollama", Some("any-value-here")).is_ok());
     }
@@ -2541,7 +2531,6 @@ mod tests {
         assert!(create_provider("gemini", Some("test-key")).is_ok());
         assert!(create_provider("google", Some("test-key")).is_ok());
         assert!(create_provider("google-gemini", Some("test-key")).is_ok());
-        // Should also work without key (will try CLI auth)
         assert!(create_provider("gemini", None).is_ok());
     }
 
@@ -2648,7 +2637,6 @@ mod tests {
         // Bedrock uses AWS env vars for credentials, not API key.
         assert!(create_provider("bedrock", None).is_ok());
         assert!(create_provider("aws-bedrock", None).is_ok());
-        // Passing an api_key is harmless (ignored).
         assert!(create_provider("bedrock", Some("ignored")).is_ok());
     }
 
@@ -2761,16 +2749,12 @@ mod tests {
 
     #[test]
     fn factory_osaurus() {
-        // Osaurus works without an explicit key (defaults to "osaurus").
         assert!(create_provider("osaurus", None).is_ok());
-        // Osaurus also works with an explicit key.
         assert!(create_provider("osaurus", Some("custom-key")).is_ok());
     }
 
     #[test]
     fn factory_osaurus_uses_default_key_when_none() {
-        // Verify that create_provider_with_url_and_options succeeds even
-        // without an API key — the match arm provides a default placeholder.
         let options = ProviderRuntimeOptions::default();
         let p = create_provider_with_url_and_options("osaurus", None, None, &options);
         assert!(p.is_ok());
@@ -2778,7 +2762,6 @@ mod tests {
 
     #[test]
     fn factory_osaurus_custom_url() {
-        // Verify that a custom api_url overrides the default localhost endpoint.
         let options = ProviderRuntimeOptions::default();
         let p = create_provider_with_url_and_options(
             "osaurus",

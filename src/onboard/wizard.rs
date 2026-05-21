@@ -198,6 +198,7 @@ pub async fn run_wizard(force: bool) -> Result<Config> {
         workspace_dir: workspace_dir.clone(),
         config_path: config_path.clone(),
         skip_bootstrap_files: false,
+        skip_input_autosave: false,
         api_key: if api_key.is_empty() {
             None
         } else {
@@ -256,6 +257,7 @@ pub async fn run_wizard(force: bool) -> Result<Config> {
         notion: crate::config::NotionConfig::default(),
         atlassian: crate::config::schema::AtlassianConfig::default(),
         elasticsearch: crate::config::schema::ElasticsearchConfig::default(),
+        github: crate::config::schema::GitHubToolConfig::default(),
         ask_user: crate::config::AskUserConfig::default(),
         local_context: crate::config::schema::LocalContextConfig::default(),
     };
@@ -578,6 +580,7 @@ async fn run_quick_setup_with_home(
         workspace_dir: workspace_dir.clone(),
         config_path: config_path.clone(),
         skip_bootstrap_files: false,
+        skip_input_autosave: false,
         api_key: credential_override.map(|c| {
             let mut s = String::with_capacity(c.len());
             s.push_str(c);
@@ -636,6 +639,7 @@ async fn run_quick_setup_with_home(
         notion: crate::config::NotionConfig::default(),
         atlassian: crate::config::schema::AtlassianConfig::default(),
         elasticsearch: crate::config::schema::ElasticsearchConfig::default(),
+        github: crate::config::schema::GitHubToolConfig::default(),
         ask_user: crate::config::AskUserConfig::default(),
         local_context: crate::config::schema::LocalContextConfig::default(),
     };
@@ -4815,7 +4819,7 @@ fn setup_tunnel() -> Result<crate::config::TunnelConfig> {
 async fn scaffold_workspace(
     workspace_dir: &Path,
     ctx: &ProjectContext,
-    memory_backend: &str,
+    _memory_backend: &str,
     identity_config: &IdentityConfig,
 ) -> Result<()> {
     let agent = if ctx.agent_name.is_empty() {
@@ -4828,9 +4832,6 @@ async fn scaffold_workspace(
     } else {
         &ctx.user_name
     };
-    let memory_kind = classify_memory_backend(memory_backend);
-    let uses_markdown_memory = memory_kind == MemoryBackendKind::Markdown;
-
     let identity = "# IDENTITY.md".to_string();
 
     let agents = "# AGENTS.md".to_string();
@@ -4847,7 +4848,7 @@ async fn scaffold_workspace(
 
     let memory = "# MEMORY.md";
 
-    let mut files: Vec<(&str, String)> = vec![
+    let files: Vec<(&str, String)> = vec![
         ("IDENTITY.md", identity),
         ("AGENTS.md", agents),
         ("HEARTBEAT.md", heartbeat),
@@ -4855,10 +4856,8 @@ async fn scaffold_workspace(
         ("USER.md", user_md),
         ("TOOLS.md", tools.to_string()),
         ("BOOTSTRAP.md", bootstrap),
+        ("MEMORY.md", memory.to_string()),
     ];
-    if uses_markdown_memory {
-        files.push(("MEMORY.md", memory.to_string()));
-    }
 
     let mut aieos_identity_file: Option<(String, String)> = None;
     if identity_config.format == "aieos" {
@@ -5522,7 +5521,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn scaffold_skips_memory_md_for_sqlite() {
+    async fn scaffold_creates_memory_md_for_all_backends() {
         let tmp = TempDir::new().unwrap();
         let ctx = ProjectContext::default();
         scaffold_workspace(
@@ -5542,14 +5541,11 @@ mod tests {
             "USER.md",
             "TOOLS.md",
             "BOOTSTRAP.md",
+            "MEMORY.md",
         ];
         for f in &expected {
             assert!(tmp.path().join(f).exists(), "missing file: {f}");
         }
-        assert!(
-            !tmp.path().join("MEMORY.md").exists(),
-            "MEMORY.md should not be created for sqlite backend"
-        );
     }
 
     #[tokio::test]

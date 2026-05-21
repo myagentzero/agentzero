@@ -38,16 +38,12 @@
 //! ```
 
 pub mod bridge;
-pub mod discovery;
-pub mod loader;
+mod discovery;
+mod loader;
 pub mod manifest;
 pub mod registry;
 pub mod traits;
 
-#[allow(unused_imports)]
-pub use discovery::discover_plugins;
-#[allow(unused_imports)]
-pub use loader::load_plugins;
 #[allow(unused_imports)]
 pub use manifest::{PLUGIN_MANIFEST_FILENAME, PluginManifest};
 #[allow(unused_imports)]

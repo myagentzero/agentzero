@@ -23,6 +23,8 @@ export default function Cron() {
   const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [selectedJob, setSelectedJob] = useState<CronJob | null>(null);
+  const [copied, setCopied] = useState(false);
 
   // Form state
   const [formName, setFormName] = useState('');
@@ -232,9 +234,6 @@ export default function Cron() {
                   Name
                 </th>
                 <th className="text-left px-4 py-3 text-gray-400 font-medium">
-                  Command
-                </th>
-                <th className="text-left px-4 py-3 text-gray-400 font-medium">
                   Next Run
                 </th>
                 <th className="text-left px-4 py-3 text-gray-400 font-medium">
@@ -255,16 +254,14 @@ export default function Cron() {
               {jobs.map((job) => (
                 <tr
                   key={job.id}
-                  className="border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors"
+                  onClick={() => setSelectedJob(job)}
+                  className="border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors cursor-pointer"
                 >
                   <td className="px-4 py-3 text-gray-400 font-mono text-xs">
                     {job.id.slice(0, 8)}
                   </td>
                   <td className="px-4 py-3 text-white font-medium">
                     {job.name ?? '-'}
-                  </td>
-                  <td className="px-4 py-3 text-gray-300 font-mono text-xs max-w-[200px] truncate">
-                    {job.command}
                   </td>
                   <td className="px-4 py-3 text-gray-400 text-xs">
                     {formatDate(job.next_run)}
@@ -299,7 +296,10 @@ export default function Cron() {
                       {job.light_context ? 'On' : 'Off'}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-right">
+                  <td
+                    className="px-4 py-3 text-right"
+                    onClick={(e) => e.stopPropagation()}
+                  >
                     {confirmDelete === job.id ? (
                       <div className="flex items-center justify-end gap-2">
                         <span className="text-xs text-red-400">Delete?</span>
@@ -329,6 +329,224 @@ export default function Cron() {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* Detail Modal */}
+      {selectedJob && (
+        <div
+          className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4"
+          onClick={() => {
+            setSelectedJob(null);
+            setCopied(false);
+          }}
+        >
+          <div
+            className="bg-gray-900 border border-gray-700 rounded-xl w-full max-w-2xl max-h-[85vh] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between p-6 pb-4 border-b border-gray-800">
+              <div className="flex items-center gap-2 min-w-0">
+                <Clock className="h-5 w-5 text-blue-400 shrink-0" />
+                <h3 className="text-lg font-semibold text-white truncate">
+                  {selectedJob.name ?? 'Untitled Task'}
+                </h3>
+              </div>
+              <button
+                onClick={() => {
+                  setSelectedJob(null);
+                  setCopied(false);
+                }}
+                className="text-gray-400 hover:text-white transition-colors shrink-0 ml-3"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="overflow-y-auto flex-1 p-6 space-y-5 text-sm">
+              <div>
+                <div className="text-xs uppercase tracking-wide text-gray-500 mb-1">
+                  ID
+                </div>
+                <div className="text-gray-300 font-mono text-xs break-all">
+                  {selectedJob.id}
+                </div>
+              </div>
+
+              <div>
+                <div className="text-xs uppercase tracking-wide text-gray-500 mb-1">
+                  Schedule
+                </div>
+                <div className="text-white font-mono bg-gray-800 border border-gray-700 rounded-md px-3 py-2">
+                  {selectedJob.expression}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <div className="text-xs uppercase tracking-wide text-gray-500 mb-1">
+                    Type
+                  </div>
+                  <div className="text-gray-200 capitalize">
+                    {selectedJob.job_type}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs uppercase tracking-wide text-gray-500 mb-1">
+                    Session
+                  </div>
+                  <div className="text-gray-200 capitalize">
+                    {selectedJob.session_target}
+                  </div>
+                </div>
+                {selectedJob.model && (
+                  <div className="col-span-2">
+                    <div className="text-xs uppercase tracking-wide text-gray-500 mb-1">
+                      Model
+                    </div>
+                    <div className="text-gray-200 font-mono text-xs">
+                      {selectedJob.model}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <div className="text-xs uppercase tracking-wide text-gray-500 mb-1">
+                  Command
+                </div>
+                <div className="text-gray-200 font-mono text-xs bg-gray-800 border border-gray-700 rounded-md px-3 py-2 whitespace-pre-wrap break-all">
+                  {selectedJob.command || '—'}
+                </div>
+              </div>
+
+              <div>
+                <div className="text-xs uppercase tracking-wide text-gray-500 mb-1">
+                  Prompt
+                </div>
+                {selectedJob.prompt ? (
+                  <div className="text-gray-200 font-mono text-xs bg-gray-800 border border-gray-700 rounded-md px-3 py-2 whitespace-pre-wrap break-words max-h-64 overflow-y-auto">
+                    {selectedJob.prompt}
+                  </div>
+                ) : (
+                  <div className="text-gray-500 italic">
+                    No prompt configured for this task.
+                  </div>
+                )}
+              </div>
+
+              <div className="flex items-center gap-2 flex-wrap">
+                <span
+                  className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+                    selectedJob.enabled
+                      ? 'bg-green-900/40 text-green-400 border border-green-700/50'
+                      : 'bg-gray-800 text-gray-500 border border-gray-700'
+                  }`}
+                >
+                  {selectedJob.enabled ? 'Enabled' : 'Disabled'}
+                </span>
+                <span
+                  className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+                    selectedJob.light_context
+                      ? 'bg-blue-900/40 text-blue-400 border border-blue-700/50'
+                      : 'bg-gray-800 text-gray-500 border border-gray-700'
+                  }`}
+                >
+                  Light Context: {selectedJob.light_context ? 'On' : 'Off'}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4 pt-2 border-t border-gray-800">
+                <div>
+                  <div className="text-xs uppercase tracking-wide text-gray-500 mb-1">
+                    Created
+                  </div>
+                  <div className="text-gray-300 text-xs">
+                    {formatDate(selectedJob.created_at)}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs uppercase tracking-wide text-gray-500 mb-1">
+                    Next Run
+                  </div>
+                  <div className="text-gray-300 text-xs">
+                    {formatDate(selectedJob.next_run)}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs uppercase tracking-wide text-gray-500 mb-1">
+                    Last Run
+                  </div>
+                  <div className="text-gray-300 text-xs">
+                    {formatDate(selectedJob.last_run)}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs uppercase tracking-wide text-gray-500 mb-1">
+                    Last Status
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    {statusIcon(selectedJob.last_status)}
+                    <span className="text-gray-300 text-xs capitalize">
+                      {selectedJob.last_status ?? '-'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {selectedJob.last_output && (
+                <div>
+                  <div className="text-xs uppercase tracking-wide text-gray-500 mb-1">
+                    Last Output
+                  </div>
+                  <div className="text-gray-200 font-mono text-xs bg-gray-800 border border-gray-700 rounded-md px-3 py-2 whitespace-pre-wrap break-words max-h-48 overflow-y-auto">
+                    {selectedJob.last_output}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-end gap-3 p-6 pt-4 border-t border-gray-800">
+              {selectedJob.prompt && (
+                <button
+                  onClick={() => {
+                    if (navigator.clipboard) {
+                      navigator.clipboard.writeText(
+                        selectedJob.prompt ?? '',
+                      ).then(() => {
+                        setCopied(true);
+                        setTimeout(() => setCopied(false), 2000);
+                      });
+                    } else {
+                      // Fallback for non-secure contexts (HTTP)
+                      const textarea = document.createElement('textarea');
+                      textarea.value = selectedJob.prompt ?? '';
+                      textarea.style.position = 'fixed';
+                      textarea.style.opacity = '0';
+                      document.body.appendChild(textarea);
+                      textarea.select();
+                      document.execCommand('copy');
+                      document.body.removeChild(textarea);
+                      setCopied(true);
+                      setTimeout(() => setCopied(false), 2000);
+                    }
+                  }}
+                  className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-300 hover:text-white border border-gray-700 rounded-lg hover:bg-gray-800 transition-colors"
+                >
+                  {copied ? 'Copied!' : 'Copy Prompt'}
+                </button>
+              )}
+              <button
+                onClick={() => {
+                  setSelectedJob(null);
+                  setCopied(false);
+                }}
+                className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
+              >
+                Close
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

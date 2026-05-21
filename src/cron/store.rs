@@ -19,14 +19,6 @@ impl rusqlite::types::FromSql for JobType {
     }
 }
 
-pub fn add_job(config: &Config, expression: &str, command: &str) -> Result<CronJob> {
-    let schedule = Schedule::Cron {
-        expr: expression.to_string(),
-        tz: None,
-    };
-    add_shell_job(config, None, schedule, command)
-}
-
 pub fn add_shell_job(
     config: &Config,
     name: Option<String>,
@@ -601,11 +593,20 @@ mod tests {
     }
 
     #[test]
-    fn add_job_accepts_five_field_expression() {
+    fn add_shell_job_accepts_five_field_expression() {
         let tmp = TempDir::new().unwrap();
         let config = test_config(&tmp);
 
-        let job = add_job(&config, "*/5 * * * *", "echo ok").unwrap();
+        let job = add_shell_job(
+            &config,
+            None,
+            Schedule::Cron {
+                expr: "*/5 * * * *".into(),
+                tz: None,
+            },
+            "echo ok",
+        )
+        .unwrap();
         assert_eq!(job.expression, "*/5 * * * *");
         assert_eq!(job.command, "echo ok");
         assert!(matches!(job.schedule, Schedule::Cron { .. }));
@@ -642,7 +643,16 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let config = test_config(&tmp);
 
-        let job = add_job(&config, "*/10 * * * *", "echo roundtrip").unwrap();
+        let job = add_shell_job(
+            &config,
+            None,
+            Schedule::Cron {
+                expr: "*/10 * * * *".into(),
+                tz: None,
+            },
+            "echo roundtrip",
+        )
+        .unwrap();
         let listed = list_jobs(&config).unwrap();
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].id, job.id);
@@ -656,7 +666,16 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let config = test_config(&tmp);
 
-        let job = add_job(&config, "* * * * *", "echo due").unwrap();
+        let job = add_shell_job(
+            &config,
+            None,
+            Schedule::Cron {
+                expr: "* * * * *".into(),
+                tz: None,
+            },
+            "echo due",
+        )
+        .unwrap();
 
         let due_now = due_jobs(&config, Utc::now()).unwrap();
         assert!(due_now.is_empty(), "new job should not be due immediately");
@@ -684,9 +703,36 @@ mod tests {
         let mut config = test_config(&tmp);
         config.scheduler.max_tasks = 2;
 
-        let _ = add_job(&config, "* * * * *", "echo due-1").unwrap();
-        let _ = add_job(&config, "* * * * *", "echo due-2").unwrap();
-        let _ = add_job(&config, "* * * * *", "echo due-3").unwrap();
+        let _ = add_shell_job(
+            &config,
+            None,
+            Schedule::Cron {
+                expr: "* * * * *".into(),
+                tz: None,
+            },
+            "echo due-1",
+        )
+        .unwrap();
+        let _ = add_shell_job(
+            &config,
+            None,
+            Schedule::Cron {
+                expr: "* * * * *".into(),
+                tz: None,
+            },
+            "echo due-2",
+        )
+        .unwrap();
+        let _ = add_shell_job(
+            &config,
+            None,
+            Schedule::Cron {
+                expr: "* * * * *".into(),
+                tz: None,
+            },
+            "echo due-3",
+        )
+        .unwrap();
 
         let far_future = Utc::now() + ChronoDuration::days(365);
         let due = due_jobs(&config, far_future).unwrap();
@@ -698,7 +744,16 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let config = test_config(&tmp);
 
-        let job = add_job(&config, "*/15 * * * *", "echo run").unwrap();
+        let job = add_shell_job(
+            &config,
+            None,
+            Schedule::Cron {
+                expr: "*/15 * * * *".into(),
+                tz: None,
+            },
+            "echo run",
+        )
+        .unwrap();
         reschedule_after_run(&config, &job, false, "failed output").unwrap();
 
         let listed = list_jobs(&config).unwrap();
@@ -797,7 +852,16 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let mut config = test_config(&tmp);
         config.cron.max_run_history = 2;
-        let job = add_job(&config, "*/5 * * * *", "echo ok").unwrap();
+        let job = add_shell_job(
+            &config,
+            None,
+            Schedule::Cron {
+                expr: "*/5 * * * *".into(),
+                tz: None,
+            },
+            "echo ok",
+        )
+        .unwrap();
         let base = Utc::now();
 
         for idx in 0..3 {
@@ -814,7 +878,16 @@ mod tests {
     fn remove_job_cascades_run_history() {
         let tmp = TempDir::new().unwrap();
         let config = test_config(&tmp);
-        let job = add_job(&config, "*/5 * * * *", "echo ok").unwrap();
+        let job = add_shell_job(
+            &config,
+            None,
+            Schedule::Cron {
+                expr: "*/5 * * * *".into(),
+                tz: None,
+            },
+            "echo ok",
+        )
+        .unwrap();
         let start = Utc::now();
         record_run(
             &config,
@@ -836,7 +909,16 @@ mod tests {
     fn record_run_truncates_large_output() {
         let tmp = TempDir::new().unwrap();
         let config = test_config(&tmp);
-        let job = add_job(&config, "*/5 * * * *", "echo trunc").unwrap();
+        let job = add_shell_job(
+            &config,
+            None,
+            Schedule::Cron {
+                expr: "*/5 * * * *".into(),
+                tz: None,
+            },
+            "echo trunc",
+        )
+        .unwrap();
         let output = "x".repeat(MAX_CRON_OUTPUT_BYTES + 512);
 
         record_run(
@@ -860,7 +942,16 @@ mod tests {
     fn reschedule_after_run_truncates_last_output() {
         let tmp = TempDir::new().unwrap();
         let config = test_config(&tmp);
-        let job = add_job(&config, "*/5 * * * *", "echo trunc").unwrap();
+        let job = add_shell_job(
+            &config,
+            None,
+            Schedule::Cron {
+                expr: "*/5 * * * *".into(),
+                tz: None,
+            },
+            "echo trunc",
+        )
+        .unwrap();
         let output = "y".repeat(MAX_CRON_OUTPUT_BYTES + 1024);
 
         reschedule_after_run(&config, &job, false, &output).unwrap();

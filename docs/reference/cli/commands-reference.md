@@ -21,9 +21,8 @@ Last verified: **March 26, 2026**.
 | `models` | Refresh provider model catalogs |
 | `providers` | List provider IDs, aliases, and active provider |
 | `channel` | Manage channels and channel health checks |
-| `integrations` | Inspect integration details |
+| `integrations` | View integration details and setup instructions |
 | `skills` | List/install/remove skills |
-| `migrate` | Import from external runtimes (currently OpenClaw) |
 | `config` | Manage configuration (view/set properties, export schema) |
 | `completions` | Generate shell completion scripts to stdout |
 | `hardware` | Discover and introspect USB hardware |
@@ -191,10 +190,6 @@ Use `skills audit` to manually validate a candidate skill directory (or an insta
 Skill manifests (`SKILL.toml`) support `prompts` and `[[tools]]`; both are injected into the agent system prompt at runtime, so the model can follow skill instructions without manually reading skill files.
 
 Tools defined with `kind = "shell"` or `kind = "http"` in `[[tools]]` sections are registered as first-class callable tools in the agent's tool registry (prefixed as `skill_name.tool_name`). See [Skills Authoring Guide](../skills-authoring.md) for full format documentation, argument substitution, security model, self-improvement, pipeline tool, and TEST.sh validation.
-
-### `migrate`
-
-- `zeroclaw migrate openclaw [--source <path>] [--dry-run]`
 
 ### `config`
 

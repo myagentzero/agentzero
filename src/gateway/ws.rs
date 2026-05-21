@@ -10,7 +10,7 @@
 //! ```
 
 use super::AppState;
-use crate::agent::loop_::{build_shell_policy_instructions, build_tool_instructions_from_specs};
+use crate::agent::loop_::build_shell_policy_instructions;
 use crate::memory::MemoryCategory;
 use crate::providers::ChatMessage;
 use axum::{
@@ -296,7 +296,6 @@ fn finalize_ws_response(
 
 fn build_ws_system_prompt(
     config: &crate::config::Config,
-    model: &str,
     tools_registry: &[Box<dyn crate::tools::Tool>],
     native_tools: bool,
 ) -> String {
@@ -304,21 +303,15 @@ fn build_ws_system_prompt(
         tools_registry.iter().map(|tool| tool.spec()).collect();
     tool_specs.sort_by(|a, b| a.name.cmp(&b.name));
 
-    let tool_descs: Vec<(&str, &str)> = tool_specs
-        .iter()
-        .map(|spec| (spec.name.as_str(), spec.description.as_str()))
-        .collect();
-
     let bootstrap_max_chars = if config.agent.compact_context {
         Some(6000)
     } else {
         None
     };
 
-    let mut prompt = crate::channels::build_system_prompt_with_mode(
+    let prompt = crate::channels::build_system_prompt_with_mode(
         &config.workspace_dir,
-        model,
-        &tool_descs,
+        &tool_specs,
         &[],
         Some(&config.identity),
         bootstrap_max_chars,
@@ -327,13 +320,12 @@ fn build_ws_system_prompt(
         false,
         config.local_context.timezone.as_deref(),
         None,
+        Some(&config.hardware),
     );
-    if !native_tools {
-        prompt.push_str(&build_tool_instructions_from_specs(&tool_specs));
-    }
-    prompt.push_str(&build_shell_policy_instructions(&config.autonomy));
+    let mut result = prompt;
+    result.push_str(&build_shell_policy_instructions(&config.autonomy));
 
-    prompt
+    result
 }
 
 fn refresh_ws_history_system_prompt_datetime(
@@ -426,7 +418,6 @@ async fn handle_socket(mut socket: WebSocket, state: AppState, session_id: Strin
         let config_guard = state.config.lock();
         build_ws_system_prompt(
             &config_guard,
-            &state.model,
             state.tools_registry_exec.as_ref(),
             state.provider.supports_native_tools(),
         )
@@ -778,16 +769,16 @@ mod tests {
         assert_eq!(evaluate_ws_auth(false, false, true), None);
     }
 
-    struct MockScheduleTool;
+    struct MockBrowserTool;
 
     #[async_trait]
-    impl Tool for MockScheduleTool {
+    impl Tool for MockBrowserTool {
         fn name(&self) -> &str {
-            "schedule"
+            "browser"
         }
 
         fn description(&self) -> &str {
-            "Mock schedule tool"
+            "Mock browser tool"
         }
 
         fn parameters_schema(&self) -> serde_json::Value {
@@ -812,7 +803,7 @@ mod tests {
     fn sanitize_ws_response_removes_tool_call_tags() {
         let input = r#"Before
 <tool_call>
-{"name":"schedule","arguments":{"action":"create"}}
+{"name":"browser","arguments":{"action":"screenshot"}}
 </tool_call>
 After"#;
 
@@ -825,20 +816,20 @@ After"#;
             .join("\n");
         assert_eq!(normalized, "Before\nAfter");
         assert!(!result.contains("<tool_call>"));
-        assert!(!result.contains("\"name\":\"schedule\""));
+        assert!(!result.contains("\"name\":\"browser\""));
     }
 
     #[test]
     fn sanitize_ws_response_removes_isolated_tool_json_artifacts() {
-        let tools: Vec<Box<dyn Tool>> = vec![Box::new(MockScheduleTool)];
-        let input = r#"{"name":"schedule","parameters":{"action":"create"}}
-{"result":{"status":"scheduled"}}
-Reminder set successfully."#;
+        let tools: Vec<Box<dyn Tool>> = vec![Box::new(MockBrowserTool)];
+        let input = r#"{"name":"browser","parameters":{"action":"screenshot"}}
+{"result":{"status":"captured"}}
+Screenshot captured successfully."#;
 
         let leak_guard = crate::config::OutboundLeakGuardConfig::default();
         let result = sanitize_ws_response(input, &tools, &leak_guard);
-        assert_eq!(result, "Reminder set successfully.");
-        assert!(!result.contains("\"name\":\"schedule\""));
+        assert_eq!(result, "Screenshot captured successfully.");
+        assert!(!result.contains("\"name\":\"browser\""));
         assert!(!result.contains("\"result\""));
     }
 
@@ -859,30 +850,30 @@ Reminder set successfully."#;
     #[test]
     fn build_ws_system_prompt_includes_tool_protocol_for_prompt_mode() {
         let config = crate::config::Config::default();
-        let tools: Vec<Box<dyn Tool>> = vec![Box::new(MockScheduleTool)];
+        let tools: Vec<Box<dyn Tool>> = vec![Box::new(MockBrowserTool)];
 
-        let prompt = build_ws_system_prompt(&config, "test-model", &tools, false);
+        let prompt = build_ws_system_prompt(&config, &tools, false);
 
         assert!(prompt.contains("## Tool Use Protocol"));
-        assert!(prompt.contains("**schedule**"));
+        assert!(prompt.contains("**browser**"));
         assert!(prompt.contains("## Shell Policy"));
     }
 
     #[test]
     fn build_ws_system_prompt_omits_xml_protocol_for_native_mode() {
         let config = crate::config::Config::default();
-        let tools: Vec<Box<dyn Tool>> = vec![Box::new(MockScheduleTool)];
+        let tools: Vec<Box<dyn Tool>> = vec![Box::new(MockBrowserTool)];
 
-        let prompt = build_ws_system_prompt(&config, "test-model", &tools, true);
+        let prompt = build_ws_system_prompt(&config, &tools, true);
 
         assert!(!prompt.contains("## Tool Use Protocol"));
-        assert!(prompt.contains("**schedule**"));
+        assert!(prompt.contains("**browser**"));
         assert!(prompt.contains("## Shell Policy"));
     }
 
     #[test]
     fn finalize_ws_response_uses_prompt_mode_tool_output_when_final_text_empty() {
-        let tools: Vec<Box<dyn Tool>> = vec![Box::new(MockScheduleTool)];
+        let tools: Vec<Box<dyn Tool>> = vec![Box::new(MockBrowserTool)];
         let history = vec![
             ChatMessage::system("sys"),
             ChatMessage::user(
@@ -899,7 +890,7 @@ Reminder set successfully."#;
 
     #[test]
     fn finalize_ws_response_uses_native_tool_message_output_when_final_text_empty() {
-        let tools: Vec<Box<dyn Tool>> = vec![Box::new(MockScheduleTool)];
+        let tools: Vec<Box<dyn Tool>> = vec![Box::new(MockBrowserTool)];
         let history = vec![ChatMessage {
             role: "tool".to_string(),
             content: r#"{"tool_call_id":"call_1","content":"Filesystem /dev/disk3s1: 210G free"}"#
@@ -914,7 +905,7 @@ Reminder set successfully."#;
 
     #[test]
     fn finalize_ws_response_uses_static_fallback_when_nothing_available() {
-        let tools: Vec<Box<dyn Tool>> = vec![Box::new(MockScheduleTool)];
+        let tools: Vec<Box<dyn Tool>> = vec![Box::new(MockBrowserTool)];
         let history = vec![ChatMessage::system("sys")];
 
         let leak_guard = crate::config::OutboundLeakGuardConfig::default();

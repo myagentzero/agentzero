@@ -83,9 +83,7 @@ pub(crate) mod cost;
 pub(crate) mod cron;
 pub(crate) mod daemon;
 pub(crate) mod doctor;
-pub mod economic;
 pub mod gateway;
-pub mod goals;
 pub(crate) mod hardware;
 pub(crate) mod health;
 pub(crate) mod heartbeat;
@@ -101,7 +99,6 @@ pub mod peripherals;
 #[allow(unused_imports)]
 pub(crate) mod plugins;
 pub mod providers;
-pub mod rag;
 pub mod runtime;
 pub(crate) mod security;
 pub(crate) mod service;

@@ -130,7 +130,16 @@ fn matches_locale(rule: &AckReactionRuleConfig, locale_hint: Option<&str>) -> bo
 }
 
 fn contains_keyword(text: &str, keyword: &str) -> bool {
-    text.contains(&keyword.to_ascii_lowercase())
+    let keyword = keyword.trim();
+    if keyword.is_empty() {
+        return false;
+    }
+
+    let pattern = format!(r"(?i)\b{}\b", regex::escape(keyword));
+    match RegexBuilder::new(&pattern).build() {
+        Ok(regex) => regex.is_match(text),
+        Err(_) => false,
+    }
 }
 
 fn regex_is_match(pattern: &str, text: &str) -> bool {
@@ -520,6 +529,42 @@ mod tests {
         assert_eq!(
             select_ack_reaction(Some(&cfg), &["✅"], &ctx()).as_deref(),
             Some("🧪")
+        );
+    }
+
+    #[test]
+    fn contains_keyword_requires_boundaries() {
+        assert!(!contains_keyword("in secondbrain code", "rain"));
+        assert!(contains_keyword("looks like rain today", "rain"));
+        assert!(contains_keyword("pull request merged", "pull request"));
+    }
+
+    #[test]
+    fn weather_rule_does_not_match_secondbrain_substring() {
+        let weather_rule = AckReactionRuleConfig {
+            contains_any: vec!["rain".into()],
+            strategy: Some(AckReactionStrategy::First),
+            emojis: vec!["🌧️".into()],
+            ..AckReactionRuleConfig::default()
+        };
+        let cfg = AckReactionConfig {
+            strategy: AckReactionStrategy::First,
+            emojis: vec!["👍".into()],
+            rules: vec![weather_rule],
+            ..AckReactionConfig::default()
+        };
+
+        let ctx = AckReactionContext {
+            text: "in the secondbrain code, update USER_AGENT",
+            sender_id: Some("u123"),
+            chat_id: Some("-100200300"),
+            chat_type: AckReactionContextChatType::Group,
+            locale_hint: Some("en_us"),
+        };
+
+        assert_eq!(
+            select_ack_reaction(Some(&cfg), &["✅"], &ctx).as_deref(),
+            Some("👍")
         );
     }
 

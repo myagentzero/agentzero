@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use crate::channels::traits::ChannelMessage;
 use crate::plugins::traits::PluginCapability;
-use crate::providers::traits::{ChatMessage, ChatResponse};
+use crate::providers::traits::ChatMessage;
 use crate::tools::traits::ToolResult;
 
 /// Result of a modifying hook — continue with (possibly modified) data, or cancel.
@@ -37,35 +37,10 @@ pub trait HookHandler: Send + Sync {
     // --- Void hooks (parallel, fire-and-forget) ---
     async fn on_gateway_start(&self, _host: &str, _port: u16) {}
     async fn on_gateway_stop(&self) {}
-    async fn on_session_start(&self, _session_id: &str, _channel: &str) {}
-    async fn on_session_end(&self, _session_id: &str, _channel: &str) {}
     async fn on_llm_input(&self, _messages: &[ChatMessage], _model: &str) {}
-    async fn on_llm_output(&self, _response: &ChatResponse) {}
     async fn on_after_tool_call(&self, _tool: &str, _result: &ToolResult, _duration: Duration) {}
-    async fn on_message_sent(&self, _channel: &str, _recipient: &str, _content: &str) {}
-    async fn on_heartbeat_tick(&self) {}
 
     // --- Modifying hooks (sequential by priority, can cancel) ---
-    async fn before_model_resolve(
-        &self,
-        provider: String,
-        model: String,
-    ) -> HookResult<(String, String)> {
-        HookResult::Continue((provider, model))
-    }
-
-    async fn before_prompt_build(&self, prompt: String) -> HookResult<String> {
-        HookResult::Continue(prompt)
-    }
-
-    async fn before_llm_call(
-        &self,
-        messages: Vec<ChatMessage>,
-        model: String,
-    ) -> HookResult<(Vec<ChatMessage>, String)> {
-        HookResult::Continue((messages, model))
-    }
-
     async fn before_tool_call(&self, name: String, args: Value) -> HookResult<(String, Value)> {
         HookResult::Continue((name, args))
     }

@@ -10,7 +10,6 @@ mod audit;
 pub mod creator;
 #[cfg(feature = "skill-creation")]
 pub mod improver;
-pub mod testing;
 
 const OPEN_SKILLS_REPO_URL: &str = "git@github.com:myagentzero/open-skills.git";
 const OPEN_SKILLS_SYNC_MARKER: &str = ".zeroclaw-open-skills-sync";

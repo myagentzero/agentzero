@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { Puzzle, Check, Zap, Clock, KeyRound, X } from 'lucide-react';
-import ChatChannelsGuide from '@/components/integrations/ChatChannelsGuide';
 import type {
   Integration,
   IntegrationCredentialsField,
@@ -456,8 +455,6 @@ export default function Integrations() {
           {quickModelError}
         </div>
       )}
-
-      <ChatChannelsGuide />
 
       {/* Category Filter Tabs */}
       <div className="flex flex-wrap gap-2">

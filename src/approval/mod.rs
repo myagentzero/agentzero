@@ -1183,15 +1183,14 @@ mod tests {
         mgr.create_non_cli_pending_request("shell", "alice", "slack", "chat-1", None);
         mgr.create_non_cli_pending_request("file_write", "bob", "slack", "chat-1", None);
         mgr.create_non_cli_pending_request("browser", "alice", "discord", "chat-9", None);
-        mgr.create_non_cli_pending_request("schedule", "alice", "slack", "chat-2", None);
+        mgr.create_non_cli_pending_request("git", "alice", "slack", "chat-2", None);
 
         let alice_slack =
             mgr.list_non_cli_pending_requests(Some("alice"), Some("slack"), Some("chat-1"));
         assert_eq!(alice_slack.len(), 1);
         assert_eq!(alice_slack[0].tool_name, "shell");
 
-        let slack_chat1 =
-            mgr.list_non_cli_pending_requests(None, Some("slack"), Some("chat-1"));
+        let slack_chat1 = mgr.list_non_cli_pending_requests(None, Some("slack"), Some("chat-1"));
         assert_eq!(slack_chat1.len(), 2);
     }
 
