@@ -13,6 +13,7 @@ const BOOTSTRAP_FILES: &[&str] = &[
     "TOOLS.md",
     "USER.md",
     "MEMORY.md",
+    "SECURITY.md",
 ];
 
 const PROTECTED_DIRS: &[&str] = &["memory", "state", "sessions", "cron"];

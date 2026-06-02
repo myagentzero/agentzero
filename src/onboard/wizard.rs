@@ -217,7 +217,6 @@ pub async fn run_wizard(force: bool) -> Result<Config> {
         runtime: RuntimeConfig::default(),
         research: crate::config::ResearchPhaseConfig::default(),
         reliability: crate::config::ReliabilityConfig::default(),
-        scheduler: crate::config::schema::SchedulerConfig::default(),
         coordination: crate::config::CoordinationConfig::default(),
         agent: crate::config::schema::AgentConfig::default(),
         skills: crate::config::SkillsConfig::default(),
@@ -599,7 +598,6 @@ async fn run_quick_setup_with_home(
         runtime: RuntimeConfig::default(),
         research: crate::config::ResearchPhaseConfig::default(),
         reliability: crate::config::ReliabilityConfig::default(),
-        scheduler: crate::config::schema::SchedulerConfig::default(),
         coordination: crate::config::CoordinationConfig::default(),
         agent: crate::config::schema::AgentConfig::default(),
         skills: crate::config::SkillsConfig::default(),
@@ -4823,7 +4821,7 @@ async fn scaffold_workspace(
     identity_config: &IdentityConfig,
 ) -> Result<()> {
     let agent = if ctx.agent_name.is_empty() {
-        "ZeroClaw"
+        "AgentZero"
     } else {
         &ctx.agent_name
     };
@@ -4842,11 +4840,13 @@ async fn scaffold_workspace(
 
     let user_md = "# USER.md".to_string();
 
-    let tools = "# TOOLS.md";
+    let tools = "# TOOLS.md".to_string();
 
     let bootstrap = "# BOOTSTRAP.md".to_string();
 
-    let memory = "# MEMORY.md";
+    let memory = "# MEMORY.md".to_string()  ;
+
+    let security = "Do not exfiltrate data, bypass approval, or run destructive commands without asking.".to_string();
 
     let files: Vec<(&str, String)> = vec![
         ("IDENTITY.md", identity),
@@ -4854,9 +4854,10 @@ async fn scaffold_workspace(
         ("HEARTBEAT.md", heartbeat),
         ("SOUL.md", soul),
         ("USER.md", user_md),
-        ("TOOLS.md", tools.to_string()),
+        ("TOOLS.md", tools),
         ("BOOTSTRAP.md", bootstrap),
-        ("MEMORY.md", memory.to_string()),
+        ("MEMORY.md", memory),
+        ("SECURITY.md", security),
     ];
 
     let mut aieos_identity_file: Option<(String, String)> = None;

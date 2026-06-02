@@ -232,10 +232,6 @@ pub struct Config {
     #[serde(default)]
     pub reliability: ReliabilityConfig,
 
-    /// Scheduler configuration for periodic task execution (`[scheduler]`).
-    #[serde(default)]
-    pub scheduler: SchedulerConfig,
-
     /// Agent orchestration settings (`[agent]`).
     #[serde(default)]
     pub agent: AgentConfig,
@@ -3957,44 +3953,6 @@ impl Default for ReliabilityConfig {
     }
 }
 
-// ── Scheduler ────────────────────────────────────────────────────
-
-/// Scheduler configuration for periodic task execution (`[scheduler]` section).
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct SchedulerConfig {
-    /// Enable the built-in scheduler loop.
-    #[serde(default = "default_scheduler_enabled")]
-    pub enabled: bool,
-    /// Maximum number of persisted scheduled tasks.
-    #[serde(default = "default_scheduler_max_tasks")]
-    pub max_tasks: usize,
-    /// Maximum tasks executed per scheduler polling cycle.
-    #[serde(default = "default_scheduler_max_concurrent")]
-    pub max_concurrent: usize,
-}
-
-fn default_scheduler_enabled() -> bool {
-    true
-}
-
-fn default_scheduler_max_tasks() -> usize {
-    64
-}
-
-fn default_scheduler_max_concurrent() -> usize {
-    4
-}
-
-impl Default for SchedulerConfig {
-    fn default() -> Self {
-        Self {
-            enabled: default_scheduler_enabled(),
-            max_tasks: default_scheduler_max_tasks(),
-            max_concurrent: default_scheduler_max_concurrent(),
-        }
-    }
-}
-
 // ── Model routing ────────────────────────────────────────────────
 
 /// Route a task hint to a specific provider + model.
@@ -4253,10 +4211,24 @@ pub struct CronConfig {
     /// Maximum number of historical cron run records to retain. Default: `50`.
     #[serde(default = "default_max_run_history")]
     pub max_run_history: u32,
+    /// Maximum number of persisted scheduled tasks. Default: `64`.
+    #[serde(default = "default_cron_max_tasks")]
+    pub max_tasks: usize,
+    /// Maximum tasks executed per cron polling cycle. Default: `4`.
+    #[serde(default = "default_cron_max_concurrent")]
+    pub max_concurrent: usize,
 }
 
 fn default_max_run_history() -> u32 {
     50
+}
+
+fn default_cron_max_tasks() -> usize {
+    64
+}
+
+fn default_cron_max_concurrent() -> usize {
+    4
 }
 
 impl Default for CronConfig {
@@ -4264,6 +4236,8 @@ impl Default for CronConfig {
         Self {
             enabled: true,
             max_run_history: default_max_run_history(),
+            max_tasks: default_cron_max_tasks(),
+            max_concurrent: default_cron_max_concurrent(),
         }
     }
 }
@@ -5815,7 +5789,6 @@ impl Default for Config {
             runtime: RuntimeConfig::default(),
             research: ResearchPhaseConfig::default(),
             reliability: ReliabilityConfig::default(),
-            scheduler: SchedulerConfig::default(),
             agent: AgentConfig::default(),
             skills: SkillsConfig::default(),
             pipeline: PipelineConfig::default(),
@@ -7557,12 +7530,6 @@ impl Config {
         if self.heartbeat.max_tasks_per_tick == 0 {
             anyhow::bail!("heartbeat.max_tasks_per_tick must be greater than 0");
         }
-        if self.scheduler.max_concurrent == 0 {
-            anyhow::bail!("scheduler.max_concurrent must be greater than 0");
-        }
-        if self.scheduler.max_tasks == 0 {
-            anyhow::bail!("scheduler.max_tasks must be greater than 0");
-        }
 
         // Model routes
         for (i, route) in self.model_routes.iter().enumerate() {
@@ -8921,11 +8888,15 @@ recipient = "42"
         let c = CronConfig {
             enabled: false,
             max_run_history: 100,
+            max_tasks: 64,
+            max_concurrent: 4,
         };
         let json = serde_json::to_string(&c).unwrap();
         let parsed: CronConfig = serde_json::from_str(&json).unwrap();
         assert!(!parsed.enabled);
         assert_eq!(parsed.max_run_history, 100);
+        assert_eq!(parsed.max_tasks, 64);
+        assert_eq!(parsed.max_concurrent, 4);
     }
 
     #[test]
@@ -9020,7 +8991,6 @@ default_temperature = 0.7
             },
             research: ResearchPhaseConfig::default(),
             reliability: ReliabilityConfig::default(),
-            scheduler: SchedulerConfig::default(),
             coordination: CoordinationConfig::default(),
             skills: SkillsConfig::default(),
             plugins: PluginsConfig::default(),
@@ -9336,7 +9306,6 @@ denied_tools = ["shell"]
             runtime: RuntimeConfig::default(),
             research: ResearchPhaseConfig::default(),
             reliability: ReliabilityConfig::default(),
-            scheduler: SchedulerConfig::default(),
             coordination: CoordinationConfig::default(),
             skills: SkillsConfig::default(),
             plugins: PluginsConfig::default(),

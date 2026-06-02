@@ -47,7 +47,7 @@ impl GatewayClient {
     }
 
     pub async fn get_devices(&self) -> Result<serde_json::Value> {
-        let mut req = self.client.get(format!("{}/api/devices", self.base_url));
+        let mut req = self.client.get(format!("{}/api/pairing/devices", self.base_url));
         if let Some(auth) = self.auth_header() {
             req = req.header("Authorization", auth);
         }

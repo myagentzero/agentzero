@@ -9,16 +9,17 @@ graph TD
     C --> E["Collect tool hints<br/>from tools"]
     E --> F["build_system_prompt_with_mode()"]
 
-    F --> G["Add Tools Section<br/>- Tool names & descriptions"]
-    G --> H["Add Hardware Section<br/>if hardware tools present"]
-    H --> I["Add Your Task Section<br/>Instructions for LLM"]
-    I --> J["Add Safety Section<br/>- General safety rules"]
-    J --> K{"security_summary<br/>provided?"}
-    K -->|Yes| L["Add Active Security Policy<br/>subsection"]
-    K -->|No| M["Add Skills Authorization<br/>if skills present"]
+    F --> G["Add Identity Section<br/>- SOUL.md + IDENTITY.md (if present)"]
+    G --> G2["Add Runtime Section<br/>- Host, OS"]
+    G2 --> H["Add Your Task Section<br/>- Instructions for LLM"]
+    H --> I["Add Safety Section<br/>- General safety rules"]
+    I --> J{"security_summary<br/>provided?"}
+    J -->|Yes| K["Add Active Security Policy<br/>subsection"]
+    J -->|No| L["Add Tools Section<br/>- Tool names & descriptions"]
+    K --> L
 
-    L --> N["Add Skills Section<br/>- Full or compact mode"]
-    M --> N
+    L --> M["Add Hardware Section<br/>if hardware tools present"]
+    M --> N["Add Skills Section<br/>- Authorization + full or compact mode"]
 
     N --> O["Add Workspace Section<br/>- Working directory"]
     O --> P{"skip_bootstrap?"}
@@ -29,13 +30,12 @@ graph TD
 
     S --> U["Convert to system prompt<br/>or fallback to OpenClaw"]
     T --> U
-    U --> V["Add Project Context<br/>- CLAUDE.md, AGENTS.md, etc"]
+    U --> V["Add Project Context<br/>- AGENTS.md, TOOLS.md, USER.md, etc"]
     V --> R
 
-    R --> W["Add Current Date & Time<br/>- Formatted with timezone"]
-    W --> X["Add Runtime Section<br/>- Host, OS, Model"]
-    X --> Y["Add Channel Capabilities<br/>- Response delivery info"]
-    Y --> Z["Append tool_instructions<br/>if not native tools"]
+    R --> W["Add Channel Capabilities<br/>- Response delivery info"]
+    W --> X["Add Current Date & Time<br/>- Formatted with timezone"]
+    X --> Z["Append tool_instructions<br/>if not native tools"]
     Z --> AA["Append shell_policy_instructions<br/>from autonomy_config"]
 
     AA --> AB["Return final system prompt"]
@@ -49,16 +49,17 @@ graph TD
 ## Key Flow Points:
 
 1. **Initialization Check** — On first turn, builds full system prompt; on subsequent turns, just refreshes the datetime
-2. **Prompt Construction** — 8 main sections built in sequence:
-   - Tools & Hardware access
+2. **Prompt Construction** — 10 main sections built in sequence:
+   - Identity (SOUL.md + IDENTITY.md — frames everything)
+   - Runtime info (host/OS — stable, cache-friendly, placed early)
    - Task instructions
    - Safety guidelines + active policy
-   - Skills authorization
+   - Tools & Hardware access
+   - Skills (authorization + definitions, contiguous)
    - Workspace context
    - Project context (bootstrap files or AIEOS)
-   - Current date/time
-   - Runtime info
    - Channel capabilities
+   - Current date/time (dynamic tail for prompt cache stability)
 3. **Conditional Sections** — Security policy, hardware access, and bootstrap files are conditionally injected
 4. **Post-processing** — Tool and shell policy instructions appended if applicable
 5. **History Management** — Final prompt stored as system message in conversation history
@@ -69,5 +70,5 @@ The prompt is modular and respects configuration options (AIEOS vs OpenClaw, nat
 
 - **Agent.turn()**: `src/agent/agent.rs:594`
 - **Agent.build_system_prompt()**: `src/agent/agent.rs:486`
-- **build_system_prompt_with_mode()**: `src/channels/mod.rs:4612`
+- **build_system_prompt_with_mode()**: `src/channels/mod.rs:4688`
 - **refresh_prompt_datetime()**: `src/agent/prompt.rs:11`

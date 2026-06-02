@@ -328,6 +328,14 @@ impl PairingGuard {
         devices
     }
 
+    /// Generate a new one-time pairing code without touching existing tokens.
+    /// Used to invite an additional device while keeping current pairings intact.
+    pub fn generate_paircode(&self) -> String {
+        let code = generate_code();
+        *self.pairing_code.lock() = Some(code.clone());
+        code
+    }
+
     /// Clear all paired tokens and set a new pairing code.
     /// Used for live reset from channel commands (e.g. `/reset-pairing`).
     pub fn reset_pairing(&self, code: String) {
@@ -914,6 +922,34 @@ mod tests {
     }
 
     // ── reset_pairing ───────────────────────────────────────
+
+    #[test]
+    async fn generate_paircode_preserves_existing_tokens() {
+        let guard = PairingGuard::new(true, &["zc_existing".into()], None);
+        assert!(guard.is_paired());
+        assert!(guard.pairing_code().is_none());
+
+        let code = guard.generate_paircode();
+
+        assert!(guard.is_paired(), "existing token should survive");
+        assert!(guard.is_authenticated("zc_existing"), "existing token still valid");
+        assert_eq!(guard.pairing_code(), Some(code));
+    }
+
+    #[test]
+    async fn generate_paircode_allows_second_device_to_pair() {
+        let guard = PairingGuard::new(true, &[], None);
+        let code1 = guard.pairing_code().unwrap().to_string();
+        let token1 = guard.try_pair(&code1, "device1").await.unwrap().unwrap();
+        assert_eq!(guard.paired_devices().len(), 1);
+
+        let code2 = guard.generate_paircode();
+        let token2 = guard.try_pair(&code2, "device2").await.unwrap().unwrap();
+
+        assert!(guard.is_authenticated(&token1), "device1 still authenticated");
+        assert!(guard.is_authenticated(&token2), "device2 authenticated");
+        assert_eq!(guard.paired_devices().len(), 2);
+    }
 
     #[test]
     async fn reset_pairing_clears_tokens_and_sets_new_code() {

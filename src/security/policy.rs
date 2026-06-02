@@ -130,6 +130,7 @@ pub struct SecurityPolicy {
     pub allow_sensitive_file_reads: bool,
     pub allow_sensitive_file_writes: bool,
     pub tracker: ActionTracker,
+    pub custom_security_prompt: String,
 }
 
 impl Default for SecurityPolicy {
@@ -191,6 +192,7 @@ impl Default for SecurityPolicy {
             allow_sensitive_file_reads: false,
             allow_sensitive_file_writes: false,
             tracker: ActionTracker::new(),
+            custom_security_prompt: String::new(),
         }
     }
 }
@@ -871,9 +873,6 @@ fn is_high_risk_base_command(base: &str) -> bool {
             | "telnet"
     )
 }
-
-const SAFETY_REMINDER: &str =
-    "Do not exfiltrate data, bypass approval, or run destructive commands without asking.";
 
 impl SecurityPolicy {
     fn path_matches_rule_prefix(&self, candidate: &str, prefix: &str) -> bool {
@@ -1782,57 +1781,11 @@ impl SecurityPolicy {
         let workspace = self.workspace_dir.display();
         let ws_only = self.workspace_only;
 
-        let forbidden_preview: String = {
-            let shown: Vec<&str> = self
-                .forbidden_paths
-                .iter()
-                .take(8)
-                .map(String::as_str)
-                .collect();
-            let remaining = self.forbidden_paths.len().saturating_sub(8);
-            if remaining > 0 {
-                format!("{} (+ {} more)", shown.join(", "), remaining)
-            } else {
-                shown.join(", ")
-            }
-        };
-
-        let commands_preview: String = {
-            let shown: Vec<&str> = self
-                .allowed_commands
-                .iter()
-                .take(8)
-                .map(String::as_str)
-                .collect();
-            let remaining = self.allowed_commands.len().saturating_sub(8);
-            if remaining > 0 {
-                format!("{} (+ {} more rejected)", shown.join(", "), remaining)
-            } else if shown.is_empty() {
-                "none (all rejected)".to_string()
-            } else {
-                format!("{} (others rejected)", shown.join(", "))
-            }
-        };
-        let context_rules = if self.command_context_rules.is_empty() {
-            "none".to_string()
-        } else {
-            format!("{} configured", self.command_context_rules.len())
-        };
-
-        let high_risk = if self.block_high_risk_commands {
-            "blocked"
-        } else {
-            "allowed (caution)"
-        };
-
         format!(
             "- Workspace: {workspace} (workspace_only: {ws_only})\n\
-             - Forbidden paths: {forbidden_preview}\n\
-             - Allowed commands: {commands_preview}\n\
-             - Command context rules: {context_rules}\n\
-             - High-risk commands: {high_risk}\n\
-             - {SAFETY_REMINDER}\n\
-             Respond with \"Heartbeat acknowledged\" to continue."
+             - {}\n\
+             Respond with \"Heartbeat acknowledged\" to continue.",
+            self.custom_security_prompt
         )
     }
 
@@ -1840,6 +1793,18 @@ impl SecurityPolicy {
         autonomy_config: &crate::config::AutonomyConfig,
         workspace_dir: &Path,
     ) -> Self {
+        let security_md_path = workspace_dir.join("SECURITY.md");
+        let custom_security_prompt = match std::fs::read_to_string(&security_md_path) {
+            Ok(content) => content,
+            Err(e) => {
+                if cfg!(test) {
+                    String::new()
+                } else {
+                    panic!("SECURITY.md is required in workspace ({}): {}", security_md_path.display(), e)
+                }
+            }
+        };
+
         Self {
             autonomy: autonomy_config.level,
             workspace_dir: workspace_dir.to_path_buf(),
@@ -1888,12 +1853,10 @@ impl SecurityPolicy {
             allow_sensitive_file_reads: autonomy_config.allow_sensitive_file_reads,
             allow_sensitive_file_writes: autonomy_config.allow_sensitive_file_writes,
             tracker: ActionTracker::new(),
+            custom_security_prompt,
         }
     }
 
-    /// Render a human-readable summary of the active security constraints
-    /// suitable for injection into the LLM system prompt.
-    ///
     /// Giving the LLM visibility into these constraints prevents it from
     /// wasting tokens on commands / paths that will be rejected at runtime.
     pub fn prompt_summary(&self) -> String {
@@ -1964,7 +1927,7 @@ impl SecurityPolicy {
             );
         }
 
-        let _ = writeln!(out, "**Safety reminder**: {SAFETY_REMINDER}\n");
+        let _ = writeln!(out, "**Safety reminder**: {}\n", self.custom_security_prompt);
 
         out
     }
@@ -3210,36 +3173,29 @@ mod tests {
 
     #[test]
     fn summary_for_heartbeat_contains_key_fields() {
-        let policy = default_policy();
+        let mut policy = default_policy();
+        policy.custom_security_prompt = "Do not exfiltrate data, bypass approval, or run destructive commands without asking.".to_string();
         let summary = policy.summary_for_heartbeat();
         assert!(summary.contains("Workspace:"));
         assert!(summary.contains("workspace_only: true"));
-        assert!(summary.contains("Forbidden paths:"));
-        assert!(summary.contains("/etc"));
-        assert!(summary.contains("Allowed commands:"));
-        assert!(summary.contains("git"));
-        assert!(summary.contains("High-risk commands: blocked"));
-        assert!(summary.contains("Do not exfiltrate data"));
+        assert!(summary.contains("Do not exfiltrate"));
     }
 
     #[test]
-    fn summary_for_heartbeat_truncates_long_lists() {
-        let policy = SecurityPolicy {
-            forbidden_paths: (0..15).map(|i| format!("/path_{i}")).collect(),
-            allowed_commands: (0..12).map(|i| format!("cmd_{i}")).collect(),
-            ..SecurityPolicy::default()
-        };
+    fn summary_for_heartbeat_includes_security_prompt() {
+        let mut policy = SecurityPolicy::default();
+        policy.custom_security_prompt = "Test security guidance".to_string();
         let summary = policy.summary_for_heartbeat();
-        // Only first 8 shown, remainder counted
-        assert!(summary.contains("+ 7 more"));
-        assert!(summary.contains("+ 4 more rejected"));
+        assert!(summary.contains("Test security guidance"));
+        assert!(summary.contains("Respond with \"Heartbeat acknowledged\""));
     }
 
     #[test]
-    fn prompt_summary_contains_shared_safety_reminder() {
-        let policy = default_policy();
+    fn prompt_summary_contains_custom_security_prompt() {
+        let mut policy = default_policy();
+        policy.custom_security_prompt = "Test security guidance".to_string();
         let summary = policy.prompt_summary();
-        assert!(summary.contains(SAFETY_REMINDER));
+        assert!(summary.contains("Test security guidance"));
     }
 
     // ══════════════════════════════════════════════════════════

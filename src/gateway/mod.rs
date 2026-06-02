@@ -621,6 +621,7 @@ pub async fn run_gateway(
         .route("/health", get(handle_health))
         .route("/metrics", get(handle_metrics))
         .route("/pair", post(handle_pair))
+        .route("/admin/paircode/new", post(handle_admin_paircode_new))
         .route("/webhook", get(handle_webhook_usage).post(handle_webhook))
         // ── OpenClaw migration: tools-enabled chat endpoint ──
         .route("/api/chat", post(openclaw_compat::handle_api_chat))
@@ -650,6 +651,7 @@ pub async fn run_gateway(
         .route("/api/memory", get(api::handle_api_memory_list))
         .route("/api/memory", post(api::handle_api_memory_store))
         .route("/api/memory/{key}", delete(api::handle_api_memory_delete))
+        .route("/api/pairing/initiate", post(api::handle_api_pairing_initiate))
         .route("/api/pairing/devices", get(api::handle_api_pairing_devices))
         .route(
             "/api/pairing/devices/{id}",
@@ -863,6 +865,28 @@ async fn handle_pair(
             (StatusCode::TOO_MANY_REQUESTS, Json(err))
         }
     }
+}
+
+/// POST /admin/paircode/new — generate a new invite code without revoking existing tokens.
+///
+/// Localhost-only: rejects requests from non-loopback addresses so external
+/// callers cannot mint codes without physical access to the machine.
+async fn handle_admin_paircode_new(
+    State(state): State<AppState>,
+    ConnectInfo(peer_addr): ConnectInfo<SocketAddr>,
+) -> impl IntoResponse {
+    if !peer_addr.ip().is_loopback() {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({"error": "localhost only"})),
+        );
+    }
+    let code = state.pairing.generate_paircode();
+    tracing::info!("🔐 New pairing invite code generated via /admin/paircode/new");
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({"pairing_code": code})),
+    )
 }
 
 async fn persist_pairing_tokens(config: Arc<Mutex<Config>>, pairing: &PairingGuard) -> Result<()> {

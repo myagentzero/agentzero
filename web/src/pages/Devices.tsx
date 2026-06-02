@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
-import { Smartphone, RefreshCw, ShieldX } from 'lucide-react';
+import { Smartphone, RefreshCw, ShieldX, PlusCircle } from 'lucide-react';
 import type { PairedDevice } from '@/types/api';
-import { getPairedDevices, revokePairedDevice } from '@/lib/api';
+import { getPairedDevices, revokePairedDevice, initiateDevicePairing } from '@/lib/api';
 
 function formatDate(value: string | null): string {
   if (!value) return 'Unknown';
@@ -18,6 +18,8 @@ export default function Devices() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pendingRevoke, setPendingRevoke] = useState<string | null>(null);
+  const [inviteCode, setInviteCode] = useState<string | null>(null);
+  const [inviting, setInviting] = useState(false);
 
   const loadDevices = async (isRefresh = false) => {
     if (isRefresh) {
@@ -44,6 +46,19 @@ export default function Devices() {
     void loadDevices(false);
   }, []);
 
+  const handleAddDevice = async () => {
+    setInviting(true);
+    setError(null);
+    try {
+      const code = await initiateDevicePairing();
+      setInviteCode(code);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to generate pairing code');
+    } finally {
+      setInviting(false);
+    }
+  };
+
   const handleRevoke = async (id: string) => {
     try {
       await revokePairedDevice(id);
@@ -64,21 +79,47 @@ export default function Devices() {
             Paired Devices ({devices.length})
           </h2>
         </div>
-        <button
-          onClick={() => {
-            void loadDevices(true);
-          }}
-          disabled={refreshing}
-          className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-60"
-        >
-          <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
-          Refresh
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => { void handleAddDevice(); }}
+            disabled={inviting}
+            className="inline-flex items-center gap-2 rounded-lg bg-green-700 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-green-600 disabled:opacity-60"
+          >
+            <PlusCircle className="h-4 w-4" />
+            {inviting ? 'Generating…' : 'Add Device'}
+          </button>
+          <button
+            onClick={() => {
+              void loadDevices(true);
+            }}
+            disabled={refreshing}
+            className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-60"
+          >
+            <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
+            Refresh
+          </button>
+        </div>
       </div>
 
       {error && (
         <div className="rounded-lg border border-red-700 bg-red-900/30 p-3 text-sm text-red-300">
           {error}
+        </div>
+      )}
+
+      {inviteCode && (
+        <div className="rounded-lg border border-green-700 bg-green-900/20 p-4">
+          <p className="mb-1 text-sm font-medium text-green-300">New device pairing code</p>
+          <p className="font-mono text-2xl font-bold tracking-widest text-white">{inviteCode}</p>
+          <p className="mt-2 text-xs text-green-400">
+            Enter this code on the new device. Valid for this gateway session only.
+          </p>
+          <button
+            onClick={() => setInviteCode(null)}
+            className="mt-3 text-xs text-gray-400 hover:text-white"
+          >
+            Dismiss
+          </button>
         </div>
       )}
 

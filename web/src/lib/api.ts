@@ -265,6 +265,12 @@ export function revokePairedDevice(id: string): Promise<void> {
   });
 }
 
+export function initiateDevicePairing(): Promise<string> {
+  return apiFetch<{ pairing_code: string }>('/api/pairing/initiate', { method: 'POST' }).then(
+    (data) => data.pairing_code,
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Cost
 // ---------------------------------------------------------------------------

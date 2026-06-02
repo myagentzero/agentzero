@@ -12,7 +12,6 @@ import {
   Server,
   Container,
   RefreshCw,
-  Clock,
   Bot,
   Sparkles,
   Heart,
@@ -410,21 +409,6 @@ export const CONFIG_SECTIONS: SectionDef[] = [
     ],
   },
 
-  // ── Scheduler ─────────────────────────────────────────────────────
-  {
-    path: 'scheduler',
-    category: 'advanced',
-    title: 'Scheduler',
-    description: 'Task scheduler settings',
-    icon: Clock,
-    defaultCollapsed: true,
-    fields: [
-      { key: 'enabled', label: 'Enabled', type: 'toggle', defaultValue: true },
-      { key: 'max_tasks', label: 'Max Tasks', type: 'number', min: 1, defaultValue: 64, description: 'Default: 64' },
-      { key: 'max_concurrent', label: 'Max Concurrent', type: 'number', min: 1, defaultValue: 4, description: 'Default: 4' },
-    ],
-  },
-
   // ── Agent ─────────────────────────────────────────────────────────
   {
     path: 'agent',
@@ -563,6 +547,8 @@ export const CONFIG_SECTIONS: SectionDef[] = [
     fields: [
       { key: 'enabled', label: 'Enabled', type: 'toggle', defaultValue: true },
       { key: 'max_run_history', label: 'Max Run History', type: 'number', min: 1, defaultValue: 50, description: 'Default: 50' },
+      { key: 'max_tasks', label: 'Max Tasks', type: 'number', min: 1, defaultValue: 64, description: 'Default: 64' },
+      { key: 'max_concurrent', label: 'Max Concurrent', type: 'number', min: 1, defaultValue: 4, description: 'Default: 4' },
     ],
   },
 

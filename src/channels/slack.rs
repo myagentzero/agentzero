@@ -114,13 +114,11 @@ fn unicode_emoji_to_slack_name(emoji: &str) -> &str {
         "\u{1F327}\u{FE0F}" | "\u{1F327}" => "rain_cloud", // 🌧️
         "\u{2600}\u{FE0F}" | "\u{2600}" => "sunny",        // ☀️
         "\u{2744}\u{FE0F}" | "\u{2744}" => "snowflake",    // ❄️
-        "\u{26C8}\u{FE0F}" | "\u{26C8}" => "thunder_cloud_and_rain", // ⛈️
         "\u{1F324}\u{FE0F}" | "\u{1F324}" => "mostly_sunny", // 🌤️
         "\u{1F321}\u{FE0F}" | "\u{1F321}" => "thermometer", // 🌡️
         // News
         "\u{1F4F0}" => "newspaper",                                 // 📰
         "\u{1F5DE}\u{FE0F}" | "\u{1F5DE}" => "rolled_up_newspaper", // 🗞️
-        "\u{1F4E2}" => "loudspeaker",                               // 📢
         // Work
         "\u{1F4BB}" => "computer",                               // 💻
         "\u{1F5A5}\u{FE0F}" | "\u{1F5A5}" => "desktop_computer", // 🖥️
@@ -131,10 +129,9 @@ fn unicode_emoji_to_slack_name(emoji: &str) -> &str {
         "\u{1F4C6}" => "calendar",                                  // 📆
         "\u{23F0}" => "alarm_clock",                                // ⏰
         // Travel
-        "\u{2708}\u{FE0F}" | "\u{2708}" => "airplane", // ✈️
-        "\u{1F697}" => "automobile",                   // 🚗
-        "\u{1F68C}" => "bus",                          // 🚌
-        "\u{1F9F3}" => "luggage",                      // 🧳
+        "\u{2708}\u{FE0F}" | "\u{2708}" => "airplane",    // ✈️
+        "\u{1F697}" => "automobile",                      // 🚗
+        "\u{1F68C}" => "bus",                             // 🚌
         "\u{1F5FA}\u{FE0F}" | "\u{1F5FA}" => "world_map", // 🗺️
         // Office
         "\u{1F3E2}" => "office",           // 🏢
@@ -142,9 +139,11 @@ fn unicode_emoji_to_slack_name(emoji: &str) -> &str {
         "\u{1F3EC}" => "department_store", // 🏬
         // Money
         "\u{1F4B0}" => "moneybag",         // 💰
-        "\u{1F4B5}" => "money_with_wings", // 💵
+        "\u{1F4B5}" => "dollar",           // 💵
         "\u{1F4B3}" => "credit_card",      // 💳
         "\u{1F4CA}" => "bar_chart",        // 📊
+        // Security
+        "\u{1F512}" => "lock",             // 🔒
         _ => {
             tracing::warn!(
                 "Slack: no shortcode mapping for emoji {emoji:?}; reactions.add will likely fail"
@@ -166,60 +165,25 @@ fn slack_default_ack_config() -> &'static crate::config::AckReactionConfig {
         rules: vec![
             AckReactionRuleConfig {
                 contains_any: vec![
-                    "weather".into(),
-                    "forecast".into(),
-                    "temperature".into(),
-                    "rain".into(),
-                    "snow".into(),
-                    "storm".into(),
-                    "sunny".into(),
-                    "cloudy".into(),
-                    "wind".into(),
-                    "humidity".into(),
-                    "climate".into(),
-                ],
-                emojis: vec![
-                    "⛅".into(),
-                    "🌧️".into(),
-                    "☀️".into(),
-                    "❄️".into(),
-                    "⛈️".into(),
-                    "🌤️".into(),
-                    "🌡️".into(),
-                ],
-                ..AckReactionRuleConfig::default()
-            },
-            AckReactionRuleConfig {
-                contains_any: vec![
-                    "news".into(),
-                    "headline".into(),
-                    "report".into(),
-                    "article".into(),
-                    "announcement".into(),
-                ],
-                emojis: vec!["📰".into(), "🗞️".into()],
-                ..AckReactionRuleConfig::default()
-            },
-            AckReactionRuleConfig {
-                contains_any: vec![
-                    "jira".into(),
-                    "confluence".into(),
-                    "ticket".into(),
-                    "sprint".into(),
-                    "standup".into(),
-                    "scrum".into(),
-                    "kanban".into(),
                     "backlog".into(),
-                    "pull request".into(),
+                    "bitbucket".into(),
                     "code review".into(),
+                    "codebase".into(),
+                    "confluence".into(),
+                    "document".into(),
                     "github".into(),
                     "gitlab".into(),
-                    "bitbucket".into(),
+                    "jira".into(),
+                    "kanban".into(),
+                    "pull request".into(),
                     "repo".into(),
+                    "report".into(),
                     "repository".into(),
-                    "codebase".into(),
+                    "scrum".into(),
                     "spreadsheet".into(),
-                    "document".into(),
+                    "sprint".into(),
+                    "standup".into(),
+                    "ticket".into(),
                     "workspace".into(),
                 ],
                 emojis: vec!["💻".into(), "🖥️".into(), "⌨️".into()],
@@ -227,86 +191,118 @@ fn slack_default_ack_config() -> &'static crate::config::AckReactionConfig {
             },
             AckReactionRuleConfig {
                 contains_any: vec![
-                    "calendar".into(),
+                    "climate".into(),
+                    "cloudy".into(),
+                    "forecast".into(),
+                    "humidity".into(),
+                    "rain".into(),
+                    "snow".into(),
+                    "temperature".into(),
+                    "storm".into(),
+                    "sunny".into(),
+                    "weather".into(),
+                    "wind".into(),
+                ],
+                emojis: vec![
+                    "⛅".into(),
+                    "🌧️".into(),
+                    "☀️".into(),
+                    "❄️".into(),
+                    "🌤️".into(),
+                    "🌡️".into(),
+                ],
+                ..AckReactionRuleConfig::default()
+            },
+            AckReactionRuleConfig {
+                contains_any: vec![
+                    "announcement".into(),
+                    "article".into(),
+                    "headline".into(),
+                    "news".into(),
+                ],
+                emojis: vec!["📰".into(), "🗞️".into()],
+                ..AckReactionRuleConfig::default()
+            },
+            AckReactionRuleConfig {
+                contains_any: vec![
                     "agenda".into(),
-                    "schedule".into(),
-                    "meeting".into(),
                     "appointment".into(),
-                    "event".into(),
-                    "deadline".into(),
-                    "reminder".into(),
                     "booking".into(),
+                    "calendar".into(),
+                    "deadline".into(),
+                    "event".into(),
+                    "meeting".into(),
+                    "reminder".into(),
+                    "schedule".into(),
                 ],
                 emojis: vec!["📅".into(), "🗓️".into(), "📆".into(), "⏰".into()],
                 ..AckReactionRuleConfig::default()
             },
             AckReactionRuleConfig {
                 contains_any: vec![
-                    "travel".into(),
-                    "driving".into(),
-                    "bus".into(),
-                    "car".into(),
-                    "train".into(),
-                    "flight".into(),
-                    "airport".into(),
-                    "ticket".into(),
-                    "transit".into(),
-                    "commute".into(),
-                    "road".into(),
-                    "highway".into(),
-                    "trip".into(),
-                    "journey".into(),
-                    "metro".into(),
-                ],
-                emojis: vec![
-                    "✈️".into(),
-                    "🚗".into(),
-                    "🚌".into(),
-                    "🧳".into(),
-                    "🗺️".into(),
-                ],
-                ..AckReactionRuleConfig::default()
-            },
-            AckReactionRuleConfig {
-                contains_any: vec![
+                    "building".into(),
+                    "company".into(),
+                    "cubicle".into(),
+                    "desk".into(),
                     "office".into(),
                     "workplace".into(),
-                    "building".into(),
-                    "desk".into(),
-                    "cubicle".into(),
-                    "company".into(),
                 ],
                 emojis: vec!["🏢".into(), "💼".into(), "🏬".into()],
                 ..AckReactionRuleConfig::default()
             },
             AckReactionRuleConfig {
                 contains_any: vec![
-                    "money".into(),
-                    "spend".into(),
-                    "dollar".into(),
-                    "cost".into(),
-                    "price".into(),
-                    "payment".into(),
-                    "invoice".into(),
                     "bill".into(),
-                    "expense".into(),
                     "budget".into(),
+                    "cash".into(),
+                    "cost".into(),
                     "credit".into(),
                     "debit".into(),
-                    "transaction".into(),
-                    "cash".into(),
+                    "dollar".into(),
+                    "expense".into(),
+                    "fee".into(),
+                    "invoice".into(),
+                    "money".into(),
+                    "payment".into(),
+                    "price".into(),
                     "profit".into(),
                     "revenue".into(),
-                    "fee".into(),
-                    "shopping".into(),
                     "salary".into(),
+                    "shopping".into(),
+                    "spend".into(),
+                    "transaction".into(),
                 ],
-                emojis: vec![
-                    "💰".into(),
-                    "💵".into(),
-                    "💳".into(),
-                    "📊".into(),
+                emojis: vec!["💰".into(), "💵".into(), "💳".into(), "📊".into(),
                 ],
+                ..AckReactionRuleConfig::default()
+            },
+             AckReactionRuleConfig {
+                contains_any: vec![
+                    "airport".into(),
+                    "bus".into(),
+                    "car".into(),
+                    "commute".into(),
+                    "driving".into(),
+                    "flight".into(),
+                    "highway".into(),
+                    "journey".into(),
+                    "metro".into(),
+                    "road".into(),
+                    "ticket".into(),
+                    "train".into(),
+                    "transit".into(),
+                    "travel".into(),
+                    "trip".into(),
+                ],
+                emojis: vec![ "✈️".into(), "🚗".into(), "🚌".into(), "🗺️".into(),
+                ],
+                ..AckReactionRuleConfig::default()
+            },
+            AckReactionRuleConfig {
+                contains_any: vec![
+                    "reset-pairing".into(),
+                ],
+                emojis: vec!["🔒".into()],
                 ..AckReactionRuleConfig::default()
             },
         ],

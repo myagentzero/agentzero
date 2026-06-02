@@ -1039,6 +1039,22 @@ pub async fn handle_api_health(
     Json(serde_json::json!({"health": snapshot})).into_response()
 }
 
+/// POST /api/pairing/initiate — generate a new invite code for an additional device.
+///
+/// Requires an existing bearer token so only already-paired clients (e.g. the
+/// dashboard) can mint invite codes.
+pub async fn handle_api_pairing_initiate(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    if let Err(e) = require_auth(&state, &headers) {
+        return e.into_response();
+    }
+    let code = state.pairing.generate_paircode();
+    tracing::info!("🔐 New pairing invite code generated via /api/pairing/initiate");
+    Json(serde_json::json!({"pairing_code": code})).into_response()
+}
+
 /// GET /api/pairing/devices — list paired devices
 pub async fn handle_api_pairing_devices(
     State(state): State<AppState>,

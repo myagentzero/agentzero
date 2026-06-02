@@ -109,7 +109,7 @@ async fn process_due_jobs(
     // Refresh scheduler health on every successful poll cycle, including idle cycles.
     crate::health::mark_component_ok(component);
 
-    let max_concurrent = config.scheduler.max_concurrent.max(1);
+    let max_concurrent = config.cron.max_concurrent.max(1);
     let mut in_flight = stream::iter(jobs.into_iter().map(|job| {
         let config = config.clone();
         let security = Arc::clone(security);
