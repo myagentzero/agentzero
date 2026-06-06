@@ -554,7 +554,7 @@ impl Tool for JiraTool {
     }
 
     fn description(&self) -> &str {
-        "Interact with Jira: get ticket/story/bug details (summary, status, comments, changelog), search issues with JQL, list projects, add comments with @mention and formatting support, and watch/unwatch tickets."
+        "Jira: get ticket details, search with JQL, list projects, add comments, watch/unwatch."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {
@@ -564,16 +564,16 @@ impl Tool for JiraTool {
                 "action": {
                     "type": "string",
                     "enum": ["get_ticket", "search_tickets", "comment_ticket", "watch_ticket", "unwatch_ticket", "list_projects", "myself"],
-                    "description": "The Jira action to perform. Enabled actions are configured in [jira].allowed_actions. Use 'myself' to verify that credentials are valid and the Jira connection is working."
+                    "description": "Jira action (get_ticket, search_tickets, comment_ticket, watch_ticket, unwatch_ticket, myself)"
                 },
                 "issue_key": {
                     "type": "string",
-                    "description": "Jira issue key, e.g. 'PROJ-123'. Required for get_ticket, comment_ticket, watch_ticket, and unwatch_ticket."
+                    "description": "Jira issue key (e.g., PROJ-123). Required for get_ticket, comment, watch, unwatch."
                 },
                 "level_of_details": {
                     "type": "string",
                     "enum": ["basic", "basic_search", "full", "changelog"],
-                    "description": "How much data to return for get_ticket. Omit to use the default ('basic'). Options: 'basic' — summary, status, priority, assignee, rendered description, and rendered comments (best for reading a ticket in full); 'basic_search' — lightweight fields only, no description or comments (best when you only need to identify the ticket); 'full' — all Jira fields plus rendered HTML (verbose, use sparingly); 'changelog' — issue key and full change history only."
+                    "description": "Detail level: basic (default), basic_search (lightweight), full (all fields), changelog (history only)"
                 },
                 "jql": {
                     "type": "string",
@@ -586,7 +586,7 @@ impl Tool for JiraTool {
                 },
                 "comment": {
                     "type": "string",
-                    "description": "Comment body for comment_ticket. Supports a limited markdown-like syntax converted to Atlassian Document Format (ADF). Mention a user with @user@domain.com — the leading @ is required (a bare email without @ prefix is treated as plain text). Bold with **text**. Bullet list items with a leading '- '. Newlines become line breaks. Everything else is plain text. Example: 'Hi @john@company.com, this is **important**.\n- Check the logs\n- Rerun the pipeline'"
+                    "description": "Comment body. Supports: @user@domain.com for mentions, **bold**, - for bullets, newlines for breaks"
                 }
             },
             "required": ["action"]

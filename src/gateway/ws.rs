@@ -854,7 +854,7 @@ Screenshot captured successfully."#;
 
         let prompt = build_ws_system_prompt(&config, &tools, false);
 
-        assert!(prompt.contains("## Tool Use Protocol"));
+        assert!(prompt.contains("## Tool Use"));
         assert!(prompt.contains("**browser**"));
         assert!(prompt.contains("## Shell Policy"));
     }

@@ -41,7 +41,7 @@ pub fn default_aieos_identity_path() -> &'static str {
 
 pub fn generate_default_aieos_json(agent_name: &str, user_name: &str) -> String {
     let resolved_agent_name = if agent_name.trim().is_empty() {
-        "ZeroClaw"
+        "AgentZero"
     } else {
         agent_name.trim()
     };
@@ -58,9 +58,9 @@ pub fn generate_default_aieos_json(agent_name: &str, user_name: &str) -> String 
                 "full": resolved_agent_name
             },
             "bio": format!(
-                "{resolved_agent_name} is a ZeroClaw assistant focused on helping {resolved_user_name} get work done efficiently."
+                "{resolved_agent_name} is a assistant focused on helping {resolved_user_name} get work done efficiently."
             ),
-            "origin": "ZeroClaw",
+            "origin": "AgentZero",
             "residence": "Workspace"
         },
         "linguistics": {

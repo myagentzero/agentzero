@@ -25,7 +25,7 @@ impl Tool for MemoryForgetTool {
     }
 
     fn description(&self) -> &str {
-        "Delete a memory entry. Use when: memory is incorrect/stale or explicitly requested for removal. Don't use when: impact is uncertain."
+        "Delete a memory entry (incorrect, stale, or unwanted)."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {

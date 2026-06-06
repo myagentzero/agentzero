@@ -38,7 +38,7 @@ impl Tool for FileWriteTool {
     }
 
     fn description(&self) -> &str {
-        "Write contents to a file in the workspace. Sensitive files (for example .env and key material) are blocked by default. Use when: applying focused edits, scaffolding files, updating docs/code. Don't use when: side effects are unclear or file ownership is uncertain."
+        "Write to a workspace file. Sensitive files (.env, keys) blocked by default."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {
@@ -47,7 +47,7 @@ impl Tool for FileWriteTool {
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "Path to the file. Relative paths resolve from workspace; outside paths require policy allowlist."
+                    "description": "File path. Relative from workspace; absolute paths need policy allowlist."
                 },
                 "content": {
                     "type": "string",

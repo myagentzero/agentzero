@@ -248,7 +248,7 @@ impl Tool for BgRunTool {
     }
 
     fn description(&self) -> &str {
-        "Run a tool in the background. Use when: the operation is long-running and you can continue other work. Don't use when: the operation is short or trivial. Check results with bg_status. Background tasks have a 600-second maximum timeout."
+        "Run a tool in background. Max 600s timeout. Check results with bg_status."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {
@@ -463,8 +463,7 @@ impl Tool for BgStatusTool {
     }
 
     fn description(&self) -> &str {
-        "Query the status of a background job by job_id, or list all jobs if no job_id provided. \
-         Returns job status (running/complete/failed), result output, and elapsed time. Hard limit of 5 concurrent jobs."
+        "Query background job status (running/complete/failed) by job_id, or list all. Max 5 concurrent."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {

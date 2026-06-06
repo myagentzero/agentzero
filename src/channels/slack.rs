@@ -141,6 +141,7 @@ fn unicode_emoji_to_slack_name(emoji: &str) -> &str {
         "\u{1F4B0}" => "moneybag",         // 💰
         "\u{1F4B5}" => "dollar",           // 💵
         "\u{1F4B3}" => "credit_card",      // 💳
+        // Goals/metrics
         "\u{1F4CA}" => "bar_chart",        // 📊
         // Security
         "\u{1F512}" => "lock",             // 🔒
@@ -185,6 +186,8 @@ fn slack_default_ack_config() -> &'static crate::config::AckReactionConfig {
                     "standup".into(),
                     "ticket".into(),
                     "workspace".into(),
+                    "excel".into(),
+                    "powerpoint".into(),
                 ],
                 emojis: vec!["💻".into(), "🖥️".into(), "⌨️".into()],
                 ..AckReactionRuleConfig::default()
@@ -218,6 +221,7 @@ fn slack_default_ack_config() -> &'static crate::config::AckReactionConfig {
                     "announcement".into(),
                     "article".into(),
                     "headline".into(),
+                    "headlines".into(),
                     "news".into(),
                 ],
                 emojis: vec!["📰".into(), "🗞️".into()],
@@ -231,7 +235,9 @@ fn slack_default_ack_config() -> &'static crate::config::AckReactionConfig {
                     "calendar".into(),
                     "deadline".into(),
                     "event".into(),
+                    "events".into(),
                     "meeting".into(),
+                    "meetings".into(),
                     "reminder".into(),
                     "schedule".into(),
                 ],
@@ -252,6 +258,21 @@ fn slack_default_ack_config() -> &'static crate::config::AckReactionConfig {
             },
             AckReactionRuleConfig {
                 contains_any: vec![
+                    "goal".into(),
+                    "goals".into(),
+                    "mbr".into(),
+                    "okr".into(),
+                    "okrs".into(),
+                    "results".into(),
+                    "statistics".into(),
+                    "metric".into(),
+                    "metrics".into(),
+                ],
+                emojis: vec!["📊".into()],
+                ..AckReactionRuleConfig::default()
+            },
+            AckReactionRuleConfig {
+                contains_any: vec![
                     "bill".into(),
                     "budget".into(),
                     "cash".into(),
@@ -259,8 +280,10 @@ fn slack_default_ack_config() -> &'static crate::config::AckReactionConfig {
                     "credit".into(),
                     "debit".into(),
                     "dollar".into(),
+                    "dollars".into(),
                     "expense".into(),
                     "fee".into(),
+                    "fees".into(),
                     "invoice".into(),
                     "money".into(),
                     "payment".into(),
@@ -272,7 +295,7 @@ fn slack_default_ack_config() -> &'static crate::config::AckReactionConfig {
                     "spend".into(),
                     "transaction".into(),
                 ],
-                emojis: vec!["💰".into(), "💵".into(), "💳".into(), "📊".into(),
+                emojis: vec!["💰".into(), "💵".into(), "💳".into(),
                 ],
                 ..AckReactionRuleConfig::default()
             },
@@ -3863,6 +3886,29 @@ mod tests {
             SlackChannel::normalize_incoming_content("  hello world  ", false, "U_BOT").as_deref(),
             Some("hello world")
         );
+    }
+
+    #[test]
+    fn default_ack_config_uses_chart_for_okr_terms() {
+        use crate::channels::ack_reaction::{
+            AckReactionContext, AckReactionContextChatType, select_ack_reaction,
+        };
+
+        let ctx = AckReactionContext {
+            text: "Weekly OKRs and MBR results are in",
+            sender_id: Some("U123"),
+            chat_id: Some("C123"),
+            chat_type: AckReactionContextChatType::Group,
+            locale_hint: Some("en_us"),
+        };
+
+        let picked = select_ack_reaction(
+            Some(slack_default_ack_config()),
+            SLACK_ACK_REACTIONS,
+            &ctx,
+        );
+
+        assert_eq!(picked.as_deref(), Some("📊"));
     }
 
     #[test]

@@ -119,7 +119,7 @@ export default function ConfigSection({
                     </span>
                   )}
                 </label>
-                {field.description && field.type !== 'text' && field.type !== 'password' && field.type !== 'number' && (
+                {field.description && field.type !== 'text' && field.type !== 'password' && (
                   <p className="text-xs text-gray-500 mb-1.5">{field.description}</p>
                 )}
                 <div className="mt-auto">

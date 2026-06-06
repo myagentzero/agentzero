@@ -134,7 +134,7 @@ impl Tool for ProviderStatusTool {
     }
 
     fn description(&self) -> &str {
-        "Check the current API key's spend, budget, and expiry against the LiteLLM proxy. Use when: user asks about remaining budget, spend, or key expiry."
+        "Check API key spend, budget, and expiry via LiteLLM proxy."
     }
 
     fn parameters_schema(&self) -> Value {

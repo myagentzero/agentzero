@@ -775,35 +775,6 @@ fn maybe_inject_cron_add_delivery(
     }
 }
 
-/// Auto-inject the `recipient` field into `ask_user` tool calls so the
-/// question is routed to the conversation that triggered the agent.
-fn maybe_inject_ask_user_recipient(
-    tool_name: &str,
-    tool_args: &mut serde_json::Value,
-    reply_target: Option<&str>,
-) {
-    if tool_name != "ask_user" {
-        return;
-    }
-    let Some(reply_target) = reply_target.map(str::trim).filter(|v| !v.is_empty()) else {
-        return;
-    };
-    let Some(args_obj) = tool_args.as_object_mut() else {
-        return;
-    };
-    // Only inject if the LLM didn't explicitly provide a recipient
-    if args_obj
-        .get("recipient")
-        .and_then(serde_json::Value::as_str)
-        .is_none_or(|v| v.trim().is_empty())
-    {
-        args_obj.insert(
-            "recipient".to_string(),
-            serde_json::Value::String(reply_target.to_string()),
-        );
-    }
-}
-
 async fn await_non_cli_approval_decision(
     mgr: &ApprovalManager,
     request_id: &str,
@@ -2112,12 +2083,6 @@ pub async fn run_tool_call_loop(
                 channel_reply_target.as_deref(),
                 provider_name,
                 active_model.as_str(),
-            );
-
-            maybe_inject_ask_user_recipient(
-                &tool_name,
-                &mut tool_args,
-                channel_reply_target.as_deref(),
             );
 
             if excluded_tools.iter().any(|ex| ex == &tool_name) {
@@ -3820,40 +3785,6 @@ mod tests {
         );
 
         assert_eq!(args["model"], "gpt-4o-mini");
-    }
-
-    #[test]
-    fn maybe_inject_ask_user_recipient_populates_from_reply_target() {
-        let mut args = serde_json::json!({ "question": "Proceed?" });
-        maybe_inject_ask_user_recipient("ask_user", &mut args, Some("C0123456789"));
-        assert_eq!(args["recipient"], "C0123456789");
-    }
-
-    #[test]
-    fn maybe_inject_ask_user_recipient_does_not_override_explicit() {
-        let mut args = serde_json::json!({
-            "question": "Proceed?",
-            "recipient": "C_EXPLICIT"
-        });
-        maybe_inject_ask_user_recipient("ask_user", &mut args, Some("C_FROM_CONTEXT"));
-        assert_eq!(args["recipient"], "C_EXPLICIT");
-    }
-
-    #[test]
-    fn maybe_inject_ask_user_recipient_skips_other_tools() {
-        let mut args = serde_json::json!({ "command": "ls" });
-        maybe_inject_ask_user_recipient("shell", &mut args, Some("C0123456789"));
-        assert!(args.get("recipient").is_none());
-    }
-
-    #[test]
-    fn maybe_inject_ask_user_recipient_skips_empty_reply_target() {
-        let mut args = serde_json::json!({ "question": "Proceed?" });
-        maybe_inject_ask_user_recipient("ask_user", &mut args, None);
-        assert!(args.get("recipient").is_none());
-
-        maybe_inject_ask_user_recipient("ask_user", &mut args, Some("  "));
-        assert!(args.get("recipient").is_none());
     }
 
     #[test]
@@ -6559,7 +6490,7 @@ Tail"#;
         let specs = tools.iter().map(|tool| tool.spec()).collect::<Vec<_>>();
         let instructions = crate::channels::build_tool_instructions_from_specs(&specs);
 
-        assert!(instructions.contains("Tool Use Protocol"));
+        assert!(instructions.contains("Tool Use"));
         assert!(instructions.contains("<tool_call>"));
         assert!(instructions.contains("shell"));
         assert!(instructions.contains("file_read"));
@@ -7408,7 +7339,7 @@ Let me check the result."#;
             "Native prompt must not contain </tool_result>"
         );
         assert!(
-            !system_prompt.contains("## Tool Use Protocol"),
+            !system_prompt.contains("## Tool Use\n"),
             "Native prompt must not contain XML protocol header"
         );
 

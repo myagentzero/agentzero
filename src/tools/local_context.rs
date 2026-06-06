@@ -36,9 +36,7 @@ impl Tool for LocalContextTool {
     }
 
     fn description(&self) -> &str {
-        "Get current date/time, day of week, timezone, and user location (latitude, longitude, and city). \
-         Use when: asking about local weather; scheduling; determining day of week. \
-         Don't use when: the system prompt already provides sufficient time and location context."
+        "Get current date/time, day of week, timezone, and location (lat, lon, city)."
     }
 
     fn parameters_schema(&self) -> Value {

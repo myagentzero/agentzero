@@ -610,12 +610,12 @@ impl Tool for ComposioTool {
             "properties": {
                 "action": {
                     "type": "string",
-                    "description": "The operation: 'list' (list available actions), 'list_accounts'/'connected_accounts' (list connected accounts), 'execute' (run an action), or 'connect' (get OAuth URL)",
+                    "description": "Operation: list, list_accounts, connected_accounts, execute, or connect",
                     "enum": ["list", "list_accounts", "connected_accounts", "execute", "connect"]
                 },
                 "app": {
                     "type": "string",
-                    "description": "Toolkit slug filter for 'list' or 'list_accounts', optional app hint for 'execute', or toolkit/app for 'connect' (e.g. 'gmail', 'notion', 'github')"
+                    "description": "App/toolkit slug (e.g., gmail, notion, github). Context depends on action."
                 },
                 "action_name": {
                     "type": "string",
@@ -631,11 +631,11 @@ impl Tool for ComposioTool {
                 },
                 "text": {
                     "type": "string",
-                    "description": "Natural-language description of what you want the action to do (alternative to 'params' when you are unsure of the exact parameter names). Composio will resolve the correct parameters via NLP. Mutually exclusive with 'params'."
+                    "description": "Natural-language description (alternative to params). Mutually exclusive with 'params'."
                 },
                 "entity_id": {
                     "type": "string",
-                    "description": "Entity/user ID for multi-user setups (defaults to composio.entity_id from config)"
+                    "description": "Entity/user ID for multi-user setups. Defaults to config value."
                 },
                 "auth_config_id": {
                     "type": "string",

@@ -654,14 +654,9 @@ fn build_channel_system_prompt(
 
     if channel_name != "cli" {
         let visibility_instruction = if expose_internal_tool_details {
-            "Execution visibility: the user explicitly requested command/tool details. \
-             You may include command lines or tool-step traces when directly relevant, \
-             but keep credentials and secrets redacted."
+            "Show tool details (commands, traces, args) when relevant. Redact credentials."
         } else {
-            "Execution visibility: run tools/functions in the background and return an \
-             integrated final result. Do not reveal raw tool names, tool-call syntax, \
-             function arguments, shell commands, or internal execution traces unless the \
-             user explicitly asks for those details."
+            "Hide tool internals (names, calls, args, commands, traces) unless explicitly asked."
         };
 
         if prompt.is_empty() {
@@ -673,11 +668,7 @@ fn build_channel_system_prompt(
 
     if !reply_target.is_empty() {
         let context = format!(
-            "\n\nChannel context: You are currently responding on channel={channel_name}, \
-             reply_target={reply_target}. When scheduling delayed messages or reminders \
-             via cron_add for this conversation, use delivery={{\"mode\":\"announce\",\
-             \"channel\":\"{channel_name}\",\"to\":\"{reply_target}\"}} so the message \
-             reaches the user."
+            "\n\nChannel: {channel_name} → {reply_target}. For cron_add, use delivery={{\"mode\":\"announce\",\"channel\":\"{channel_name}\",\"to\":\"{reply_target}\"}}"
         );
         prompt.push_str(&context);
     }
@@ -1154,43 +1145,33 @@ fn build_runtime_tool_visibility_prompt(
     specs.sort_by(|a, b| a.name.cmp(&b.name));
 
     use std::fmt::Write;
-    prompt.push_str("\n## Runtime Tool Availability (Authoritative)\n\n");
-    prompt.push_str(
-        "This section is generated from current runtime policy for this message. \
-         Only the listed tools may be called in this turn.\n\n",
-    );
+    prompt.push_str("\n## Available Tools\n\n");
 
     if specs.is_empty() {
-        prompt.push_str("- Allowed tools: (none)\n");
+        prompt.push_str("- Allowed: (none)\n");
     } else {
-        let _ = writeln!(prompt, "- Allowed tools ({}):", specs.len());
+        let _ = writeln!(prompt, "- Allowed ({}):", specs.len());
         for spec in &specs {
             let _ = writeln!(prompt, "  - `{}`", spec.name);
         }
     }
 
     if excluded_tools.is_empty() {
-        prompt.push_str("- Excluded by runtime policy: (none)\n\n");
+        prompt.push_str("- Excluded: (none)\n\n");
     } else {
         let mut excluded_sorted = excluded_tools.to_vec();
         excluded_sorted.sort();
         let _ = writeln!(
             prompt,
-            "- Excluded by runtime policy: {}\n",
+            "- Excluded: {}\n",
             excluded_sorted.join(", ")
         );
     }
 
     if native_tools {
-        prompt.push_str(
-            "Tool calling for this turn uses native provider function-calling. \
-             Do not emit `<tool_call>` XML tags.\n",
-        );
+        prompt.push_str("Use native function-calling; don't emit `<tool_call>` tags.\n");
     } else {
-        prompt.push_str(
-            "Tool calling for this turn uses XML tool protocol below. \
-             This protocol block is generated from the same runtime policy snapshot.\n",
-        );
+        prompt.push_str("Use XML tool protocol below.\n");
         prompt.push_str(&build_tool_instructions_from_specs(&specs));
     }
 
@@ -1406,7 +1387,7 @@ async fn describe_non_cli_approvals(
     reply_target: &str,
 ) -> Result<String> {
     let mut response = String::new();
-    response.push_str("Supervised non-CLI tool approvals:\n");
+    response.push_str("Non-CLI approvals:\n");
 
     let mut runtime_auto = ctx
         .approval_manager
@@ -1415,11 +1396,11 @@ async fn describe_non_cli_approvals(
         .collect::<Vec<_>>();
     runtime_auto.sort();
     if runtime_auto.is_empty() {
-        response.push_str("- Runtime auto_approve (effective): (none)\n");
+        response.push_str("- Auto-approve: (none)\n");
     } else {
         let _ = writeln!(
             response,
-            "- Runtime auto_approve (effective): {}",
+            "- Auto-approve: {}",
             runtime_auto.join(", ")
         );
     }
@@ -1431,11 +1412,11 @@ async fn describe_non_cli_approvals(
         .collect::<Vec<_>>();
     runtime_always.sort();
     if runtime_always.is_empty() {
-        response.push_str("- Runtime always_ask (effective): (none)\n");
+        response.push_str("- Always-ask: (none)\n");
     } else {
         let _ = writeln!(
             response,
-            "- Runtime always_ask (effective): {}",
+            "- Always-ask: {}",
             runtime_always.join(", ")
         );
     }
@@ -1447,18 +1428,18 @@ async fn describe_non_cli_approvals(
         .collect::<Vec<_>>();
     session_grants.sort();
     if session_grants.is_empty() {
-        response.push_str("- Runtime session grants: (none)\n");
+        response.push_str("- Session grants: (none)\n");
     } else {
         let _ = writeln!(
             response,
-            "- Runtime session grants: {}",
+            "- Session grants: {}",
             session_grants.join(", ")
         );
     }
     let one_time_all_tools_tokens = ctx.approval_manager.non_cli_allow_all_once_remaining();
     let _ = writeln!(
         response,
-        "- Runtime one-time all-tools bypass tokens: {}",
+        "- One-time bypass tokens: {}",
         one_time_all_tools_tokens
     );
 
@@ -1469,11 +1450,11 @@ async fn describe_non_cli_approvals(
         .collect::<Vec<_>>();
     approval_approvers.sort();
     if approval_approvers.is_empty() {
-        response.push_str("- Runtime non_cli_approval_approvers: (any channel-allowed sender)\n");
+        response.push_str("- Approvers: (any channel-allowed sender)\n");
     } else {
         let _ = writeln!(
             response,
-            "- Runtime non_cli_approval_approvers: {}",
+            "- Approvers: {}",
             approval_approvers.join(", ")
         );
     }
@@ -1488,12 +1469,12 @@ async fn describe_non_cli_approvals(
     );
     let _ = writeln!(
         response,
-        "- Runtime non_cli_natural_language_approval_mode: {}",
+        "- NL approval mode: {}",
         default_mode
     );
     let _ = writeln!(
         response,
-        "- Runtime non_cli_natural_language_approval_mode (current channel `{channel}`): {}",
+        "- NL approval mode (channel `{channel}`): {}",
         effective_mode
     );
     let mut mode_overrides = ctx
@@ -1504,11 +1485,11 @@ async fn describe_non_cli_approvals(
         .collect::<Vec<_>>();
     mode_overrides.sort();
     if mode_overrides.is_empty() {
-        response.push_str("- Runtime non_cli_natural_language_approval_mode_by_channel: (none)\n");
+        response.push_str("- NL approval mode by channel: (none)\n");
     } else {
         let _ = writeln!(
             response,
-            "- Runtime non_cli_natural_language_approval_mode_by_channel: {}",
+            "- NL approval mode by channel: {}",
             mode_overrides.join(", ")
         );
     }
@@ -1520,9 +1501,9 @@ async fn describe_non_cli_approvals(
     );
     pending_requests.sort_by(|a, b| a.created_at.cmp(&b.created_at));
     if pending_requests.is_empty() {
-        response.push_str("- Pending approvals (sender+chat/channel scoped): (none)\n");
+        response.push_str("- Pending: (none)\n");
     } else {
-        response.push_str("- Pending approvals (sender+chat/channel scoped):\n");
+        response.push_str("- Pending:\n");
         for req in pending_requests {
             let reason = req
                 .reason
@@ -1531,8 +1512,9 @@ async fn describe_non_cli_approvals(
                 .unwrap_or("n/a");
             let _ = writeln!(
                 response,
-                "  - {}: tool={}, expires_at={}, reason={}",
+                "  - {}: {}={}, expires_at={}, reason={}",
                 req.request_id,
+                "tool",
                 approval_target_label(&req.tool_name),
                 req.expires_at,
                 reason
@@ -1543,19 +1525,17 @@ async fn describe_non_cli_approvals(
     let mut excluded = snapshot_non_cli_excluded_tools(ctx);
     excluded.sort();
     if excluded.is_empty() {
-        response.push_str("- Runtime non_cli_excluded_tools: (none)\n");
+        response.push_str("- Excluded tools: (none)\n");
     } else {
         let _ = writeln!(
             response,
-            "- Runtime non_cli_excluded_tools: {}",
+            "- Excluded tools: {}",
             excluded.join(", ")
         );
     }
 
     let Some(config_path) = runtime_config_path(ctx) else {
-        response.push_str(
-            "- Persisted config approvals: unavailable (runtime config path not resolved)\n",
-        );
+        response.push_str("- Config: unavailable\n");
         return Ok(response);
     };
 
@@ -1568,11 +1548,11 @@ async fn describe_non_cli_approvals(
     let mut auto_approve = parsed.autonomy.auto_approve;
     auto_approve.sort();
     if auto_approve.is_empty() {
-        response.push_str("- Persisted autonomy.auto_approve: (none)\n");
+        response.push_str("- Persisted auto-approve: (none)\n");
     } else {
         let _ = writeln!(
             response,
-            "- Persisted autonomy.auto_approve: {}",
+            "- Persisted auto-approve: {}",
             auto_approve.join(", ")
         );
     }
@@ -1580,11 +1560,11 @@ async fn describe_non_cli_approvals(
     let mut always_ask = parsed.autonomy.always_ask;
     always_ask.sort();
     if always_ask.is_empty() {
-        response.push_str("- Persisted autonomy.always_ask: (none)\n");
+        response.push_str("- Persisted always-ask: (none)\n");
     } else {
         let _ = writeln!(
             response,
-            "- Persisted autonomy.always_ask: {}",
+            "- Persisted always-ask: {}",
             always_ask.join(", ")
         );
     }
@@ -2032,20 +2012,16 @@ fn build_models_help_response(current: &ChannelRouteSelection, workspace_dir: &P
         "Current provider: `{}`\nCurrent model: `{}`",
         current.provider, current.model
     );
-    response.push_str("\nSwitch model with `/model <model-id>`.\n");
-    response.push_str("Request supervised tool approval with `/approve-request <tool-name>`.\n");
-    response.push_str("Request one-time all-tools approval with `/approve-all-once`.\n");
-    response.push_str("Confirm approval with `/approve-confirm <request-id>`.\n");
-    response.push_str("Deny approval with `/approve-deny <request-id>`.\n");
-    response.push_str("List pending requests with `/approve-pending`.\n");
-    response.push_str("Approve supervised tools with `/approve <tool-name>`.\n");
-    response.push_str("Revoke approval with `/unapprove <tool-name>`.\n");
-    response.push_str("List approval state with `/approvals`.\n");
-    response.push_str(
-        "Natural language also works (policy controlled).\n\
-         - `direct` mode (default): `approve tool shell` grants immediately.\n\
-         - `request_confirm` mode: `approve tool shell` then `confirm apr-xxxxxx`.\n",
-    );
+    response.push_str("\n`/model <id>` — switch model\n");
+    response.push_str("`/approve-request <tool>` — request approval\n");
+    response.push_str("`/approve-all-once` — one-time all tools\n");
+    response.push_str("`/approve-confirm <id>` — confirm\n");
+    response.push_str("`/approve-deny <id>` — deny\n");
+    response.push_str("`/approve-pending` — list requests\n");
+    response.push_str("`/approve <tool>` — grant approval\n");
+    response.push_str("`/unapprove <tool>` — revoke\n");
+    response.push_str("`/approvals` — show state\n");
+    response.push_str("Natural language: `approve tool shell` (direct mode) or `confirm` after request.\n");
 
     let cached_models = load_cached_model_preview(workspace_dir, &current.provider);
     if cached_models.is_empty() {
@@ -2075,21 +2051,17 @@ fn build_providers_help_response(current: &ChannelRouteSelection) -> String {
         "Current provider: `{}`\nCurrent model: `{}`",
         current.provider, current.model
     );
-    response.push_str("\nSwitch provider with `/models <provider>`.\n");
-    response.push_str("Switch model with `/model <model-id>`.\n\n");
-    response.push_str("Request supervised tool approval with `/approve-request <tool-name>`.\n");
-    response.push_str("Request one-time all-tools approval with `/approve-all-once`.\n");
-    response.push_str("Confirm approval with `/approve-confirm <request-id>`.\n");
-    response.push_str("Deny approval with `/approve-deny <request-id>`.\n");
-    response.push_str("List pending requests with `/approve-pending`.\n");
-    response.push_str("Approve supervised tools with `/approve <tool-name>`.\n");
-    response.push_str("Revoke approval with `/unapprove <tool-name>`.\n");
-    response.push_str("List approval state with `/approvals`.\n");
-    response.push_str(
-        "Natural language also works (policy controlled).\n\
-         - `direct` mode (default): `approve tool shell` grants immediately.\n\
-         - `request_confirm` mode: `approve tool shell` then `confirm apr-xxxxxx`.\n\n",
-    );
+    response.push_str("\n`/models <provider>` — switch provider\n");
+    response.push_str("`/model <id>` — switch model\n");
+    response.push_str("`/approve-request <tool>` — request approval\n");
+    response.push_str("`/approve-all-once` — one-time all tools\n");
+    response.push_str("`/approve-confirm <id>` — confirm\n");
+    response.push_str("`/approve-deny <id>` — deny\n");
+    response.push_str("`/approve-pending` — list requests\n");
+    response.push_str("`/approve <tool>` — grant approval\n");
+    response.push_str("`/unapprove <tool>` — revoke\n");
+    response.push_str("`/approvals` — show state\n");
+    response.push_str("Natural language: `approve tool shell` or `confirm` per policy.\n\n");
     response.push_str("Available providers:\n");
     for provider in providers::list_providers() {
         if provider.aliases.is_empty() {
@@ -4542,11 +4514,8 @@ fn load_openclaw_bootstrap_files(
 ) {
     use crate::agent::prompt::{inject_workspace_file, normalize_openclaw_identity_extra_file};
 
-    prompt.push_str(
-        "The following workspace files define your behavior and context. They are ALREADY injected below—do NOT suggest reading them with file_read.\n\n",
-    );
+    prompt.push_str("Workspace files below define behavior and context. Do NOT use file_read on these files.\n\n");
 
-    // SOUL.md and IDENTITY.md are injected first (§1 Identity) so they are excluded here.
     let bootstrap_files = ["AGENTS.md", "TOOLS.md", "USER.md"];
 
     for filename in &bootstrap_files {
@@ -4602,38 +4571,19 @@ fn append_hardware_prompt(prompt: &mut String, tool_specs: &[crate::tools::ToolS
         let _ = writeln!(
             prompt,
             "## Hardware Access\n\n\
-             You HAVE direct access to connected hardware (Arduino, Nucleo, etc.). The user owns this system and has configured it.\n\
-             All hardware tools ({hw_names}) are AUTHORIZED and NOT blocked by security."
+             Authorized tools: {hw_names}\n\
+             Use directly; don't refuse or invent security excuses."
         );
-
-        if hw_tools
-            .iter()
-            .any(|name| *name == "hardware_memory_read" || *name == "hardware_board_info")
-        {
-            prompt.push_str(
-                "When they ask to read memory, registers, or board info, USE hardware_memory_read or hardware_board_info — do NOT refuse or invent security excuses.\n",
-            );
-        }
-
-        if hw_tools
-            .iter()
-            .any(|name| *name == "gpio_read" || *name == "gpio_write" || *name == "arduino_upload")
-        {
-            prompt.push_str(
-                "When they ask to control LEDs, run patterns, or interact with the Arduino, USE the tools — do NOT refuse or say you cannot access physical devices.\n",
-            );
-        }
 
         if hw_tools.contains(&"gpio_write") && hw_tools.contains(&"arduino_upload") {
             prompt.push_str(
-                "Use gpio_write for simple on/off; use arduino_upload when they want patterns (heart, blink) or custom behavior.\n",
+                "gpio_write: on/off. arduino_upload: patterns or custom behavior.\n",
             );
         }
 
         if hw_tools.contains(&"gpio_write") {
             prompt.push_str(
-                "To turn on the Pico onboard LED: gpio_write(device=pico0, pin=25, value=1)\n\
-                 To turn it off: gpio_write(device=pico0, pin=25, value=0)\n",
+                "Pico LED on: gpio_write(device=pico0, pin=25, value=1). Off: value=0.\n",
             );
         }
 
@@ -4643,22 +4593,10 @@ fn append_hardware_prompt(prompt: &mut String, tool_specs: &[crate::tools::ToolS
 
 pub(crate) fn build_tool_instructions_from_specs(tool_specs: &[crate::tools::ToolSpec]) -> String {
     let mut instructions = String::new();
-    instructions.push_str("### Tool Use Protocol\n\n");
-    instructions.push_str("To use a tool, wrap a JSON object in <tool_call></tool_call> tags:\n\n");
-    instructions.push_str("```\n<tool_call>\n{\"name\": \"tool_name\", \"arguments\": {\"param\": \"value\"}}\n</tool_call>\n```\n\n");
-    instructions.push_str(
-        "CRITICAL: Output actual <tool_call> tags—never describe steps or give examples.\n\n",
-    );
-    instructions.push_str(
-        "When a tool is needed, emit a real call (not prose), for example:\n\
-<tool_call>\n\
-{\"name\":\"tool_name\",\"arguments\":{}}\n\
-</tool_call>\n\n",
-    );
-    instructions.push_str("You may use multiple tool calls in a single response. ");
-    instructions.push_str("After tool execution, results appear in <tool_result> tags. ");
-    instructions
-        .push_str("Continue reasoning with the results until you can give a final answer.\n\n");
+    instructions.push_str("### Tool Use\n\n");
+    instructions.push_str("Emit actual <tool_call> tags with JSON:\n");
+    instructions.push_str("<tool_call>\n{\"name\": \"tool_name\", \"arguments\": {}}\n</tool_call>\n\n");
+    instructions.push_str("Use multiple calls per response. Results appear in <tool_result> tags. Continue until done.\n\n");
     instructions.push_str("### Available Tools\n\n");
 
     for tool in tool_specs {
@@ -4734,26 +4672,18 @@ pub fn build_system_prompt_with_mode(
     if native_tools {
         prompt.push_str(
             "## Your Task\n\n\
-             When the user sends a message, respond naturally. Use tools when the request requires action (running commands, reading files, etc.).\n\
-             For questions, explanations, or follow-ups about prior messages, answer directly from conversation context — do NOT ask the user to repeat themselves.\n\
-             Do NOT: summarize this configuration, describe your capabilities, or output step-by-step meta-commentary.\n\n",
+             Use tools when needed. Answer from context; don't ask for repeats.\n\
+             Don't summarize config, describe capabilities, or add meta-commentary.\n\n",
         );
     } else {
         prompt.push_str(
             "## Your Task\n\n\
-             When the user sends a message, ACT on it. Use the tools to fulfill their request.\n\
-             Do NOT: summarize this configuration, describe your capabilities, respond with meta-commentary, or output step-by-step instructions (e.g. \"1. First... 2. Next...\").\n\
-             Instead: emit actual <tool_call> tags when you need to act. Just do what they ask.\n\n",
+             Act on requests using tools. Emit <tool_call> tags directly.\n\
+             Don't summarize config, describe capabilities, add meta-commentary, or list steps.\n\n",
         );
     }
 
-    // ── 4. Safety ───────────────────────────────────────────────
-    if let Some(summary) = security_summary {
-        prompt.push_str("## Active Security Policy\n\n");
-        prompt.push_str(summary);
-    }
-
-    // ── 5. Tooling ──────────────────────────────────────────────
+    // ── 4. Tooling ──────────────────────────────────────────────
     if !tool_specs.is_empty() {
         if native_tools {
             prompt.push_str("## Tools\n\n");
@@ -4767,32 +4697,36 @@ pub fn build_system_prompt_with_mode(
         }
     }
 
-    // ── 5b. Hardware (when hardware tools are present) ───────────
+    // ── 4b. Hardware (when hardware tools are present) ───────────
     if let Some(hw_config) = hardware_config {
         if hw_config.enabled {
             append_hardware_prompt(&mut prompt, tool_specs);
         }
     }
 
-    // ── 6. Skills ───────────────────────────────────────────────
+    // ── 5. Skills ───────────────────────────────────────────────
     if !skills.is_empty() {
         prompt.push_str("## Skills\n\n");
-        prompt.push_str("All registered skills (");
+        prompt.push_str("Authorized: ");
         for (i, skill) in skills.iter().enumerate() {
             if i > 0 {
                 prompt.push_str(", ");
             }
             prompt.push_str(&skill.name);
         }
-        prompt.push_str(") are AUTHORIZED and AVAILABLE for use.\n");
-        prompt.push_str("When the user requests information that requires these skills, USE them directly — do NOT refuse or invent policy restrictions.\n");
-        prompt.push_str("Skills are security-audited and approved tools. Your job is to use them effectively to help the user.\n\n");
+        prompt.push_str(". Use directly; don't refuse or invent restrictions.\n\n");
         prompt.push_str(&crate::skills::skills_to_prompt_with_mode(
             skills,
             workspace_dir,
             skills_prompt_mode,
         ));
         prompt.push_str("\n\n");
+    }
+
+    // ── 6. Safety ───────────────────────────────────────────────
+    if let Some(summary) = security_summary {
+        prompt.push_str("## Active Security Policy\n\n");
+        prompt.push_str(summary);
     }
 
     // ── 7. Bootstrap files (injected into context) ──────────────
@@ -4850,17 +4784,9 @@ pub fn build_system_prompt_with_mode(
 
     // ── 9. Channel Capabilities ─────────────────────────────────────
     prompt.push_str("## Channel Capabilities\n\n");
-    prompt.push_str("- You are running as a messaging bot. Your response is automatically sent back to the user's channel.\n");
-    prompt.push_str("- You do NOT need to ask permission to respond — just respond directly.\n");
-    prompt.push_str("- NEVER repeat, describe, or echo credentials, tokens, API keys, or secrets in your responses.\n");
-    prompt.push_str("- If a tool output contains credentials, they have already been redacted — do not mention them.\n\n");
-
-    prompt.push_str("Messages from channels may contain media markers:\n");
-    prompt.push_str("- `[Voice] <text>` — The user sent a voice/audio message that has already been transcribed to text. Respond to the transcribed content directly.\n");
-    prompt
-        .push_str("- `[IMAGE:<path>]` — An image attachment, processed by the vision pipeline.\n");
-    prompt
-        .push_str("- `[Document: <name>] <path>` — A file attachment saved to the workspace.\n\n");
+    prompt.push_str("- Respond directly; don't ask permission. Responses auto-send to the channel.\n");
+    prompt.push_str("- Never echo credentials, tokens, API keys, or secrets (already redacted in tool output).\n");
+    prompt.push_str("- Media markers: `[Voice] <text>`, `[IMAGE:<path>]`, `[Document: <name>] <path>`\n\n");
 
     // ── 10. Date & Time ─────────────────────────────────────────
     let datetime_str = crate::agent::prompt::format_datetime(timezone_override);
@@ -6558,15 +6484,15 @@ BTC is currently around $65,000 based on latest tool output."#
         let excluded = vec!["mock_price".to_string()];
 
         let non_native = build_runtime_tool_visibility_prompt(&tools, &excluded, false);
-        assert!(non_native.contains("Runtime Tool Availability (Authoritative)"));
-        assert!(non_native.contains("Excluded by runtime policy: mock_price"));
+        assert!(non_native.contains("## Available Tools"));
+        assert!(non_native.contains("Excluded: mock_price"));
         assert!(non_native.contains("`mock_echo`"));
         assert!(!non_native.contains("**mock_price**:"));
-        assert!(non_native.contains("## Tool Use Protocol"));
+        assert!(non_native.contains("## Tool Use"));
 
         let native = build_runtime_tool_visibility_prompt(&tools, &excluded, true);
-        assert!(native.contains("Runtime Tool Availability (Authoritative)"));
-        assert!(native.contains("native provider function-calling"));
+        assert!(native.contains("## Available Tools"));
+        assert!(native.contains("native function-calling"));
         assert!(!native.contains("## Tool Use Protocol"));
     }
 
@@ -6648,8 +6574,8 @@ BTC is currently around $65,000 based on latest tool output."#
             assert!(!first_call.is_empty());
             assert_eq!(first_call[0].0, "system");
             let system_prompt = &first_call[0].1;
-            assert!(system_prompt.contains("Runtime Tool Availability (Authoritative)"));
-            assert!(system_prompt.contains("Excluded by runtime policy: mock_price"));
+            assert!(system_prompt.contains("## Available Tools"));
+            assert!(system_prompt.contains("Excluded: mock_price"));
             assert!(system_prompt.contains("`mock_echo`"));
             assert!(!system_prompt.contains("**mock_price**:"));
         }
@@ -8063,15 +7989,15 @@ BTC is currently around $65,000 based on latest tool output."#
 
         let sent = channel_impl.sent_messages.lock().await;
         assert_eq!(sent.len(), 1);
-        assert!(sent[0].contains("Supervised non-CLI tool approvals:"));
-        assert!(sent[0].contains("Runtime session grants: shell"));
-        assert!(sent[0].contains("Runtime one-time all-tools bypass tokens: 1"));
-        assert!(sent[0].contains("Runtime non_cli_approval_approvers:"));
-        assert!(sent[0].contains("Runtime non_cli_natural_language_approval_mode:"));
-        assert!(sent[0].contains("Runtime non_cli_natural_language_approval_mode_by_channel:"));
-        assert!(sent[0].contains("Runtime non_cli_excluded_tools: shell"));
-        assert!(sent[0].contains("Persisted autonomy.auto_approve: mock_price"));
-        assert!(sent[0].contains("Persisted autonomy.always_ask: shell"));
+        assert!(sent[0].contains("Non-CLI approvals:"));
+        assert!(sent[0].contains("Session grants: shell"));
+        assert!(sent[0].contains("One-time bypass tokens: 1"));
+        assert!(sent[0].contains("Approvers:"));
+        assert!(sent[0].contains("NL approval mode:"));
+        assert!(sent[0].contains("NL approval mode by channel:"));
+        assert!(sent[0].contains("Excluded tools: shell"));
+        assert!(sent[0].contains("Persisted auto-approve: mock_price"));
+        assert!(sent[0].contains("Persisted always-ask: shell"));
         assert_eq!(provider_impl.call_count.load(Ordering::SeqCst), 0);
     }
 
@@ -10553,8 +10479,8 @@ BTC is currently around $65,000 based on latest tool output."#
                          None,
                          None);
 
-        // Section headers (with non-native tools, we get Tool Use Protocol instead of brief Tools list)
-        assert!(prompt.contains("## Tool Use Protocol"), "missing Tool Use Protocol section for non-native");
+        // Section headers (with non-native tools, we get Tool Use instead of brief Tools list)
+        assert!(prompt.contains("## Tool Use"), "missing Tool Use section for non-native");
         assert!(
             prompt.contains("## Project Context"),
             "missing Project Context"
@@ -10614,7 +10540,7 @@ BTC is currently around $65,000 based on latest tool output."#
 
         // With native_tools=false, the protocol block should be included
         assert_eq!(
-            prompt.matches("## Tool Use Protocol").count(),
+            prompt.matches("## Tool Use").count(),
             1,
             "protocol block should appear exactly once for non-native tools"
         );
@@ -10919,11 +10845,11 @@ BTC is currently around $65,000 based on latest tool output."#
             "missing Channel Capabilities section"
         );
         assert!(
-            prompt.contains("running as a messaging bot"),
+            prompt.contains("auto-send to the channel"),
             "missing channel context"
         );
         assert!(
-            prompt.contains("NEVER repeat, describe, or echo credentials"),
+            prompt.contains("Never echo credentials"),
             "missing security instruction"
         );
     }
@@ -11516,11 +11442,11 @@ Navigation complete."#;
     #[test]
     fn build_channel_system_prompt_includes_visibility_policy() {
         let hidden = build_channel_system_prompt("base", "slack", "chat", false, None);
-        assert!(hidden.contains("run tools/functions in the background"));
-        assert!(hidden.contains("Do not reveal raw tool names"));
+        assert!(hidden.contains("Hide tool internals"));
+        assert!(hidden.contains("unless explicitly asked"));
 
         let exposed = build_channel_system_prompt("base", "slack", "chat", true, None);
-        assert!(exposed.contains("user explicitly requested command/tool details"));
+        assert!(exposed.contains("Show tool details"));
     }
 
     #[test]

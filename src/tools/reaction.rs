@@ -29,9 +29,7 @@ impl Tool for ReactionTool {
     }
 
     fn description(&self) -> &str {
-        "Add or remove an emoji reaction on a message in any active channel. \
-         Provide the channel name, the platform channel ID, \
-         the platform message ID, and the emoji (Unicode character or platform shortcode)."
+        "Add or remove emoji reaction on a message (channel, message ID, emoji)."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {

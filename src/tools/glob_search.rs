@@ -24,7 +24,7 @@ impl Tool for GlobSearchTool {
     }
 
     fn description(&self) -> &str {
-        "Find files by glob pattern. Use when: locating files by name or extension. Don't use when: searching file contents (use content_search)."
+        "Find files by glob pattern. For file contents, use content_search."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {

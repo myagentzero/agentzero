@@ -417,10 +417,10 @@ export const CONFIG_SECTIONS: SectionDef[] = [
     description: 'Agent orchestration settings',
     icon: Bot,
     fields: [
-      { key: 'compact_context', label: 'Compact Context', type: 'toggle', defaultValue: true, description: 'Compress long conversation context' },
-      { key: 'max_tool_iterations', label: 'Max Tool Iterations', type: 'number', min: 1, defaultValue: 20, description: 'Default: 20' },
-      { key: 'max_history_messages', label: 'Max History Messages', type: 'number', min: 1, defaultValue: 50, description: 'Default: 50' },
-      { key: 'parallel_tools', label: 'Parallel Tools', type: 'toggle', defaultValue: false, description: 'Execute tools in parallel when possible' },
+      { key: 'compact_context', label: 'Compact Context', type: 'toggle', defaultValue: true, description: 'Optimize for smaller models: limits initial context to 6000 chars, reduces RAG results to 2' },
+      { key: 'max_tool_iterations', label: 'Max Tool Iterations Per Message', type: 'number', min: 1, defaultValue: 20, description: 'Max tool calls allowed in a single user message. Default: 20' },
+      { key: 'max_history_messages', label: 'Max History Messages', type: 'number', min: 10, defaultValue: 50, description: 'Triggers automatic compaction when exceeded. Default: 50 (recommended: 25-35)' },
+      { key: 'parallel_tools', label: 'Parallel Tools', type: 'toggle', defaultValue: false, description: 'Execute multiple tools concurrently within a single iteration' },
       {
         key: 'tool_dispatcher', label: 'Tool Dispatcher', type: 'select', defaultValue: 'auto', options: [
           { value: 'auto', label: 'Auto' },
@@ -428,6 +428,11 @@ export const CONFIG_SECTIONS: SectionDef[] = [
           { value: 'parallel', label: 'Parallel' },
         ]
       },
+      { key: 'loop_detection_no_progress_threshold', label: 'No-Progress Loop Threshold', type: 'number', min: 0, defaultValue: 3, description: 'Detect repeated identical tool calls. Set to 0 to disable. Default: 3' },
+      { key: 'loop_detection_ping_pong_cycles', label: 'Ping-Pong Loop Threshold', type: 'number', min: 0, defaultValue: 2, description: 'Detect A→B→A→B patterns (cycles). Set to 0 to disable. Default: 2' },
+      { key: 'loop_detection_failure_streak', label: 'Failure Streak Threshold', type: 'number', min: 0, defaultValue: 3, description: 'Detect consecutive tool failures. Set to 0 to disable. Default: 3' },
+      { key: 'safety_heartbeat_interval', label: 'Safety Heartbeat (iterations)', type: 'number', min: 0, defaultValue: 5, description: 'Inject a security-constraint reminder every N tool calls within a single message (guards runaway tool loops). Set to 0 to disable. Default: 5' },
+      { key: 'safety_heartbeat_turn_interval', label: 'Safety Heartbeat (turns)', type: 'number', min: 0, defaultValue: 10, description: 'Inject a security-constraint reminder every N conversation turns (guards long sessions drifting from constraints). Set to 0 to disable. Default: 10' },
     ],
   },
 

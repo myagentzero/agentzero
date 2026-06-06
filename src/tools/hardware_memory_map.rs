@@ -57,7 +57,7 @@ impl Tool for HardwareMemoryMapTool {
     }
 
     fn description(&self) -> &str {
-        "Return flash and RAM address ranges for connected hardware. Use when: user asks for 'upper and lower memory addresses', 'memory map', or 'readable addresses'."
+        "Get flash and RAM address ranges for connected hardware."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {
@@ -66,7 +66,7 @@ impl Tool for HardwareMemoryMapTool {
             "properties": {
                 "board": {
                     "type": "string",
-                    "description": "Optional board name (e.g. nucleo-f401re, arduino-uno). If omitted, returns map for first configured board."
+                    "description": "Board name (e.g., nucleo-f401re, arduino-uno). Omit for first configured board."
                 }
             }
         })

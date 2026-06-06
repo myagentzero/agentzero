@@ -42,8 +42,7 @@ impl Tool for FileReadTool {
     }
 
     fn description(&self) -> &str {
-        "Read file contents with line numbers. Supports partial reading via offset and limit. Binary files are read with lossy UTF-8 conversion. \
-         Don't use when: when file may contain sensitive info (e.g. .env) unless necessary and policy allows."
+        "Read file with line numbers. Supports partial reading (offset/limit). Binary→UTF-8 lossy."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {
@@ -52,7 +51,7 @@ impl Tool for FileReadTool {
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "Path to the file. Relative paths resolve from workspace; outside paths require policy allowlist."
+                    "description": "File path. Relative from workspace; absolute paths need policy allowlist."
                 },
                 "offset": {
                     "type": "integer",

@@ -54,7 +54,7 @@ impl Tool for CronRemoveTool {
     }
 
     fn description(&self) -> &str {
-        "Remove a cron job by id. Use cron_list first if the job_id is unknown. Use when: user wants to cancel or replace a scheduled job. Don't use when: user hasn't confirmed which job to remove."
+        "Remove a cron job by id. Use cron_list to find job_id first."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {

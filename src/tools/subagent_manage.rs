@@ -31,8 +31,7 @@ impl Tool for SubAgentManageTool {
     }
 
     fn description(&self) -> &str {
-        "Check status or kill a background sub-agent. Use when: monitoring or cancelling a spawned sub-agent session. \
-         Don't use when: listing all sub-agents (use subagent_list) or spawning new ones (use subagent_spawn)."
+        "Check status or kill background sub-agent session."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {

@@ -257,7 +257,6 @@ pub async fn run_wizard(force: bool) -> Result<Config> {
         atlassian: crate::config::schema::AtlassianConfig::default(),
         elasticsearch: crate::config::schema::ElasticsearchConfig::default(),
         github: crate::config::schema::GitHubToolConfig::default(),
-        ask_user: crate::config::AskUserConfig::default(),
         local_context: crate::config::schema::LocalContextConfig::default(),
     };
 
@@ -638,7 +637,6 @@ async fn run_quick_setup_with_home(
         atlassian: crate::config::schema::AtlassianConfig::default(),
         elasticsearch: crate::config::schema::ElasticsearchConfig::default(),
         github: crate::config::schema::GitHubToolConfig::default(),
-        ask_user: crate::config::AskUserConfig::default(),
         local_context: crate::config::schema::LocalContextConfig::default(),
     };
     if no_totp {

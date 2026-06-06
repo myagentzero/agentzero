@@ -228,9 +228,7 @@ impl Tool for PipelineTool {
     }
 
     fn description(&self) -> &str {
-        "Execute a multi-step tool pipeline in a single call. Steps run sequentially by default with result interpolation \
-         (use {{step[N].result}} to reference prior outputs), or in parallel when 'parallel: true' is set. \
-         Consider using bg_run for long-running operations that don't require interpolation."
+        "Execute multi-step tool pipeline sequentially (with {{step[N].result}} interpolation) or parallel."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {

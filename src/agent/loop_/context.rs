@@ -1,30 +1,22 @@
 use crate::memory::{self, Memory, MemoryCategory, decay, retrieval};
 use std::fmt::Write;
 
-/// Default half-life (days) for time decay in context building.
+/// Time-decay half-life (days) for context recall.
 const CONTEXT_DECAY_HALF_LIFE_DAYS: f64 = 7.0;
 
-/// Score boost applied to `Core` category memories so durable facts and
-/// preferences surface even when keyword/semantic similarity is moderate.
+/// Score boost for `Core` memories.
 const CORE_CATEGORY_SCORE_BOOST: f64 = 0.3;
 
-/// Maximum number of memory entries included in the context preamble.
+/// Max memory entries in context.
 const CONTEXT_ENTRY_LIMIT: usize = 5;
 
-/// Over-fetch factor: retrieve more candidates than the output limit so
-/// that Core boost and re-ranking can select the best subset.
+/// Recall multiplier before re-ranking.
 const RECALL_OVER_FETCH_FACTOR: usize = 2;
 
-/// Build context preamble by searching memory for relevant entries.
-/// Uses enhanced retrieval (multi-query + Core boosting) for better coverage.
-/// Entries with a hybrid score below `min_relevance_score` are dropped to
-/// prevent unrelated memories from bleeding into the conversation.
+/// Build memory context for the current message.
 ///
-/// Core memories are exempt from time decay (evergreen).
-///
-/// `Core` category memories receive a score boost so that durable facts,
-/// preferences, and project rules are more likely to appear in context
-/// even when semantic similarity to the current message is moderate.
+/// Uses enhanced recall, applies time decay + Core boost, and filters
+/// entries below `min_relevance_score`.
 pub(super) async fn build_context(
     mem: &dyn Memory,
     user_msg: &str,
@@ -33,7 +25,7 @@ pub(super) async fn build_context(
 ) -> String {
     let mut context = String::new();
 
-    // Over-fetch so Core-boosted entries can compete fairly after re-ranking.
+    // Over-fetch before boost/re-rank.
     let fetch_limit = CONTEXT_ENTRY_LIMIT * RECALL_OVER_FETCH_FACTOR;
     if let Ok(mut entries) =
         retrieval::enhanced_recall(mem, user_msg, fetch_limit, session_id).await
@@ -42,10 +34,10 @@ pub(super) async fn build_context(
             return context;
         }
 
-        // Apply time decay: older non-Core memories score lower.
+        // Older non-Core memories decay.
         decay::apply_time_decay(&mut entries, CONTEXT_DECAY_HALF_LIFE_DAYS);
 
-        // Apply Core category boost and filter by minimum relevance.
+        // Boost Core, then filter by relevance.
         let mut scored: Vec<_> = entries
             .iter()
             .filter(|e| !memory::is_assistant_autosave_key(&e.key))
@@ -64,7 +56,7 @@ pub(super) async fn build_context(
             })
             .collect();
 
-        // Sort by boosted score descending, then truncate to output limit.
+        // Rank and cap output.
         scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         scored.truncate(CONTEXT_ENTRY_LIMIT);
 
@@ -80,8 +72,9 @@ pub(super) async fn build_context(
     context
 }
 
-/// Build hardware datasheet context from RAG when peripherals are enabled.
-/// Includes pin-alias lookup (e.g. "red_led" → 13) when query matches, plus retrieved chunks.
+/// Build hardware docs context from RAG.
+///
+/// Adds matching pin aliases (for example, "red_led" -> 13) and retrieved chunks.
 pub(super) fn build_hardware_context(
     rag: &crate::hardware::datasheet::HardwareRag,
     user_msg: &str,
@@ -94,7 +87,7 @@ pub(super) fn build_hardware_context(
 
     let mut context = String::new();
 
-    // Pin aliases: when user says "red led", inject "red_led: 13" for matching boards
+    // Add matching pin aliases.
     let pin_ctx = rag.pin_alias_context(user_msg, boards);
     if !pin_ctx.is_empty() {
         context.push_str(&pin_ctx);

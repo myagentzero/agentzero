@@ -25,7 +25,7 @@ impl Tool for MemoryStoreTool {
     }
 
     fn description(&self) -> &str {
-        "Save to memory. Use when: preserving durable preferences, decisions, key context. Don't use when: information is transient/noisy/sensitive without need."
+        "Save to memory (durable preferences, decisions, key context)."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {
@@ -42,7 +42,7 @@ impl Tool for MemoryStoreTool {
                 },
                 "category": {
                     "type": "string",
-                    "description": "Memory category: 'core' (permanent), 'daily' (session), 'conversation' (chat), 'system' (automated), or a custom category name. Defaults to 'core'."
+                    "description": "Category: core (permanent), daily (session), conversation (chat), system, or custom. Default: core."
                 }
             },
             "required": ["key", "content"]

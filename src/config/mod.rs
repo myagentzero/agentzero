@@ -6,7 +6,7 @@ pub use schema::{
     AckReactionChannelsConfig, AckReactionChatType, AckReactionConfig, AckReactionRuleAction,
     AckReactionRuleConfig, AckReactionStrategy, AgentConfig, AgentLoadBalanceStrategy,
     AgentSessionBackend, AgentSessionConfig, AgentSessionStrategy, AgentTeamsConfig,
-    AgentsIpcConfig, AskUserConfig, AuditConfig, AutonomyConfig, BrowserComputerUseConfig,
+    AgentsIpcConfig, AuditConfig, AutonomyConfig, BrowserComputerUseConfig,
     BrowserConfig, BuiltinHooksConfig, ChannelsConfig, ClassificationRule,
     CommandContextRuleAction, CommandContextRuleConfig, ComposioConfig, Config,
     ConsolidationConfig, CoordinationConfig, CostConfig, CronConfig, DEFAULT_MODEL_FALLBACK,

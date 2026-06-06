@@ -56,10 +56,7 @@ impl Tool for CronAddTool {
     }
 
     fn description(&self) -> &str {
-        "Create a scheduled job (shell command or agent prompt). \
-         Use when: user wants reminders, scheduled tasks, delayed messages, or recurring automation. \
-         Prefer schedule.kind='at' for one-time tasks. Set light_context=true for simple self-contained jobs. \
-         Don't use when: the task should run immediately (just do it inline)."
+        "Create scheduled job: shell commands or agent prompts. Supports one-time or interval schedules."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {
@@ -69,7 +66,7 @@ impl Tool for CronAddTool {
                 "name": { "type": "string" },
                 "schedule": {
                     "type": "object",
-                    "description": "Schedule object: {kind:'cron',expr,tz?} recurring | {kind:'at',at} one-time | {kind:'every',every_ms} recurring interval"
+                    "description": "One of: {kind:'cron',expr,tz?} | {kind:'at',at} | {kind:'every',every_ms}"
                 },
                 "job_type": { "type": "string", "enum": ["shell", "agent"] },
                 "command": { "type": "string" },
@@ -77,32 +74,32 @@ impl Tool for CronAddTool {
                 "session_target": { "type": "string", "enum": ["isolated", "main"] },
                 "model": {
                     "type": "string",
-                    "description": "Optional model override for this job. Omit unless the user explicitly requests a different model; defaults to the active model/context."
+                    "description": "Optional model override."
                 },
                 "recurring_confirmed": {
                     "type": "boolean",
-                    "description": "Required for agent recurring schedules (schedule.kind='cron' or 'every'). Set true only when recurring behavior is intentional.",
+                    "description": "Required for recurring agent schedules.",
                     "default": false
                 },
                 "delivery": {
                     "type": "object",
-                    "description": "Delivery config to send job output to a channel. Example: {\"mode\":\"announce\",\"channel\":\"slack\",\"to\":\"<channel_id>\"}",
+                    "description": "Optional output delivery config.",
                     "properties": {
-                        "mode": { "type": "string", "enum": ["none", "announce"], "description": "Set to 'announce' to deliver output to a channel" },
-                        "channel": { "type": "string", "enum": ["notion", "slack", "email"], "description": "Channel type to deliver to" },
-                        "to": { "type": "string", "description": "Target: Notion page ID, Slack channel, Email address, etc." },
-                        "best_effort": { "type": "boolean", "description": "If true, delivery failure does not fail the job" }
+                        "mode": { "type": "string", "enum": ["none", "announce"], "description": "Delivery mode." },
+                        "channel": { "type": "string", "enum": ["notion", "slack", "email"], "description": "Delivery channel." },
+                        "to": { "type": "string", "description": "Channel target (ID/address)." },
+                        "best_effort": { "type": "boolean", "description": "If true, ignore delivery failure." }
                     }
                 },
                 "light_context": {
                     "type": "boolean",
-                    "description": "Set true for a scheduled job that doesn't need full identity/persona/project context (e.g., a weather check, a log sweep, a simple reminder). Saves tokens for simple, self-contained tasks.",
-                    "default": false
+                    "description": "Use small context for simple tasks/reminders to save tokens.",
+                    "default": true
                 },
                 "delete_after_run": { "type": "boolean" },
                 "approved": {
                     "type": "boolean",
-                    "description": "Set true to explicitly approve medium/high-risk shell commands in supervised mode",
+                    "description": "Required for medium/high-risk shell jobs in supervised mode",
                     "default": false
                 }
             },

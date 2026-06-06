@@ -321,7 +321,7 @@ impl Tool for HttpRequestTool {
     }
 
     fn description(&self) -> &str {
-        "Make HTTP requests to external APIs. Use when: fetching data from or interacting with REST APIs, webhooks, or web services. Don't use when: target domain is not on the allowlist, or a dedicated integration tool already covers the service."
+        "Make HTTP requests to external APIs (REST, webhooks, web services). Domain must be allowlisted."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {
@@ -344,7 +344,7 @@ impl Tool for HttpRequestTool {
                 },
                 "credential_profile": {
                     "type": "string",
-                    "description": "Optional profile name from [http_request.credential_profiles]. Lets the harness inject credentials from environment variables without passing raw tokens in tool arguments."
+                    "description": "Credential profile name. Injects credentials from env vars instead of passing tokens."
                 },
                 "body": {
                     "type": "string",

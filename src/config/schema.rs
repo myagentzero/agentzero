@@ -320,10 +320,6 @@ pub struct Config {
     #[serde(default)]
     pub web_search: WebSearchConfig,
 
-    /// Interactive user prompting tool configuration (`[ask_user]`).
-    #[serde(default)]
-    pub ask_user: AskUserConfig,
-
     /// Local context tool configuration (`[local_context]`).
     #[serde(default)]
     pub local_context: LocalContextConfig,
@@ -1036,7 +1032,7 @@ impl Default for SubAgentsConfig {
 /// Agent orchestration configuration (`[agent]` section).
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct AgentConfig {
-    /// When true: bootstrap_max_chars=6000, rag_chunk_limit=2. Use for 13B or smaller models.
+    /// Optimize context size for smaller models. When true: limits initial context to 6000 chars and reduces RAG results to 2. Default: false.
     #[serde(default)]
     pub compact_context: bool,
     #[serde(default)]
@@ -2300,37 +2296,6 @@ impl Default for WebSearchConfig {
             searxng_instance_url: None,
             max_results: default_web_search_max_results(),
             timeout_secs: default_web_search_timeout_secs(),
-        }
-    }
-}
-
-// ── Ask User ───────────────────────────────────────────────────
-
-/// Interactive user prompting tool configuration (`[ask_user]` section).
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct AskUserConfig {
-    /// Enable the `ask_user` tool for interactive prompts
-    #[serde(default = "default_true")]
-    pub enabled: bool,
-    /// Default timeout in seconds when waiting for a user response
-    #[serde(default = "default_ask_user_timeout_secs")]
-    pub default_timeout_secs: u64,
-    /// Preferred channel when none is specified (e.g. "slack", "slack").
-    /// When empty, uses the first available channel.
-    #[serde(default)]
-    pub default_channel: Option<String>,
-}
-
-fn default_ask_user_timeout_secs() -> u64 {
-    300
-}
-
-impl Default for AskUserConfig {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            default_timeout_secs: default_ask_user_timeout_secs(),
-            default_channel: None,
         }
     }
 }
@@ -5829,7 +5794,6 @@ impl Default for Config {
             atlassian: AtlassianConfig::default(),
             elasticsearch: ElasticsearchConfig::default(),
             github: GitHubToolConfig::default(),
-            ask_user: AskUserConfig::default(),
             local_context: LocalContextConfig::default(),
         }
     }
@@ -9058,7 +9022,6 @@ default_temperature = 0.7
             atlassian: AtlassianConfig::default(),
             elasticsearch: ElasticsearchConfig::default(),
             github: GitHubToolConfig::default(),
-            ask_user: AskUserConfig::default(),
             local_context: LocalContextConfig::default(),
         };
 
@@ -9346,7 +9309,6 @@ denied_tools = ["shell"]
             atlassian: AtlassianConfig::default(),
             elasticsearch: ElasticsearchConfig::default(),
             github: GitHubToolConfig::default(),
-            ask_user: AskUserConfig::default(),
             local_context: LocalContextConfig::default(),
         };
 

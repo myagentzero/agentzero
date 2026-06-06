@@ -23,7 +23,7 @@ impl Tool for CalculatorTool {
     }
 
     fn description(&self) -> &str {
-        "Perform arithmetic, statistical, and quantitative calculations. Supports 27 functions for any numeric computation. Use when: any numeric computation is needed. Don't use when: the answer is trivially obvious."
+        "Perform arithmetic, statistical, and quantitative calculations (27 functions)."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {
@@ -32,12 +32,7 @@ impl Tool for CalculatorTool {
             "properties": {
                 "function": {
                     "type": "string",
-                    "description": "Calculation to perform. \
-                        Arithmetic: add(values), subtract(values), divide(values), multiply(values), pow(a,b), sqrt(x), abs(x), modulo(a,b), round(x,decimals). \
-                        Logarithmic/exponential: log(x,base?), ln(x), exp(x), factorial(x). \
-                        Aggregation: sum(values), average(values), count(values), min(values), max(values), range(values). \
-                        Statistics: median(values), mode(values), variance(values), stdev(values), percentile(values,p). \
-                        Utility: percentage_change(a,b), clamp(x,min_val,max_val), convert_temp(x,from_unit).",
+                    "description": "See enumeration for available functions.",
                     "enum": [
                         "add", "subtract", "divide", "multiply", "pow", "sqrt",
                         "abs", "modulo", "round", "log", "ln", "exp", "factorial",

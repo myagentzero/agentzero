@@ -36,7 +36,7 @@ impl Tool for HardwareMemoryReadTool {
     }
 
     fn description(&self) -> &str {
-        "Read actual memory/register values from Nucleo. Use when user asks to read registers, read memory, dump lower memory 0-126, or give address and value."
+        "Read memory/register values from Nucleo by address."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {

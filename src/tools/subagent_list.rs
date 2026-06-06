@@ -30,8 +30,7 @@ impl Tool for SubAgentListTool {
     }
 
     fn description(&self) -> &str {
-        "List background sub-agent sessions. Use when: checking which sub-agents are running or reviewing completed work. \
-         Don't use when: managing a specific session (use subagent_manage)."
+        "List background sub-agent sessions (running/completed)."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {

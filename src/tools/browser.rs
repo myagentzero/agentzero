@@ -900,9 +900,7 @@ impl Tool for BrowserTool {
     }
 
     fn description(&self) -> &str {
-        "Web Browser automation for rendering web pages and interacting with dynamic content. \
-         Use when you need browser automation to load a website, interact with dynamic content, or take screenshots. \
-         Don't use for tasks like calling an API (use http_request) or searching for web content (use web_search)."
+        "Browser automation: load pages, interact with dynamic content, take screenshots."
     }
 
     fn parameters_schema(&self) -> Value {

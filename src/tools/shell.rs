@@ -115,7 +115,7 @@ impl Tool for ShellTool {
     }
 
     fn description(&self) -> &str {
-        "Execute terminal commands. Use when: running local checks, build/test commands, diagnostics. Don't use when: a safer dedicated tool exists, or command is destructive without approval."
+        "Execute terminal commands (checks, builds, tests, diagnostics)."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {

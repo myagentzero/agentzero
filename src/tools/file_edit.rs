@@ -206,7 +206,7 @@ impl Tool for FileEditTool {
     }
 
     fn description(&self) -> &str {
-        "Edit a file by exact string replacement. Use when: making targeted changes to existing files. Don't use when: creating new files (use file_write)."
+        "Edit file by exact string replacement. For new files, use file_write."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {
@@ -215,15 +215,15 @@ impl Tool for FileEditTool {
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "Path to the file. Relative paths resolve from workspace; outside paths require policy allowlist."
+                    "description": "File path. Relative from workspace; absolute paths need policy allowlist."
                 },
                 "old_string": {
                     "type": "string",
-                    "description": "The exact text to find and replace (must appear exactly once in the file)"
+                    "description": "Text to find (must appear exactly once)"
                 },
                 "new_string": {
                     "type": "string",
-                    "description": "The replacement text (empty string to delete the matched text)"
+                    "description": "Replacement text (empty to delete)"
                 }
             },
             "required": ["path", "old_string", "new_string"]

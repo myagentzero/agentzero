@@ -71,7 +71,7 @@ impl Tool for MemoryRecallTool {
     }
 
     fn description(&self) -> &str {
-        "Search memory. Use when: retrieving prior decisions, user preferences, historical context. Don't use when: answer is already in current context."
+        "Search memory for prior decisions, preferences, historical context."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {
@@ -88,11 +88,11 @@ impl Tool for MemoryRecallTool {
                 },
                 "category": {
                     "type": "string",
-                    "description": "Filter by category: 'core', 'daily', 'conversation', 'system', or a custom category name. If omitted, searches all categories."
+                    "description": "Filter by category (core, daily, conversation, system, or custom). Omit for all."
                 },
                 "since": {
                     "type": "string",
-                    "description": "Only return memories created after this time. Accepts relative durations (e.g. '7d', '24h', '1w', '30m') or absolute dates (e.g. '2026-04-10' or RFC3339)."
+                    "description": "Return memories after this time. Relative (7d, 24h, 1w, 30m) or absolute (2026-04-10)."
                 }
             },
             "required": []

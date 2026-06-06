@@ -330,9 +330,7 @@ impl Tool for ConfluenceTool {
     }
 
     fn description(&self) -> &str {
-        "Interact with Confluence: read documentation pages, search with CQL, explore spaces. \
-         Use when: user asks about work related documentation or references Confluence pages/spaces. \
-         Don't use when: user is discussing documentation conceptually or when referencing content from the web."
+        "Confluence: read pages, search with CQL, explore spaces, get/create/update pages."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {
@@ -342,7 +340,7 @@ impl Tool for ConfluenceTool {
                 "action": {
                     "type": "string",
                     "enum": ["get_page", "search_pages", "list_spaces", "get_space"],
-                    "description": "The Confluence action to perform. Enabled actions are configured in [confluence].allowed_actions."
+                    "description": "Confluence action (get_page, search_pages, list_spaces, get_space)"
                 },
                 "page_id": {
                     "type": "string",
@@ -351,15 +349,15 @@ impl Tool for ConfluenceTool {
                 "detail_level": {
                     "type": "string",
                     "enum": ["basic", "standard", "full"],
-                    "description": "How much content to return for get_page. Options: 'basic' — minimal metadata only (title, space, version); 'standard' (default) — includes excerpt and labels; 'full' — complete page body content."
+                    "description": "Detail level: basic (metadata), standard (default, excerpt/labels), full (page body)"
                 },
                 "cql": {
                     "type": "string",
-                    "description": "CQL (Confluence Query Language) query string for search_pages. Example: 'space=DEV AND type=page AND title~\"API\"'. Common fields: space, type, title, creator, created, lastModified. Operators: =, !=, ~, >, <, AND, OR."
+                    "description": "CQL query for search_pages. Example: 'space=DEV AND type=page AND title~\"API\"'"
                 },
                 "max_results": {
                     "type": "integer",
-                    "description": "Maximum number of results to return for search_pages or list_spaces. Defaults to 25 for search, 50 for list_spaces. Capped at 999.",
+                    "description": "Max results (defaults 25 search, 50 list_spaces; capped at 999)",
                     "default": 25
                 },
                 "space_key": {

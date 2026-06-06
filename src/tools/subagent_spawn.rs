@@ -151,8 +151,7 @@ impl Tool for SubAgentSpawnTool {
     }
 
     fn description(&self) -> &str {
-        "Spawn a background delegate agent. Use when: parallelizing independent tasks or offloading long-running work. \
-         Don't use when: the task is quick or needs immediate results."
+        "Spawn background delegate agent for parallel/long-running work."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {

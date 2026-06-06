@@ -34,7 +34,7 @@ export default function NumberField({ field, value, onChange }: FieldProps) {
       min={field.min}
       max={field.max}
       step={field.step ?? 1}
-      placeholder={field.description ?? ''}
+      placeholder=""
       className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
     />
   );

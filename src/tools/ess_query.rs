@@ -50,11 +50,8 @@ impl EssQueryTool {
         let names_list = cluster_names.join(", ");
         let default_name = cluster_names.first().cloned().unwrap_or_default();
         let description = format!(
-            "Read-only Elasticsearch query against the configured cluster. Accepts a raw path \
-             (e.g. '/_cat/indices?v', '/_cluster/health', '/<index>/_search') with GET or POST \
-             and an optional JSON body. Returns the response body. \
-             Available cluster names: {names_list}. \
-             Pass cluster_name to target a specific cluster; defaults to '{default_name}' if omitted."
+            "Read-only Elasticsearch query. Accepts a path (e.g. /_cat/indices?v, /_search) with GET or POST. \
+             Clusters: {names_list}. Default: {default_name}."
         );
         Ok(Self {
             cluster_names,
@@ -79,7 +76,7 @@ impl Tool for EssQueryTool {
     fn parameters_schema(&self) -> Value {
         let default_name = self.cluster_names.first().map(String::as_str).unwrap_or("");
         let cluster_name_desc = format!(
-            "Cluster to query. Valid values: {}. Defaults to '{default_name}' if omitted.",
+            "Cluster to query: {}. Default: {default_name}.",
             self.cluster_names.join(", ")
         );
         json!({
@@ -87,16 +84,16 @@ impl Tool for EssQueryTool {
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "Relative path on the cluster, starting with '/'. May include a query string (e.g. '/_cat/indices?v')."
+                    "description": "Cluster path with '/' prefix (e.g., /_cat/indices?v)."
                 },
                 "method": {
                     "type": "string",
                     "enum": ["GET", "POST"],
-                    "description": "HTTP method. Defaults to GET. Use POST for _search requests with a JSON body."
+                    "description": "HTTP method (default: GET)."
                 },
                 "body": {
                     "type": "object",
-                    "description": "Optional JSON body (used primarily with POST for _search/_msearch queries)."
+                    "description": "JSON body for POST requests."
                 },
                 "cluster_name": {
                     "type": "string",

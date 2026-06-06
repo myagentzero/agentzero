@@ -375,7 +375,7 @@ impl Tool for GitHubTool {
     }
 
     fn description(&self) -> &str {
-        "Interact with GitHub issues and PRs: read details, list comments, add comments, create/close/merge PRs, request reviews. Use when: user references a GitHub issue/PR, asks about its state, or wants to comment, open, close, merge, or request reviewers. Don't use when: discussing GitHub conceptually without needing live data. Note: create_pull_request requires the head branch to already exist on remote, the tool does not push code (use git_operations)."
+        "GitHub REST API: get/comment on issues and PRs, create/manage PRs, request reviews."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {
@@ -395,49 +395,49 @@ impl Tool for GitHubTool {
                         "merge_pr",
                         "request_review"
                     ],
-                    "description": "GitHub action to perform. Enabled actions are configured in [github].allowed_actions."
+                    "description": "Action to perform (must be in allowed_actions)."
                 },
                 "repo": {
                     "type": "string",
-                    "description": "Repository in 'owner/repo' format. Required for all actions. Must match github.allowed_repos."
+                    "description": "Repository as 'owner/repo' (must match allowed_repos)."
                 },
                 "issue_number": {
                     "type": "integer",
-                    "description": "Issue number for get_issue, list_comments, add_comment."
+                    "description": "Issue number (get_issue, list_comments, add_comment)."
                 },
                 "pr_number": {
                     "type": "integer",
-                    "description": "Pull request number for get_pr, list_pr_review_comments, close_pr, merge_pr, request_review."
+                    "description": "PR number (get_pr, list_pr_review_comments, close_pr, merge_pr, request_review)."
                 },
                 "body": {
                     "type": "string",
-                    "description": "Comment body for add_comment, or PR description for create_pull_request."
+                    "description": "Comment or PR description (add_comment, create_pull_request)."
                 },
                 "title": {
                     "type": "string",
-                    "description": "PR title for create_pull_request."
+                    "description": "PR title (create_pull_request)."
                 },
                 "head": {
                     "type": "string",
-                    "description": "Source branch for create_pull_request. Must exist on remote (this tool does not push)."
+                    "description": "Source branch (create_pull_request; must exist on remote)."
                 },
                 "base": {
                     "type": "string",
-                    "description": "Target branch for create_pull_request."
+                    "description": "Target branch (create_pull_request)."
                 },
                 "draft": {
                     "type": "boolean",
-                    "description": "Whether to open the PR as a draft (create_pull_request)."
+                    "description": "Open PR as draft (create_pull_request)."
                 },
                 "merge_method": {
                     "type": "string",
                     "enum": ["merge", "squash", "rebase"],
-                    "description": "Merge strategy for merge_pr. Defaults to 'merge'."
+                    "description": "Merge strategy (merge_pr; default: merge)."
                 },
                 "reviewers": {
                     "type": "array",
                     "items": { "type": "string" },
-                    "description": "List of GitHub usernames to request review from (request_review)."
+                    "description": "Usernames to request reviews from (request_review)."
                 }
             },
             "required": ["action", "repo"]

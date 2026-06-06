@@ -17,7 +17,6 @@
 
 pub mod agent_load_tracker;
 pub mod agent_selection;
-pub mod ask_user;
 pub mod bg_run;
 pub mod browser;
 pub mod calculator;
@@ -72,7 +71,6 @@ pub mod web_fetch;
 mod web_search_provider_routing;
 pub mod web_search_tool;
 pub use agent_load_tracker::AgentLoadTracker;
-pub use ask_user::AskUserTool;
 pub use bg_run::{BgJobStore, BgRunTool, BgStatusTool};
 pub use browser::{BrowserTool, ComputerUseConfig};
 pub use calculator::CalculatorTool;
@@ -365,13 +363,6 @@ pub fn all_tools_with_runtime(
         tool_arcs.push(Arc::new(LocalContextTool::new(&root_config.local_context)));
     }
 
-    // Interactive ask_user tool — conditionally registered.
-    if root_config.ask_user.enabled {
-        tool_arcs.push(Arc::new(AskUserTool::new(
-            security.clone(),
-            root_config.ask_user.clone(),
-        )));
-    }
 
     // LiteLLM proxy status tool — only when using a custom provider
     if root_config

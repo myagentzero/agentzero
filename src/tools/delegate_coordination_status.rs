@@ -35,8 +35,7 @@ impl Tool for DelegateCoordinationStatusTool {
     }
 
     fn description(&self) -> &str {
-        "Inspect delegate coordination runtime state. Use when: debugging delegation issues, checking inbox backlogs, or reviewing dead-letter events. \
-         Don't use when: delegating tasks (use delegate) or managing sub-agents (use subagent_manage)."
+        "Inspect delegation runtime state: inbox backlogs, dead-letter events, context."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {
@@ -68,7 +67,7 @@ impl Tool for DelegateCoordinationStatusTool {
                     "type": "integer",
                     "minimum": 0,
                     "maximum": MAX_MESSAGE_OFFSET,
-                    "description": "Offset into preview messages ordered by oldest first (or matching oldest first when correlation_id is set)",
+                    "description": "Offset into preview messages (oldest first)",
                     "default": 0
                 },
                 "include_dead_letters": {

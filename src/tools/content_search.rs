@@ -37,7 +37,7 @@ impl Tool for ContentSearchTool {
     }
 
     fn description(&self) -> &str {
-        "Search file contents by regex. Use when: finding code patterns, definitions, usages across the workspace. Don't use when: you know the exact file (use file_read) or need file paths only (use glob_search)."
+        "Search file contents by regex. For file paths only, use glob_search."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {
@@ -55,7 +55,7 @@ impl Tool for ContentSearchTool {
                 },
                 "output_mode": {
                     "type": "string",
-                    "description": "Output format: 'content' (matching lines), 'files_with_matches' (paths only), 'count' (match counts)",
+                    "description": "Output: content (lines), files_with_matches (paths), count (totals)",
                     "enum": ["content", "files_with_matches", "count"],
                     "default": "content"
                 },

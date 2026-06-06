@@ -266,9 +266,7 @@ impl Tool for WebFetchTool {
     }
 
     fn description(&self) -> &str {
-        "Fetch a web page and return its content as clean plain text. HTML pages are automatically converted to readable text. \
-         JSON and plain text responses are returned as-is. Only GET requests; follows redirects. Use when: reading documentation, APIs, or public web content. \
-         Don't use when: making POST/PUT requests (use http_request) or browsing interactive pages (use browser)."
+        "Fetch web page as plain text (HTML→readable, JSON/text as-is). GET only, follows redirects."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {
