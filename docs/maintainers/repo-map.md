@@ -200,8 +200,6 @@ Sandboxing: `bubblewrap.rs`, `firejail.rs`, `landlock.rs`, `docker.rs`, `detect.
 | `firmware/` | Embedded firmware: `arduino/`, `esp32/`, `esp32-ui/`, `nucleo/`, `uno-q-bridge/` |
 | `web/` | Web UI frontend (Vite + TypeScript) |
 | `python/` | Python SDK / tools bridge with its own tests |
-| `dev/` | Local development: Docker Compose, CI script (`ci.sh`), config template, sandbox configs |
-| `scripts/` | CI helpers, release automation, bootstrap, contributor tier computation |
 | `docs/` | Documentation system: multilingual (en/zh-CN/ja/ru/fr/vi), runtime references, operations runbooks, security proposals |
 | `.github/` | CI workflows, PR templates, issue templates, automation |
 

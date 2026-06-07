@@ -113,11 +113,8 @@ Merge-blocking checks should stay small and deterministic. Optional checks are u
 
 - Keep merge-blocking checks deterministic and reproducible (`--locked` where applicable).
 - Follow [`docs/contributing/release-process.md`](./release-process.md) for verify-before-publish release cadence and tag discipline.
-- Keep merge-blocking rust quality policy aligned across `.github/workflows/ci-run.yml`, `dev/ci.sh`, and `.githooks/pre-push` (`./scripts/ci/rust_quality_gate.sh` + `./scripts/ci/rust_strict_delta_gate.sh`).
-- Use `./scripts/ci/rust_strict_delta_gate.sh` (or `./dev/ci.sh lint-delta`) as the incremental strict merge gate for changed Rust lines.
-- Run full strict lint audits regularly via `./scripts/ci/rust_quality_gate.sh --strict` (for example through `./dev/ci.sh lint-strict`) and track cleanup in focused PRs.
-- Keep docs markdown gating incremental via `./scripts/ci/docs_quality_gate.sh` (block changed-line issues, report baseline issues separately).
-- Keep docs link gating incremental via `./scripts/ci/collect_changed_links.py` + lychee (check only links added on changed lines).
+- Keep merge-blocking rust quality policy aligned with `.github/workflows/ci-run.yml`.
+- Run full lint audits regularly via `cargo fmt && cargo clippy` and track cleanup in focused PRs.
 - Prefer explicit workflow permissions (least privilege).
 - Keep Actions source policy restricted to approved allowlist patterns (see [`docs/contributing/actions-source-policy.md`](./actions-source-policy.md)).
 - Use path filters for expensive workflows when practical.

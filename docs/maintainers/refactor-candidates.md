@@ -87,7 +87,6 @@ Auth/token refresh paths clone large structs on every branch. Hot paths like tok
 
 - Property-based testing for parsers/validators
 - Integration tests for multi-module flows
-- Fuzz testing for the shell command parser (security surface)
 - Mock-based tests for network-dependent paths
 
 ### Medium: Dependency count (82 direct)
@@ -122,7 +121,7 @@ Only sets `edition = "2021"`. For a project this size, configuring `max_width`, 
 2. **Split god modules** — extract runtime orchestration from `channels/mod.rs`, isolate security parsing, break `Config` into sub-configs.
 3. **Remove global clippy suppressions** — fix violations individually or add per-item `#[allow]` with reasoning.
 4. **Replace `let _ =` on Results** with at minimum `tracing::warn!` logging.
-5. **Add property/fuzz tests** for security-surface parsers (shell command validation, webhook signatures).
+5. **Add property-based tests** for security-surface parsers (shell command validation, webhook signatures).
 
 ---
 
@@ -147,34 +146,6 @@ Changes deferred from the project-cleanup pass. Each entry includes rationale an
 - Create `docs/i18n/{zh-CN,ja,ru,fr}/` directories with their README + SUMMARY
 - Root `README.*.md` files stay (GitHub convention)
 - Update `docs/i18n/vi/` internal structure to mirror the new English docs layout after the English restructure lands
-
-### TODO: Fuzz testing — upgrade stubs to real coverage
-
-**Current state:** 5 fuzz targets exist in `fuzz/fuzz_targets/`, but only `fuzz_command_validation` tests real ZeroClaw code. The other 4 (`fuzz_config_parse`, `fuzz_tool_params`, `fuzz_webhook_payload`, `fuzz_provider_response`) just fuzz `serde_json::from_str::<Value>` or `toml::from_str::<Value>` — they test third-party crate internals, not ZeroClaw logic.
-
-**Wire existing stubs to real code paths:**
-
-- `fuzz_config_parse`: deserialize into `Config`, not `toml::Value`
-- `fuzz_tool_params`: pass through actual `Tool::execute` input validation
-- `fuzz_webhook_payload`: run through webhook signature verification + body parsing
-- `fuzz_provider_response`: parse into actual provider response types (Anthropic, OpenAI, etc.)
-
-**Add missing targets for security surfaces:**
-
-- Shell command parser (quote-aware parsing, beyond just `validate_command_execution`)
-- Credential scrubbing (`scrub_credentials` — already had a UTF-8 boundary panic in #3024)
-- Pairing code generation/validation
-- Domain matcher
-- Prompt guard scoring
-- Leak detector regex
-
-**Infrastructure improvements:**
-
-- Add seed corpora (`fuzz/corpus/<target>/`) with known-good and edge-case inputs; commit to repo
-- Consider `Arbitrary` derive for structured fuzzing instead of raw `&[u8]`
-- Set up scheduled CI fuzzing (nightly/weekly) — OSS-Fuzz is free for open-source projects
-- Use `cargo fuzz coverage <target>` to generate lcov reports from corpus runs and track which code paths the fuzzer actually reaches
-- Track crash artifacts (`fuzz/artifacts/<target>/`) as issues
 
 ### TODO: Test infrastructure follow-ups from `e2e-testing` branch
 

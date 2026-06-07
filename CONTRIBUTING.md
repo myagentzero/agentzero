@@ -37,30 +37,13 @@ cargo build
 cargo test --locked
 
 # Format & lint (required before PR)
-./scripts/ci/rust_quality_gate.sh
-
-# Optional strict lint audit (full repo, recommended periodically)
-./scripts/ci/rust_quality_gate.sh --strict
-
-# Optional strict lint delta gate (blocks only changed Rust lines)
-./scripts/ci/rust_strict_delta_gate.sh
-
-# Optional docs lint gate (blocks only markdown issues on changed lines)
-./scripts/ci/docs_quality_gate.sh
+cargo fmt && cargo clippy
 
 # Optional docs links gate (checks only links added on changed lines)
 ./scripts/ci/docs_links_gate.sh
 
 # Release build
 cargo build --release --locked
-```
-
-### Optional CI-parity check
-
-For full CI parity in Docker, run:
-
-```bash
-./dev/ci.sh all
 ```
 
 ## Local Secret Management (Required)

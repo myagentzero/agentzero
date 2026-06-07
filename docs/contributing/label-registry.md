@@ -47,8 +47,6 @@ Applied automatically by `pr-path-labeler.yml` using `actions/labeler`. Matches 
 | `tunnel` | `src/tunnel/**` |
 | `observability` | `src/observability/**` |
 | `tests` | `tests/**` |
-| `scripts` | `scripts/**` |
-| `dev` | `dev/**` |
 
 ### Per-component channel labels
 

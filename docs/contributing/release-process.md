@@ -66,10 +66,11 @@ Expected outcome:
 From a clean local checkout synced to `origin/master`:
 
 ```bash
-scripts/release/cut_release_tag.sh vX.Y.Z --push
+git tag -s vX.Y.Z -m "Release vX.Y.Z"
+git push origin vX.Y.Z
 ```
 
-This script enforces:
+Ensure:
 
 - clean working tree
 - `HEAD == origin/master`
