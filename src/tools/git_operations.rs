@@ -53,7 +53,7 @@ impl GitOperationsTool {
     fn requires_write_access(&self, operation: &str) -> bool {
         matches!(
             operation,
-            "commit" | "add" | "checkout" | "stash" | "reset" | "revert" | "push" | "pull"
+            "commit" | "add" | "checkout" | "stash" | "reset" | "revert" | "push" | "pull" | "clone"
         )
     }
 
@@ -612,6 +612,94 @@ impl GitOperationsTool {
             }),
         }
     }
+
+    fn validate_clone_url(url: &str) -> anyhow::Result<()> {
+        if url.is_empty() {
+            anyhow::bail!("clone URL cannot be empty");
+        }
+        if url.starts_with("file://") || url.starts_with('/') || url.starts_with('.') {
+            anyhow::bail!("clone URL must use https:// or git@ scheme, not local paths");
+        }
+        if !url.starts_with("https://") && !url.starts_with("git@") {
+            anyhow::bail!("clone URL must start with https:// or git@");
+        }
+        if url.contains('`') || url.contains("$(") || url.contains(';')
+            || url.contains('|') || url.contains('>')
+        {
+            anyhow::bail!("clone URL contains invalid characters");
+        }
+        Ok(())
+    }
+
+    async fn git_clone(&self, args: serde_json::Value) -> anyhow::Result<ToolResult> {
+        let url = match args.get("url").and_then(|v| v.as_str()) {
+            Some(u) => u,
+            None => return Ok(ToolResult {
+                success: false,
+                output: String::new(),
+                error: Some("Missing 'url' parameter".into()),
+            }),
+        };
+
+        let path = match args.get("path").and_then(|v| v.as_str()) {
+            Some(p) => p,
+            None => return Ok(ToolResult {
+                success: false,
+                output: String::new(),
+                error: Some("Missing 'path' parameter".into()),
+            }),
+        };
+
+        if let Err(e) = Self::validate_clone_url(url) {
+            return Ok(ToolResult {
+                success: false,
+                output: String::new(),
+                error: Some(e.to_string()),
+            });
+        }
+
+        // path must be a single directory name — no separators, no traversal
+        if path.is_empty() || path.contains('/') || path.contains('\\') || path == ".." || path == "." {
+            return Ok(ToolResult {
+                success: false,
+                output: String::new(),
+                error: Some("'path' must be a single directory name with no path separators".into()),
+            });
+        }
+
+        let target = self.workspace_dir.join(path);
+        if target.components().any(|c| c == std::path::Component::ParentDir) {
+            return Ok(ToolResult {
+                success: false,
+                output: String::new(),
+                error: Some("'path' resolves outside the workspace directory".into()),
+            });
+        }
+
+        if target.exists() {
+            return Ok(ToolResult {
+                success: false,
+                output: String::new(),
+                error: Some(format!("Destination '{path}' already exists")),
+            });
+        }
+
+        let workspace = self.workspace_dir.canonicalize()
+            .unwrap_or_else(|_| self.workspace_dir.clone());
+
+        match self.run_git_command(&["clone", url, path], &workspace).await {
+            Ok(_) => Ok(ToolResult {
+                success: true,
+                output: format!("Cloned {url} into {path}"),
+                error: None,
+            }),
+            Err(e) => Ok(ToolResult {
+                success: false,
+                output: String::new(),
+                error: Some(format!("Clone failed: {e}")),
+            }),
+        }
+    }
 }
 
 #[async_trait]
@@ -630,52 +718,56 @@ impl Tool for GitOperationsTool {
             "properties": {
                 "operation": {
                     "type": "string",
-                    "enum": ["status", "diff", "log", "branch", "commit", "add", "checkout", "stash", "push", "pull"],
+                    "enum": ["status", "diff", "log", "branch", "commit", "add", "checkout", "stash", "push", "pull", "clone"],
                     "description": "Git operation to perform"
                 },
                 "message": {
                     "type": "string",
-                    "description": "Commit message (for 'commit' operation)"
+                    "description": "Commit message"
                 },
                 "paths": {
                     "type": "string",
-                    "description": "File paths to stage (for 'add' operation)"
+                    "description": "File paths to stage"
                 },
                 "branch": {
                     "type": "string",
-                    "description": "Branch name (for 'checkout', 'push', 'pull' operations)"
+                    "description": "Branch name"
                 },
                 "remote": {
                     "type": "string",
-                    "description": "Remote name (for 'push'/'pull' operations, default: 'origin')"
+                    "description": "Remote name (default: 'origin')"
                 },
                 "files": {
                     "type": "string",
-                    "description": "File or path to diff (for 'diff' operation, default: '.')"
+                    "description": "File path to diff (default: '.')"
                 },
                 "cached": {
                     "type": "boolean",
-                    "description": "Show staged changes (for 'diff' operation)"
+                    "description": "Show staged changes"
                 },
                 "limit": {
                     "type": "integer",
-                    "description": "Number of log entries (for 'log' operation, default: 10)"
+                    "description": "Log entry limit (default: 10)"
                 },
                 "action": {
                     "type": "string",
                     "enum": ["push", "pop", "list", "drop"],
-                    "description": "Stash action (for 'stash' operation)"
+                    "description": "Stash action"
                 },
                 "index": {
                     "type": "integer",
-                    "description": "Stash index (for 'stash' with 'drop' action)"
+                    "description": "Stash index for drop"
                 },
                 "path": {
                     "type": "string",
-                    "description": "Optional subdirectory path within the workspace to run git operations in. Defaults to workspace root."
-                }
+                    "description": "Must be a workspace subdirectory."
+                },
+                "url": {
+                    "type": "string",
+                    "description": "Remote URL to clone (https:// or git@ form)"
+                },
             },
-            "required": ["operation"]
+            "required": ["operation", "path"]
         })
     }
 
@@ -694,6 +786,14 @@ impl Tool for GitOperationsTool {
         tracing::info!("🔀 git_operations executing: {operation}");
 
         let path = args.get("path").and_then(|v| v.as_str());
+        if path.map(|p| p.trim().is_empty()).unwrap_or(true) {
+            return Ok(ToolResult {
+                success: false,
+                output: String::new(),
+                error: Some("path is required: provide a subdirectory path to the git repository within the workspace".into()),
+            });
+        }
+
         let working_dir = match self.resolve_working_dir(path) {
             Ok(d) => d,
             Err(e) => {
@@ -704,6 +804,36 @@ impl Tool for GitOperationsTool {
                 });
             }
         };
+
+        // Reject workspace root — must be a subdirectory
+        if working_dir == self.workspace_dir {
+            return Ok(ToolResult {
+                success: false,
+                output: String::new(),
+                error: Some("path must be a subdirectory within the workspace, not the workspace root".into()),
+            });
+        }
+
+        // Early dispatch for clone — it bypasses the .git check since destination doesn't exist yet
+        if operation == "clone" {
+            if self.requires_write_access(operation) {
+                if !self.security.can_act() {
+                    return Ok(ToolResult {
+                        success: false,
+                        output: String::new(),
+                        error: Some("Write operation blocked: read-only mode".into()),
+                    });
+                }
+            }
+            if !self.security.record_action() {
+                return Ok(ToolResult {
+                    success: false,
+                    output: String::new(),
+                    error: Some("Rate limit exceeded".into()),
+                });
+            }
+            return self.git_clone(args).await;
+        }
 
         // Check if we're in a git repository
         if !working_dir.join(".git").exists() {
