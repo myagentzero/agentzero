@@ -868,6 +868,24 @@ export const CONFIG_SECTIONS: SectionDef[] = [
     ],
   },
 
+  // ── ServiceNow ─────────────────────────────────────────────────────
+  {
+    path: 'servicenow',
+    category: 'tools',
+    title: 'ServiceNow',
+    description: 'Read/write ServiceNow records via the Table API (OAuth2 client credentials)',
+    icon: Ticket,
+    defaultCollapsed: true,
+    fields: [
+      { key: 'enabled', label: 'Enabled', type: 'toggle', defaultValue: false },
+      { key: 'base_url', label: 'Base URL', type: 'text', description: 'e.g. https://yourcompany.service-now.com (no trailing slash)' },
+      { key: 'client_id', label: 'Client ID', type: 'password', sensitive: true, description: 'OAuth2 client_id (encrypted at rest)' },
+      { key: 'client_secret', label: 'Client Secret', type: 'password', sensitive: true, description: 'OAuth2 client_secret (encrypted at rest). Falls back to SERVICENOW_CLIENT_SECRET env var when blank.' },
+      { key: 'allowed_actions', label: 'Allowed Actions', type: 'tag-list', tagPlaceholder: 'e.g. get_record', description: 'Default: get_record, list_records. Options: list_records, get_record, create_record, update_record' },
+      { key: 'timeout_secs', label: 'Timeout (s)', type: 'number', min: 1, defaultValue: 30, description: 'Default: 30 (request timeout)' },
+    ],
+  },
+
   // ── Elasticsearch ─────────────────────────────────────────────────
   {
     path: 'elasticsearch',

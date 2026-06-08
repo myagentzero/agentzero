@@ -110,12 +110,12 @@ fn unicode_emoji_to_slack_name(emoji: &str) -> &str {
         "\u{1F525}" => "fire",                        // 🔥
         "\u{26A1}" => "zap",                          // ⚡
         // Weather
-        "\u{26C5}" => "partly_sunny",                      // ⛅
-        "\u{1F327}\u{FE0F}" | "\u{1F327}" => "rain_cloud", // 🌧️
-        "\u{2600}\u{FE0F}" | "\u{2600}" => "sunny",        // ☀️
-        "\u{2744}\u{FE0F}" | "\u{2744}" => "snowflake",    // ❄️
+        "\u{26C5}" => "partly_sunny",                        // ⛅
+        "\u{1F327}\u{FE0F}" | "\u{1F327}" => "rain_cloud",   // 🌧️
+        "\u{2600}\u{FE0F}" | "\u{2600}" => "sunny",          // ☀️
+        "\u{2744}\u{FE0F}" | "\u{2744}" => "snowflake",      // ❄️
         "\u{1F324}\u{FE0F}" | "\u{1F324}" => "mostly_sunny", // 🌤️
-        "\u{1F321}\u{FE0F}" | "\u{1F321}" => "thermometer", // 🌡️
+        "\u{1F321}\u{FE0F}" | "\u{1F321}" => "thermometer",  // 🌡️
         // News
         "\u{1F4F0}" => "newspaper",                                 // 📰
         "\u{1F5DE}\u{FE0F}" | "\u{1F5DE}" => "rolled_up_newspaper", // 🗞️
@@ -129,22 +129,22 @@ fn unicode_emoji_to_slack_name(emoji: &str) -> &str {
         "\u{1F4C6}" => "calendar",                                  // 📆
         "\u{23F0}" => "alarm_clock",                                // ⏰
         // Travel
-        "\u{2708}\u{FE0F}" | "\u{2708}" => "airplane",    // ✈️
-        "\u{1F697}" => "automobile",                      // 🚗
-        "\u{1F68C}" => "bus",                             // 🚌
+        "\u{2708}\u{FE0F}" | "\u{2708}" => "airplane", // ✈️
+        "\u{1F697}" => "automobile",                   // 🚗
+        "\u{1F68C}" => "bus",                          // 🚌
         "\u{1F5FA}\u{FE0F}" | "\u{1F5FA}" => "world_map", // 🗺️
         // Office
         "\u{1F3E2}" => "office",           // 🏢
         "\u{1F4BC}" => "briefcase",        // 💼
         "\u{1F3EC}" => "department_store", // 🏬
         // Money
-        "\u{1F4B0}" => "moneybag",         // 💰
-        "\u{1F4B5}" => "dollar",           // 💵
-        "\u{1F4B3}" => "credit_card",      // 💳
+        "\u{1F4B0}" => "moneybag",    // 💰
+        "\u{1F4B5}" => "dollar",      // 💵
+        "\u{1F4B3}" => "credit_card", // 💳
         // Goals/metrics
-        "\u{1F4CA}" => "bar_chart",        // 📊
+        "\u{1F4CA}" => "bar_chart", // 📊
         // Security
-        "\u{1F512}" => "lock",             // 🔒
+        "\u{1F512}" => "lock", // 🔒
         _ => {
             tracing::warn!(
                 "Slack: no shortcode mapping for emoji {emoji:?}; reactions.add will likely fail"
@@ -295,11 +295,10 @@ fn slack_default_ack_config() -> &'static crate::config::AckReactionConfig {
                     "spend".into(),
                     "transaction".into(),
                 ],
-                emojis: vec!["💰".into(), "💵".into(), "💳".into(),
-                ],
+                emojis: vec!["💰".into(), "💵".into(), "💳".into()],
                 ..AckReactionRuleConfig::default()
             },
-             AckReactionRuleConfig {
+            AckReactionRuleConfig {
                 contains_any: vec![
                     "airport".into(),
                     "bus".into(),
@@ -317,14 +316,11 @@ fn slack_default_ack_config() -> &'static crate::config::AckReactionConfig {
                     "travel".into(),
                     "trip".into(),
                 ],
-                emojis: vec![ "✈️".into(), "🚗".into(), "🚌".into(), "🗺️".into(),
-                ],
+                emojis: vec!["✈️".into(), "🚗".into(), "🚌".into(), "🗺️".into()],
                 ..AckReactionRuleConfig::default()
             },
             AckReactionRuleConfig {
-                contains_any: vec![
-                    "reset-pairing".into(),
-                ],
+                contains_any: vec!["reset-pairing".into()],
                 emojis: vec!["🔒".into()],
                 ..AckReactionRuleConfig::default()
             },
@@ -3902,11 +3898,8 @@ mod tests {
             locale_hint: Some("en_us"),
         };
 
-        let picked = select_ack_reaction(
-            Some(slack_default_ack_config()),
-            SLACK_ACK_REACTIONS,
-            &ctx,
-        );
+        let picked =
+            select_ack_reaction(Some(slack_default_ack_config()), SLACK_ACK_REACTIONS, &ctx);
 
         assert_eq!(picked.as_deref(), Some("📊"));
     }

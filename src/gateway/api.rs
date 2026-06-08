@@ -551,6 +551,41 @@ pub async fn handle_api_integrations_credentials_put(
                 config.atlassian.jira_enabled = true;
             }
         }
+        "servicenow" => {
+            if let Some(base_url) = fields.get("base_url").and_then(|v| v.as_str()) {
+                if !base_url.is_empty() && base_url != MASKED_SECRET {
+                    config.servicenow.base_url = base_url.to_string();
+                }
+            }
+            if let Some(client_id) = fields.get("client_id").and_then(|v| v.as_str()) {
+                if !client_id.is_empty() && client_id != MASKED_SECRET {
+                    config.servicenow.client_id = client_id.to_string();
+                }
+            }
+            if let Some(client_secret) = fields.get("client_secret").and_then(|v| v.as_str()) {
+                if !client_secret.is_empty() && client_secret != MASKED_SECRET {
+                    config.servicenow.client_secret = client_secret.to_string();
+                }
+            }
+            if let Some(timeout_secs) = fields.get("timeout_secs").and_then(|v| v.as_u64()) {
+                if timeout_secs > 0 {
+                    config.servicenow.timeout_secs = timeout_secs;
+                }
+            }
+            if let Some(actions_raw) = fields.get("allowed_actions").and_then(|v| v.as_array()) {
+                config.servicenow.allowed_actions = actions_raw
+                    .iter()
+                    .filter_map(|v| v.as_str())
+                    .map(|s| s.to_string())
+                    .collect();
+            }
+            if !config.servicenow.base_url.is_empty()
+                && !config.servicenow.client_id.is_empty()
+                && !config.servicenow.client_secret.is_empty()
+            {
+                config.servicenow.enabled = true;
+            }
+        }
         _ => {
             // Channel integrations - not implemented for credentials update via this endpoint
             return (
@@ -618,6 +653,7 @@ fn provider_key_from_integration_id(id: &str) -> Option<&'static str> {
         "ollama" => Some("ollama"),
         "notion" => Some("notion"),
         "jira" => Some("jira"),
+        "servicenow" => Some("servicenow"),
         _ => None,
     }
 }
@@ -1222,6 +1258,9 @@ fn mask_sensitive_fields(config: &crate::config::Config) -> crate::config::Confi
     mask_required_secret(&mut masked.elasticsearch.auth);
     mask_required_secret(&mut masked.elasticsearch.endpoint);
     mask_required_secret(&mut masked.github.access_token);
+    mask_required_secret(&mut masked.servicenow.base_url);
+    mask_required_secret(&mut masked.servicenow.client_id);
+    mask_required_secret(&mut masked.servicenow.client_secret);
 
     if let Some(discord) = masked.channels_config.discord.as_mut() {
         mask_required_secret(&mut discord.bot_token);
@@ -1326,6 +1365,18 @@ fn restore_masked_sensitive_fields(
     restore_required_secret(
         &mut incoming.github.access_token,
         &current.github.access_token,
+    );
+    restore_required_secret(
+        &mut incoming.servicenow.base_url,
+        &current.servicenow.base_url,
+    );
+    restore_required_secret(
+        &mut incoming.servicenow.client_id,
+        &current.servicenow.client_id,
+    );
+    restore_required_secret(
+        &mut incoming.servicenow.client_secret,
+        &current.servicenow.client_secret,
     );
 
     if let (Some(incoming_ch), Some(current_ch)) = (

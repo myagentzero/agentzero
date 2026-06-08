@@ -10,7 +10,6 @@
 //! ```
 
 use super::AppState;
-use crate::agent::loop_::build_shell_policy_instructions;
 use crate::memory::MemoryCategory;
 use crate::providers::ChatMessage;
 use axum::{
@@ -303,29 +302,7 @@ fn build_ws_system_prompt(
         tools_registry.iter().map(|tool| tool.spec()).collect();
     tool_specs.sort_by(|a, b| a.name.cmp(&b.name));
 
-    let bootstrap_max_chars = if config.agent.compact_context {
-        Some(6000)
-    } else {
-        None
-    };
-
-    let prompt = crate::channels::build_system_prompt_with_mode(
-        &config.workspace_dir,
-        &tool_specs,
-        &[],
-        Some(&config.identity),
-        bootstrap_max_chars,
-        native_tools,
-        config.skills.prompt_injection_mode,
-        false,
-        config.local_context.timezone.as_deref(),
-        None,
-        Some(&config.hardware),
-    );
-    let mut result = prompt;
-    result.push_str(&build_shell_policy_instructions(&config.autonomy));
-
-    result
+    crate::agent::prompt::build_system_prompt_with_mode(config, &tool_specs, native_tools, "ws")
 }
 
 fn refresh_ws_history_system_prompt_datetime(
@@ -854,7 +831,7 @@ Screenshot captured successfully."#;
 
         let prompt = build_ws_system_prompt(&config, &tools, false);
 
-        assert!(prompt.contains("## Tool Use"));
+        assert!(prompt.contains("### Tool Calling (XML Protocol)"));
         assert!(prompt.contains("**browser**"));
         assert!(prompt.contains("## Shell Policy"));
     }
@@ -866,7 +843,7 @@ Screenshot captured successfully."#;
 
         let prompt = build_ws_system_prompt(&config, &tools, true);
 
-        assert!(!prompt.contains("## Tool Use Protocol"));
+        assert!(!prompt.contains("### Tool Calling (XML Protocol)"));
         assert!(prompt.contains("**browser**"));
         assert!(prompt.contains("## Shell Policy"));
     }

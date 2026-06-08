@@ -212,7 +212,6 @@ pub async fn flash_uf2(mount_point: &Path, firmware_dir: &Path) -> Result<()> {
     )
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

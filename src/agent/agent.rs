@@ -60,15 +60,14 @@ pub struct Agent {
     available_hints: Vec<String>,
     route_model_by_hint: HashMap<String, String>,
     research_config: ResearchPhaseConfig,
-    /// Pre-rendered security policy summary injected into the system prompt
-    /// so the LLM knows the concrete constraints before making tool calls.
-    security_summary: Option<String>,
     /// IANA timezone override from `local_context.timezone`.
     timezone_override: Option<String>,
     /// Autonomy config for shell policy instructions.
     autonomy_config: crate::config::AutonomyConfig,
     /// Hardware configuration for hardware tool access.
     hardware_config: crate::config::HardwareConfig,
+    /// Full Config for building prompts and other centralized uses.
+    full_config: Arc<crate::config::Config>,
 }
 
 pub struct AgentBuilder {
@@ -91,10 +90,10 @@ pub struct AgentBuilder {
     available_hints: Option<Vec<String>>,
     route_model_by_hint: Option<HashMap<String, String>>,
     research_config: Option<ResearchPhaseConfig>,
-    security_summary: Option<String>,
     timezone_override: Option<String>,
     autonomy_config: Option<crate::config::AutonomyConfig>,
     hardware_config: Option<crate::config::HardwareConfig>,
+    full_config: Option<Arc<crate::config::Config>>,
 }
 
 impl AgentBuilder {
@@ -119,10 +118,10 @@ impl AgentBuilder {
             available_hints: None,
             route_model_by_hint: None,
             research_config: None,
-            security_summary: None,
             timezone_override: None,
             autonomy_config: None,
             hardware_config: None,
+            full_config: None,
         }
     }
 
@@ -233,13 +232,13 @@ impl AgentBuilder {
         self
     }
 
-    pub fn security_summary(mut self, summary: Option<String>) -> Self {
-        self.security_summary = summary;
+    pub fn timezone_override(mut self, tz: Option<String>) -> Self {
+        self.timezone_override = tz;
         self
     }
 
-    pub fn timezone_override(mut self, tz: Option<String>) -> Self {
-        self.timezone_override = tz;
+    pub fn full_config(mut self, config: Arc<crate::config::Config>) -> Self {
+        self.full_config = Some(config);
         self
     }
 
@@ -284,10 +283,12 @@ impl AgentBuilder {
             available_hints: self.available_hints.unwrap_or_default(),
             route_model_by_hint: self.route_model_by_hint.unwrap_or_default(),
             research_config: self.research_config.unwrap_or_default(),
-            security_summary: self.security_summary,
             timezone_override: self.timezone_override,
             autonomy_config: self.autonomy_config.unwrap_or_default(),
             hardware_config: self.hardware_config.unwrap_or_default(),
+            full_config: self
+                .full_config
+                .unwrap_or_else(|| Arc::new(crate::config::Config::default())),
         })
     }
 }
@@ -368,36 +369,7 @@ impl Agent {
             config.api_key.as_deref(),
             config,
         );
-        let (tools, tool_filter_report) = tools::filter_primary_agent_tools(
-            tools,
-            &config.agent.allowed_tools,
-            &config.agent.denied_tools,
-        );
-        for unmatched in tool_filter_report.unmatched_allowed_tools {
-            tracing::debug!(
-                tool = %unmatched,
-                "agent.allowed_tools entry did not match any registered tool"
-            );
-        }
-        let has_agent_allowlist = config
-            .agent
-            .allowed_tools
-            .iter()
-            .any(|entry| !entry.trim().is_empty());
-        let has_agent_denylist = config
-            .agent
-            .denied_tools
-            .iter()
-            .any(|entry| !entry.trim().is_empty());
-        if has_agent_allowlist
-            && has_agent_denylist
-            && tool_filter_report.allowlist_match_count > 0
-            && tools.is_empty()
-        {
-            anyhow::bail!(
-                "agent.allowed_tools and agent.denied_tools removed all executable tools; update [agent] tool filters"
-            );
-        }
+        let tools = crate::agent::tools_registry::filter_primary_agent_tools_or_fail(config, tools)?;
 
         let provider_name = config.default_provider.as_deref().unwrap_or("openrouter");
 
@@ -456,8 +428,8 @@ impl Agent {
             .skills_prompt_mode(config.skills.prompt_injection_mode)
             .auto_save(config.memory.auto_save)
             .research_config(config.research.clone())
-            .security_summary(Some(security.prompt_summary()))
             .timezone_override(config.local_context.timezone.clone())
+            .full_config(Arc::new(config.clone()))
             .build()
     }
 
@@ -489,29 +461,14 @@ impl Agent {
     }
 
     fn build_system_prompt(&self) -> Result<String> {
-        let tool_specs: Vec<crate::tools::ToolSpec> = self
-            .tools
-            .iter()
-            .map(|t| t.spec())
-            .collect();
+        let tool_specs: Vec<crate::tools::ToolSpec> = self.tools.iter().map(|t| t.spec()).collect();
         let native_tools = self.provider.supports_native_tools();
-        let prompt = crate::channels::build_system_prompt_with_mode(
-            &self.workspace_dir,
+        let result = crate::agent::prompt::build_system_prompt_with_mode(
+            &self.full_config,
             &tool_specs,
-            &self.skills,
-            Some(&self.identity_config),
-            None,
             native_tools,
-            self.skills_prompt_mode,
-            false,
-            self.timezone_override.as_deref(),
-            self.security_summary.as_deref(),
-            Some(&self.hardware_config),
+            "agent",
         );
-        let mut result = prompt;
-        result.push_str(&crate::agent::loop_::build_shell_policy_instructions(
-            &self.autonomy_config,
-        ));
         Ok(result)
     }
 

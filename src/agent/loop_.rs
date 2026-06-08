@@ -11,7 +11,7 @@ use crate::providers::{
 };
 use crate::runtime;
 use crate::security::{CanaryGuard, SecurityPolicy};
-use crate::tools::{self, Tool};
+use crate::tools::Tool;
 use crate::util::truncate_with_ellipsis;
 use anyhow::Result;
 use regex::{Regex, RegexSet};
@@ -22,7 +22,7 @@ use rustyline::hint::Hinter;
 use rustyline::validate::Validator;
 use rustyline::{CompletionType, Config as RlConfig, Context, Editor, Helper};
 use std::borrow::Cow;
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 use std::future::Future;
 use std::io::Write as _;
@@ -38,7 +38,7 @@ mod execution;
 pub(crate) mod history;
 mod parsing;
 
-use context::{build_context, build_hardware_context};
+use context::build_injected_context;
 use detection::{DetectionVerdict, LoopDetectionConfig, LoopDetector};
 use execution::{
     ToolExecutionOutcome, execute_tools_parallel, execute_tools_sequential,
@@ -79,46 +79,6 @@ const CANARY_EXFILTRATION_BLOCK_MESSAGE: &str =
 /// Minimum user-message length (in chars) for auto-save to memory.
 /// Matches the channel-side constant in `channels/mod.rs`.
 const AUTOSAVE_MIN_MESSAGE_CHARS: usize = 20;
-
-fn filter_primary_agent_tools_or_fail(
-    config: &Config,
-    tools_registry: Vec<Box<dyn Tool>>,
-) -> Result<Vec<Box<dyn Tool>>> {
-    let (filtered_tools, report) = tools::filter_primary_agent_tools(
-        tools_registry,
-        &config.agent.allowed_tools,
-        &config.agent.denied_tools,
-    );
-
-    for unmatched in report.unmatched_allowed_tools {
-        tracing::debug!(
-            tool = %unmatched,
-            "agent.allowed_tools entry did not match any registered tool"
-        );
-    }
-
-    let has_agent_allowlist = config
-        .agent
-        .allowed_tools
-        .iter()
-        .any(|entry| !entry.trim().is_empty());
-    let has_agent_denylist = config
-        .agent
-        .denied_tools
-        .iter()
-        .any(|entry| !entry.trim().is_empty());
-    if has_agent_allowlist
-        && has_agent_denylist
-        && report.allowlist_match_count > 0
-        && filtered_tools.is_empty()
-    {
-        anyhow::bail!(
-            "agent.allowed_tools and agent.denied_tools removed all executable tools; update [agent] tool filters"
-        );
-    }
-
-    Ok(filtered_tools)
-}
 
 fn should_treat_provider_as_vision_capable(provider_name: &str, provider: &dyn Provider) -> bool {
     if provider.supports_vision() {
@@ -2532,79 +2492,6 @@ pub async fn run_tool_call_loop(
     anyhow::bail!("Agent exceeded maximum tool iterations ({max_iterations})")
 }
 
-/// Build the tool instruction block for the system prompt from concrete tool
-/// specs so the LLM knows how to invoke tools.
-/// Build shell-policy instructions for the system prompt so the model is aware
-/// of command-level execution constraints before it emits tool calls.
-pub(crate) fn build_shell_policy_instructions(autonomy: &crate::config::AutonomyConfig) -> String {
-    let mut instructions = String::new();
-    instructions.push_str("\n## Shell Policy\n\n");
-    instructions
-        .push_str("When using the `shell` tool, follow these runtime constraints exactly.\n\n");
-
-    let autonomy_label = match autonomy.level {
-        crate::security::AutonomyLevel::ReadOnly => "read_only",
-        crate::security::AutonomyLevel::Supervised => "supervised",
-        crate::security::AutonomyLevel::Full => "full",
-    };
-    let _ = writeln!(instructions, "- Autonomy level: `{autonomy_label}`");
-
-    if autonomy.level == crate::security::AutonomyLevel::ReadOnly {
-        instructions.push_str(
-            "- Shell execution is disabled in `read_only` mode. Do not emit shell tool calls.\n",
-        );
-        return instructions;
-    }
-
-    let normalized: BTreeSet<String> = autonomy
-        .allowed_commands
-        .iter()
-        .map(|entry| entry.trim())
-        .filter(|entry| !entry.is_empty())
-        .map(ToOwned::to_owned)
-        .collect();
-
-    if normalized.contains("*") {
-        instructions.push_str(
-            "- Allowed commands: wildcard `*` is configured (any command name/path may be allowlisted).\n",
-        );
-    } else if normalized.is_empty() {
-        instructions
-            .push_str("- Allowed commands: none configured. Any shell command will be rejected.\n");
-    } else {
-        const MAX_DISPLAY_COMMANDS: usize = 64;
-        let shown: Vec<String> = normalized
-            .iter()
-            .take(MAX_DISPLAY_COMMANDS)
-            .map(|cmd| format!("`{cmd}`"))
-            .collect();
-        let hidden = normalized.len().saturating_sub(MAX_DISPLAY_COMMANDS);
-        let _ = write!(instructions, "- Allowed commands: {}", shown.join(", "));
-        if hidden > 0 {
-            let _ = write!(instructions, " (+{hidden} more)");
-        }
-        instructions.push('\n');
-    }
-
-    if autonomy.level == crate::security::AutonomyLevel::Supervised
-        && autonomy.require_approval_for_medium_risk
-    {
-        instructions.push_str(
-            "- Medium-risk shell commands require explicit approval in `supervised` mode.\n",
-        );
-    }
-    if autonomy.block_high_risk_commands {
-        instructions.push_str(
-            "- High-risk shell commands are blocked even when command names are allowed.\n",
-        );
-    }
-    instructions.push_str(
-        "- If a requested command is outside policy, choose allowed alternatives and explain the limitation.\n",
-    );
-
-    instructions
-}
-
 fn classify_model_route(
     classification_config: &crate::config::QueryClassificationConfig,
     available_hints: &[String],
@@ -2634,12 +2521,6 @@ fn classify_model_route(
     default_model.to_string()
 }
 
-// ── CLI Entrypoint ───────────────────────────────────────────────────────
-// Wires up all subsystems (observer, runtime, security, memory, tools,
-// provider, hardware RAG, peripherals) and enters either single-shot or
-// interactive REPL mode. The interactive loop manages history compaction
-// and hard trimming to keep the context window bounded.
-
 #[allow(clippy::too_many_lines)]
 /// Run the agent loop with the given configuration.
 ///
@@ -2653,7 +2534,6 @@ pub async fn run(
     provider_override: Option<String>,
     model_override: Option<String>,
     temperature: f64,
-    peripheral_overrides: Vec<String>,
     interactive: bool,
     hooks: Option<&crate::hooks::HookRunner>,
 ) -> Result<String> {
@@ -2694,46 +2574,18 @@ pub async fn run(
     )?);
     tracing::info!(backend = mem.name(), "Memory initialized");
 
-    // ── Peripherals (merge peripheral tools into registry) ─
-    if !peripheral_overrides.is_empty() {
-        tracing::info!(
-            peripherals = ?peripheral_overrides,
-            "Peripheral overrides from CLI (config boards take precedence)"
-        );
-    }
-
     // ── Tools (including memory tools and peripherals) ────────────
-    let (composio_key, composio_entity_id) = if config.composio.enabled {
-        (
-            config.composio.api_key.as_deref(),
-            Some(config.composio.entity_id.as_str()),
-        )
-    } else {
-        (None, None)
-    };
-    let mut tools_registry = tools::all_tools_with_runtime(
-        Arc::new(config.clone()),
+    let tools_registry = crate::agent::tools_registry::build_tools_registry(
+        &config,
         &security,
         runtime,
         mem.clone(),
-        composio_key,
-        composio_entity_id,
-        &config.browser,
-        &config.http_request,
-        &config.web_fetch,
-        &config.workspace_dir,
-        &config.agents,
-        config.api_key.as_deref(),
-        &config,
-    );
+        crate::agent::tools_registry::ToolsRegistryOptions::AGENT_LOOP,
+    )
+    .await?;
 
-    let peripheral_tools: Vec<Box<dyn Tool>> =
-        crate::peripherals::create_peripheral_tools(&config.peripherals).await?;
-    if !peripheral_tools.is_empty() {
-        tracing::info!(count = peripheral_tools.len(), "Peripheral tools added");
-        tools_registry.extend(peripheral_tools);
-    }
-    let tools_registry = filter_primary_agent_tools_or_fail(&config, tools_registry)?;
+    // Load hardware RAG once — reused across REPL turns and the single-message path.
+    let (hardware_rag, board_names) = context::load_peripheral_hardware_state(&config);
 
     // ── Resolve provider ─────────────────────────────────────────
     let provider_name = provider_override
@@ -2774,87 +2626,46 @@ pub async fn run(
         &provider_runtime_options,
     )?;
 
-    observer.record_event(&ObserverEvent::AgentStart {
-        provider: provider_name.to_string(),
-        model: model_name.to_string(),
-    });
-
-    // ── Hardware RAG (datasheet retrieval when peripherals + datasheet_dir) ──
-    let hardware_rag: Option<crate::hardware::datasheet::HardwareRag> = config
-        .peripherals
-        .datasheet_dir
-        .as_ref()
-        .filter(|d| !d.trim().is_empty())
-        .map(|dir| crate::hardware::datasheet::HardwareRag::load(&config.workspace_dir, dir.trim()))
-        .and_then(Result::ok)
-        .filter(|r: &crate::hardware::datasheet::HardwareRag| !r.is_empty());
-    if let Some(ref rag) = hardware_rag {
-        tracing::info!(chunks = rag.len(), "Hardware RAG loaded");
-    }
-
-    let board_names: Vec<String> = config
-        .peripherals
-        .boards
-        .iter()
-        .map(|b| b.board.clone())
-        .collect();
-
-    // ── Build system prompt from workspace MD files (OpenClaw framework) ──
-    let skills = crate::skills::load_skills_with_config(&config.workspace_dir, &config);
-    // Build tool specs from the registry.
-    let tool_specs: Vec<crate::tools::ToolSpec> = tools_registry
-        .iter()
-        .map(|t| t.spec())
-        .collect();
-    let bootstrap_max_chars = if config.agent.compact_context {
-        Some(6000)
-    } else {
-        None
-    };
+    // Build system prompt (needed by both single-message and REPL)
+    let tool_specs: Vec<crate::tools::ToolSpec> = tools_registry.iter().map(|t| t.spec()).collect();
     let native_tools = provider.supports_native_tools();
-    let security_summary_str = security.prompt_summary();
-    let mut system_prompt = crate::channels::build_system_prompt_with_mode(
-        &config.workspace_dir,
+    let system_prompt = crate::agent::prompt::build_system_prompt_with_mode(
+        &config,
         &tool_specs,
-        &skills,
-        Some(&config.identity),
-        bootstrap_max_chars,
         native_tools,
-        config.skills.prompt_injection_mode,
-        config.skip_bootstrap_files,
-        config.local_context.timezone.as_deref(),
-        Some(&security_summary_str),
-        Some(&config.hardware),
+        "loop_run",
     );
-    system_prompt.push_str(&build_shell_policy_instructions(&config.autonomy));
 
-    let configured_hooks = crate::hooks::create_runner_from_config(&config.hooks);
-    let effective_hooks = hooks.or(configured_hooks.as_deref());
-
-    // ── Approval manager (supervised mode) ───────────────────────
-    let approval_manager = if interactive {
-        Some(ApprovalManager::from_config(&config.autonomy))
-    } else {
-        None
-    };
-    let channel_name = if interactive { "cli" } else { "daemon" };
-
-    // ── Query classification ────────────────────────────────────
-    let route_model_by_hint: std::collections::HashMap<String, String> = config
-        .model_routes
-        .iter()
-        .map(|route| (route.hint.clone(), route.model.clone()))
-        .collect();
-    let available_hints: Vec<String> = route_model_by_hint.keys().cloned().collect();
-
-    // ── Execute ──────────────────────────────────────────────────
     let start = Instant::now();
-    let cost_enforcement_context =
-        create_cost_enforcement_context(&config.cost, &config.workspace_dir);
-
     let mut final_output = String::new();
 
     if let Some(msg) = message {
+        // ── Single-message mode setup ───────────────────────────
+        let configured_hooks = crate::hooks::create_runner_from_config(&config.hooks);
+        let effective_hooks = hooks.or(configured_hooks.as_deref());
+
+        let approval_manager = if interactive {
+            Some(Arc::new(ApprovalManager::from_config(&config.autonomy)))
+        } else {
+            None
+        };
+        let channel_name = if interactive { "cli" } else { "daemon" };
+
+        let route_model_by_hint: std::collections::HashMap<String, String> = config
+            .model_routes
+            .iter()
+            .map(|route| (route.hint.clone(), route.model.clone()))
+            .collect();
+        let _available_hints: Vec<String> = route_model_by_hint.keys().cloned().collect();
+
+        let cost_enforcement_context =
+            create_cost_enforcement_context(&config.cost, &config.workspace_dir);
+
+        observer.record_event(&ObserverEvent::AgentStart {
+            provider: provider_name.to_string(),
+            model: model_name.to_string(),
+        });
+
         // Auto-save user message to memory (skip short/trivial messages)
         if config.memory.auto_save
             && !config.skip_input_autosave
@@ -2866,172 +2677,37 @@ pub async fn run(
                 .await;
         }
 
-        // ── Research phase ──────────────────────────────────────
-        let research_context = if crate::agent::research::should_trigger(&config.research, &msg) {
-            if config.research.show_progress {
-                println!("[Research] Gathering information...");
-            }
-            match crate::agent::research::run_research_phase(
-                &config.research,
-                provider.as_ref(),
-                &tools_registry,
-                &msg,
-                &model_name,
-                temperature,
-                observer.clone(),
-            )
-            .await
-            {
-                Ok(result) => {
-                    if config.research.show_progress {
-                        println!(
-                            "[Research] Complete: {} tool calls, {} chars context",
-                            result.tool_call_count,
-                            result.context.len()
-                        );
-                        for summary in &result.tool_summaries {
-                            println!("  - {}: {}", summary.tool_name, summary.result_preview);
-                        }
-                    }
-                    if result.context.is_empty() {
-                        None
-                    } else {
-                        Some(result.context)
-                    }
-                }
-                Err(e) => {
-                    tracing::warn!("Research phase failed: {}", e);
-                    None
-                }
-            }
-        } else {
-            None
+        let cli_overrides = CliOverrides {
+            provider: provider_override.clone(),
+            model: model_override.clone(),
+            temperature,
+            hooks: effective_hooks,
+            approval_manager: approval_manager.clone(),
+            channel_name,
+            loop_detection: true,
+            canary_tokens: config.security.canary_tokens,
+            skip_input_autosave: config.skip_input_autosave,
+            research_verbose: config.research.show_progress,
         };
 
-        // Inject memory + hardware RAG context into user message
-        let mem_context =
-            build_context(mem.as_ref(), &msg, config.memory.min_relevance_score, None).await;
-        let rag_limit = if config.agent.compact_context { 2 } else { 5 };
-        let hw_context = hardware_rag
-            .as_ref()
-            .map(|r| build_hardware_context(r, &msg, &board_names, rag_limit))
-            .unwrap_or_default();
-        let context = format!("{mem_context}{hw_context}");
-        let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S %Z");
-        let stamped_msg = format!("[{now}] {msg}");
-        let enriched = match (&context, &research_context) {
-            (c, Some(r)) if !c.is_empty() => format!("{c}\n\n{r}\n\n{stamped_msg}"),
-            (_, Some(r)) => format!("{r}\n\n{stamped_msg}"),
-            (c, None) if !c.is_empty() => format!("{c}{stamped_msg}"),
-            _ => stamped_msg,
-        };
-
-        // ── Classify model route ────────────────────────────────
-        let effective_model = classify_model_route(
-            &config.query_classification,
-            &available_hints,
-            &route_model_by_hint,
-            &model_name,
+        let (response, _history) = process_message_core(
+            &config,
             &msg,
-        );
-
-        let mut history = vec![
-            ChatMessage::system(&system_prompt),
-            ChatMessage::user(&enriched),
-        ];
-
-        let ld_cfg = LoopDetectionConfig {
-            no_progress_threshold: config.agent.loop_detection_no_progress_threshold,
-            ping_pong_cycles: config.agent.loop_detection_ping_pong_cycles,
-            failure_streak_threshold: config.agent.loop_detection_failure_streak,
-        };
-        let hb_cfg = if config.agent.safety_heartbeat_interval > 0 {
-            Some(SafetyHeartbeatConfig {
-                body: security.summary_for_heartbeat(),
-                interval: config.agent.safety_heartbeat_interval,
-            })
-        } else {
-            None
-        };
-        let response = scope_cost_enforcement_context(
-            cost_enforcement_context.clone(),
-            SAFETY_HEARTBEAT_CONFIG.scope(
-                hb_cfg,
-                LOOP_DETECTION_CONFIG.scope(
-                    ld_cfg,
-                    TOOL_LOOP_CANARY_TOKENS_ENABLED.scope(
-                        config.security.canary_tokens,
-                        run_tool_call_loop(
-                            provider.as_ref(),
-                            &mut history,
-                            &tools_registry,
-                            observer.as_ref(),
-                            provider_name,
-                            &effective_model,
-                            temperature,
-                            false,
-                            approval_manager.as_ref(),
-                            channel_name,
-                            &config.multimodal,
-                            config.agent.max_tool_iterations,
-                            None,
-                            None,
-                            effective_hooks,
-                            &[],
-                        ),
-                    ),
-                ),
-            ),
+            None,
+            observer.clone(),
+            mem.clone(),
+            Arc::new(tools_registry),
+            provider,
+            provider_name,
+            &model_name,
+            system_prompt,
+            cost_enforcement_context,
+            security.clone(),
+            hardware_rag.as_ref(),
+            &board_names,
+            Some(&cli_overrides),
         )
         .await?;
-
-        // After successful multi-step execution, attempt autonomous skill creation.
-        #[cfg(feature = "skill-creation")]
-        if config.skills.skill_creation.enabled {
-            let tool_calls = crate::skills::creator::extract_tool_calls_from_history(&history);
-            tracing::debug!(
-                tool_call_count = tool_calls.len(),
-                "Evaluating auto skill creation from execution history"
-            );
-
-            if tool_calls.len() >= 2 {
-                let creator = crate::skills::creator::SkillCreator::new(
-                    config.workspace_dir.clone(),
-                    config.skills.skill_creation.clone(),
-                );
-                tracing::debug!(
-                    tool_call_count = tool_calls.len(),
-                    "Attempting auto skill creation"
-                );
-
-                match creator.create_from_execution(&msg, &tool_calls, None).await {
-                    Ok(Some(slug)) => {
-                        tracing::info!(
-                            slug,
-                            tool_call_count = tool_calls.len(),
-                            "Auto-created skill from execution"
-                        );
-                    }
-                    Ok(None) => {
-                        tracing::debug!(
-                            tool_call_count = tool_calls.len(),
-                            "Skill creation skipped by creator"
-                        );
-                    }
-                    Err(e) => tracing::warn!(
-                        tool_call_count = tool_calls.len(),
-                        "Skill creation failed: {e}"
-                    ),
-                }
-            } else {
-                tracing::debug!(
-                    tool_call_count = tool_calls.len(),
-                    "Skill creation skipped: requires at least 2 tool calls"
-                );
-            }
-        } else {
-            tracing::debug!("Skill creation disabled by config");
-        }
 
         final_output = response.clone();
         if config.memory.auto_save && response.chars().count() >= AUTOSAVE_MIN_MESSAGE_CHARS {
@@ -3047,21 +2723,35 @@ pub async fn run(
         }
         println!("{response}");
         observer.record_event(&ObserverEvent::TurnComplete);
-
-        // ── Post-turn fact extraction (single-message mode) ────────
-        if config.memory.auto_save {
-            let turns = vec![(msg.clone(), response.clone())];
-            let _ = extract_facts_from_turns(
-                provider.as_ref(),
-                &model_name,
-                &turns,
-                mem.as_ref(),
-                None,
-            )
-            .await;
-        }
     } else {
-        println!("🦀 ZeroClaw Interactive Mode");
+        // ── REPL mode setup ─────────────────────────────────────
+        observer.record_event(&ObserverEvent::AgentStart {
+            provider: provider_name.to_string(),
+            model: model_name.to_string(),
+        });
+
+        let configured_hooks = crate::hooks::create_runner_from_config(&config.hooks);
+        let effective_hooks = hooks.or(configured_hooks.as_deref());
+
+        let approval_manager = if interactive {
+            Some(Arc::new(ApprovalManager::from_config(&config.autonomy)))
+        } else {
+            None
+        };
+
+        let channel_name = if interactive { "cli" } else { "daemon" };
+
+        let route_model_by_hint: std::collections::HashMap<String, String> = config
+            .model_routes
+            .iter()
+            .map(|route| (route.hint.clone(), route.model.clone()))
+            .collect();
+        let _available_hints: Vec<String> = route_model_by_hint.keys().cloned().collect();
+
+        let cost_enforcement_context =
+            create_cost_enforcement_context(&config.cost, &config.workspace_dir);
+
+        println!("🦀 AgentZero Interactive Mode");
         println!("Type /help for commands.\n");
         let cli = crate::channels::CliChannel::new();
 
@@ -3176,19 +2866,15 @@ pub async fn run(
             }
 
             // Inject memory + hardware RAG context into user message
-            let mem_context = build_context(
+            let context = build_injected_context(
+                &config,
                 mem.as_ref(),
                 &user_input,
-                config.memory.min_relevance_score,
                 None,
+                hardware_rag.as_ref(),
+                &board_names,
             )
             .await;
-            let rag_limit = if config.agent.compact_context { 2 } else { 5 };
-            let hw_context = hardware_rag
-                .as_ref()
-                .map(|r| build_hardware_context(r, &user_input, &board_names, rag_limit))
-                .unwrap_or_default();
-            let context = format!("{mem_context}{hw_context}");
             let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S %Z");
             let enriched = if context.is_empty() {
                 format!("[{now}] {user_input}")
@@ -3256,7 +2942,7 @@ pub async fn run(
                                 &model_name,
                                 temperature,
                                 false,
-                                approval_manager.as_ref(),
+                                approval_manager.as_deref(),
                                 channel_name,
                                 &config.multimodal,
                                 config.agent.max_tool_iterations,
@@ -3399,6 +3085,260 @@ pub async fn process_message(config: Config, message: &str) -> Result<String> {
     process_message_with_session(config, message, None, None).await
 }
 
+/// CLI-specific overrides for message processing (research verbosity, loop detection, etc.)
+struct CliOverrides<'a> {
+    provider: Option<String>,
+    model: Option<String>,
+    temperature: f64,
+    hooks: Option<&'a crate::hooks::HookRunner>,
+    approval_manager: Option<Arc<ApprovalManager>>,
+    channel_name: &'a str,
+    loop_detection: bool,
+    canary_tokens: bool,
+    skip_input_autosave: bool,
+    research_verbose: bool,
+}
+
+async fn process_message_core(
+    config: &Config,
+    message: &str,
+    session_id: Option<&str>,
+    observer: Arc<dyn Observer>,
+    mem: Arc<dyn Memory>,
+    tools_registry: Arc<Vec<Box<dyn Tool>>>,
+    provider: Box<dyn Provider>,
+    provider_name: &str,
+    model_name: &str,
+    system_prompt: String,
+    cost_enforcement_context: Option<CostEnforcementContext>,
+    security: Arc<SecurityPolicy>,
+    hardware_rag: Option<&crate::hardware::datasheet::HardwareRag>,
+    board_names: &[String],
+    overrides: Option<&CliOverrides<'_>>,
+) -> Result<(String, Vec<ChatMessage>)> {
+    // ── Research phase ──────────────────────────────────────────
+    let verbose_research = overrides.map_or(false, |o| o.research_verbose);
+    let research_temperature = overrides.map_or(config.default_temperature, |o| o.temperature);
+    let research_context = if crate::agent::research::should_trigger(&config.research, message) {
+        if verbose_research {
+            println!("[Research] Gathering information...");
+        }
+        match crate::agent::research::run_research_phase(
+            &config.research,
+            provider.as_ref(),
+            &tools_registry,
+            message,
+            model_name,
+            research_temperature,
+            observer.clone(),
+        )
+        .await
+        {
+            Ok(result) => {
+                if verbose_research {
+                    println!(
+                        "[Research] Complete: {} tool calls, {} chars context",
+                        result.tool_call_count,
+                        result.context.len()
+                    );
+                    for summary in &result.tool_summaries {
+                        println!("  - {}: {}", summary.tool_name, summary.result_preview);
+                    }
+                }
+                if result.context.is_empty() {
+                    None
+                } else {
+                    Some(result.context)
+                }
+            }
+            Err(e) => {
+                tracing::warn!("Research phase failed: {}", e);
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    let context = build_injected_context(
+        config,
+        mem.as_ref(),
+        message,
+        session_id,
+        hardware_rag,
+        board_names,
+    )
+    .await;
+    let enriched = match (&context, &research_context) {
+        (c, Some(r)) if !c.is_empty() => format!("{c}\n\n{r}\n\n{message}"),
+        (_, Some(r)) => format!("{r}\n\n{message}"),
+        (c, None) if !c.is_empty() => format!("{c}{message}"),
+        _ => message.to_string(),
+    };
+
+    // ── Classify model route ────────────────────────────────────
+    let route_model_by_hint: std::collections::HashMap<String, String> = config
+        .model_routes
+        .iter()
+        .map(|route| (route.hint.clone(), route.model.clone()))
+        .collect();
+    let available_hints: Vec<String> = route_model_by_hint.keys().cloned().collect();
+    let effective_model = classify_model_route(
+        &config.query_classification,
+        &available_hints,
+        &route_model_by_hint,
+        model_name,
+        message,
+    );
+
+    let mut history = vec![
+        ChatMessage::system(&system_prompt),
+        ChatMessage::user(&enriched),
+    ];
+
+    let temperature = overrides.map_or(config.default_temperature, |o| o.temperature);
+    let response = if let Some(cli_overrides) = overrides {
+        // CLI mode: use full run_tool_call_loop with all scopes
+        let ld_cfg = LoopDetectionConfig {
+            no_progress_threshold: config.agent.loop_detection_no_progress_threshold,
+            ping_pong_cycles: config.agent.loop_detection_ping_pong_cycles,
+            failure_streak_threshold: config.agent.loop_detection_failure_streak,
+        };
+        let hb_cfg = if config.agent.safety_heartbeat_interval > 0 {
+            Some(SafetyHeartbeatConfig {
+                body: security.summary_for_heartbeat(),
+                interval: config.agent.safety_heartbeat_interval,
+            })
+        } else {
+            None
+        };
+        scope_cost_enforcement_context(
+            cost_enforcement_context,
+            SAFETY_HEARTBEAT_CONFIG.scope(
+                hb_cfg,
+                LOOP_DETECTION_CONFIG.scope(
+                    ld_cfg,
+                    TOOL_LOOP_CANARY_TOKENS_ENABLED.scope(
+                        cli_overrides.canary_tokens,
+                        run_tool_call_loop(
+                            provider.as_ref(),
+                            &mut history,
+                            &tools_registry,
+                            observer.as_ref(),
+                            provider_name,
+                            &effective_model,
+                            temperature,
+                            false,
+                            cli_overrides.approval_manager.as_ref().map(|arc| &**arc),
+                            cli_overrides.channel_name,
+                            &config.multimodal,
+                            config.agent.max_tool_iterations,
+                            None,
+                            None,
+                            cli_overrides.hooks,
+                            &[],
+                        ),
+                    ),
+                ),
+            ),
+        )
+        .await?
+    } else {
+        // Channel mode: use simplified agent_turn
+        let hb_cfg = if config.agent.safety_heartbeat_interval > 0 {
+            Some(SafetyHeartbeatConfig {
+                body: security.summary_for_heartbeat(),
+                interval: config.agent.safety_heartbeat_interval,
+            })
+        } else {
+            None
+        };
+        scope_cost_enforcement_context(
+            cost_enforcement_context,
+            SAFETY_HEARTBEAT_CONFIG.scope(
+                hb_cfg,
+                agent_turn(
+                    provider.as_ref(),
+                    &mut history,
+                    &tools_registry,
+                    observer.as_ref(),
+                    provider_name,
+                    &effective_model,
+                    temperature,
+                    true,
+                    &config.multimodal,
+                    config.agent.max_tool_iterations,
+                ),
+            ),
+        )
+        .await?
+    };
+
+    // ── Post-turn fact extraction ──────────────────────────────
+    if config.memory.auto_save {
+        let turns = vec![(message.to_owned(), response.clone())];
+        let _ = extract_facts_from_turns(
+            provider.as_ref(),
+            model_name,
+            &turns,
+            mem.as_ref(),
+            session_id,
+        )
+        .await;
+    }
+
+    // ── Auto-skill creation (CLI only, feature-gated) ──────────
+    #[cfg(feature = "skill-creation")]
+    if overrides.is_some() && config.skills.skill_creation.enabled {
+        let tool_calls = crate::skills::creator::extract_tool_calls_from_history(&history);
+        tracing::debug!(
+            tool_call_count = tool_calls.len(),
+            "Evaluating auto skill creation from execution history"
+        );
+
+        if tool_calls.len() >= 2 {
+            let creator = crate::skills::creator::SkillCreator::new(
+                config.workspace_dir.clone(),
+                config.skills.skill_creation.clone(),
+            );
+            tracing::debug!(
+                tool_call_count = tool_calls.len(),
+                "Attempting auto skill creation"
+            );
+
+            match creator
+                .create_from_execution(message, &tool_calls, None)
+                .await
+            {
+                Ok(Some(slug)) => {
+                    tracing::info!(
+                        slug,
+                        tool_call_count = tool_calls.len(),
+                        "Auto-created skill from execution"
+                    );
+                }
+                Ok(None) => {
+                    tracing::debug!(
+                        tool_call_count = tool_calls.len(),
+                        "Skill creation skipped by creator"
+                    );
+                }
+                Err(e) => tracing::warn!(
+                    tool_call_count = tool_calls.len(),
+                    "Skill creation failed: {e}"
+                ),
+            }
+        } else {
+            tracing::debug!(
+                tool_call_count = tool_calls.len(),
+                "Skill creation skipped: requires at least 2 tool calls"
+            );
+        }
+    }
+
+    Ok((response, history))
+}
+
 pub async fn process_message_with_session(
     config: Config,
     message: &str,
@@ -3443,33 +3383,14 @@ pub async fn process_message_with_session(
         config.api_key.as_deref(),
     )?);
 
-    let (composio_key, composio_entity_id) = if config.composio.enabled {
-        (
-            config.composio.api_key.as_deref(),
-            Some(config.composio.entity_id.as_str()),
-        )
-    } else {
-        (None, None)
-    };
-    let mut tools_registry = tools::all_tools_with_runtime(
-        Arc::new(config.clone()),
+    let tools_registry = crate::agent::tools_registry::build_tools_registry(
+        &config,
         &security,
         runtime,
         mem.clone(),
-        composio_key,
-        composio_entity_id,
-        &config.browser,
-        &config.http_request,
-        &config.web_fetch,
-        &config.workspace_dir,
-        &config.agents,
-        config.api_key.as_deref(),
-        &config,
-    );
-    let peripheral_tools: Vec<Box<dyn Tool>> =
-        crate::peripherals::create_peripheral_tools(&config.peripherals).await?;
-    tools_registry.extend(peripheral_tools);
-    let tools_registry = filter_primary_agent_tools_or_fail(&config, tools_registry)?;
+        crate::agent::tools_registry::ToolsRegistryOptions::AGENT_LOOP,
+    )
+    .await?;
 
     let provider_name = config.default_provider.as_deref().unwrap_or("openrouter");
     let model_name = crate::config::resolve_default_model_id(
@@ -3501,153 +3422,39 @@ pub async fn process_message_with_session(
         &provider_runtime_options,
     )?;
 
-    let hardware_rag: Option<crate::hardware::datasheet::HardwareRag> = config
-        .peripherals
-        .datasheet_dir
-        .as_ref()
-        .filter(|d| !d.trim().is_empty())
-        .map(|dir| crate::hardware::datasheet::HardwareRag::load(&config.workspace_dir, dir.trim()))
-        .and_then(Result::ok)
-        .filter(|r: &crate::hardware::datasheet::HardwareRag| !r.is_empty());
-    let board_names: Vec<String> = config
-        .peripherals
-        .boards
-        .iter()
-        .map(|b| b.board.clone())
-        .collect();
-
-    let skills = crate::skills::load_skills_with_config(&config.workspace_dir, &config);
     // Build tool specs from the registry.
-    let tool_specs: Vec<crate::tools::ToolSpec> = tools_registry
-        .iter()
-        .map(|t| t.spec())
-        .collect();
-    let bootstrap_max_chars = if config.agent.compact_context {
-        Some(6000)
-    } else {
-        None
-    };
+    let tool_specs: Vec<crate::tools::ToolSpec> = tools_registry.iter().map(|t| t.spec()).collect();
     let native_tools = provider.supports_native_tools();
-    let security_summary_str = security.prompt_summary();
-    let mut system_prompt = crate::channels::build_system_prompt_with_mode(
-        &config.workspace_dir,
+    let system_prompt = crate::agent::prompt::build_system_prompt_with_mode(
+        &config,
         &tool_specs,
-        &skills,
-        Some(&config.identity),
-        bootstrap_max_chars,
         native_tools,
-        config.skills.prompt_injection_mode,
-        config.skip_bootstrap_files,
-        config.local_context.timezone.as_deref(),
-        Some(&security_summary_str),
-        Some(&config.hardware),
+        "loop_run_repl",
     );
-    system_prompt.push_str(&build_shell_policy_instructions(&config.autonomy));
-
-    // ── Research phase ──────────────────────────────────────────
-    let research_context = if crate::agent::research::should_trigger(&config.research, message) {
-        match crate::agent::research::run_research_phase(
-            &config.research,
-            provider.as_ref(),
-            &tools_registry,
-            message,
-            &model_name,
-            config.default_temperature,
-            observer.clone(),
-        )
-        .await
-        {
-            Ok(result) if !result.context.is_empty() => Some(result.context),
-            _ => None,
-        }
-    } else {
-        None
-    };
-
-    let mem_context = build_context(
-        mem.as_ref(),
-        message,
-        config.memory.min_relevance_score,
-        session_id,
-    )
-    .await;
-    let rag_limit = if config.agent.compact_context { 2 } else { 5 };
-    let hw_context = hardware_rag
-        .as_ref()
-        .map(|r| build_hardware_context(r, message, &board_names, rag_limit))
-        .unwrap_or_default();
-    let context = format!("{mem_context}{hw_context}");
-    let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S %Z");
-    let stamped_msg = format!("[{now}] {message}");
-    let enriched = match (&context, &research_context) {
-        (c, Some(r)) if !c.is_empty() => format!("{c}\n\n{r}\n\n{stamped_msg}"),
-        (_, Some(r)) => format!("{r}\n\n{stamped_msg}"),
-        (c, None) if !c.is_empty() => format!("{c}{stamped_msg}"),
-        _ => stamped_msg,
-    };
-
-    // ── Classify model route ────────────────────────────────────
-    let route_model_by_hint: std::collections::HashMap<String, String> = config
-        .model_routes
-        .iter()
-        .map(|route| (route.hint.clone(), route.model.clone()))
-        .collect();
-    let available_hints: Vec<String> = route_model_by_hint.keys().cloned().collect();
-    let effective_model = classify_model_route(
-        &config.query_classification,
-        &available_hints,
-        &route_model_by_hint,
-        &model_name,
-        message,
-    );
-
-    let mut history = vec![
-        ChatMessage::system(&system_prompt),
-        ChatMessage::user(&enriched),
-    ];
 
     let cost_enforcement_context =
         create_cost_enforcement_context(&config.cost, &config.workspace_dir);
-    let hb_cfg = if config.agent.safety_heartbeat_interval > 0 {
-        Some(SafetyHeartbeatConfig {
-            body: security.summary_for_heartbeat(),
-            interval: config.agent.safety_heartbeat_interval,
-        })
-    } else {
-        None
-    };
-    let response = scope_cost_enforcement_context(
+
+    let (hardware_rag, board_names) = context::load_peripheral_hardware_state(&config);
+
+    let (response, _history) = process_message_core(
+        &config,
+        message,
+        session_id,
+        observer,
+        mem,
+        Arc::new(tools_registry),
+        provider,
+        provider_name,
+        &model_name,
+        system_prompt,
         cost_enforcement_context,
-        SAFETY_HEARTBEAT_CONFIG.scope(
-            hb_cfg,
-            agent_turn(
-                provider.as_ref(),
-                &mut history,
-                &tools_registry,
-                observer.as_ref(),
-                provider_name,
-                &effective_model,
-                config.default_temperature,
-                true,
-                &config.multimodal,
-                config.agent.max_tool_iterations,
-            ),
-        ),
+        security,
+        hardware_rag.as_ref(),
+        &board_names,
+        None,
     )
     .await?;
-
-    // ── Post-turn fact extraction (channel / single-message-with-session) ──
-    if config.memory.auto_save {
-        let turns = vec![(message.to_owned(), response.clone())];
-        let _ = extract_facts_from_turns(
-            provider.as_ref(),
-            &model_name,
-            &turns,
-            mem.as_ref(),
-            session_id,
-        )
-        .await;
-    }
 
     Ok(response)
 }
@@ -6480,68 +6287,13 @@ Tail"#;
     }
 
     #[test]
-    fn build_tool_instructions_includes_all_tools() {
-        use crate::security::SecurityPolicy;
-        let security = Arc::new(SecurityPolicy::from_config(
-            &crate::config::AutonomyConfig::default(),
-            std::path::Path::new("/tmp"),
-        ));
-        let tools = tools::default_tools(security);
-        let specs = tools.iter().map(|tool| tool.spec()).collect::<Vec<_>>();
-        let instructions = crate::channels::build_tool_instructions_from_specs(&specs);
-
-        assert!(instructions.contains("Tool Use"));
-        assert!(instructions.contains("<tool_call>"));
-        assert!(instructions.contains("shell"));
-        assert!(instructions.contains("file_read"));
-        assert!(instructions.contains("file_write"));
-    }
-
-    #[test]
-    fn build_shell_policy_instructions_lists_allowlist() {
-        let mut autonomy = crate::config::AutonomyConfig::default();
-        autonomy.level = crate::security::AutonomyLevel::Supervised;
-        autonomy.allowed_commands = vec!["grep".into(), "cat".into(), "grep".into()];
-
-        let instructions = build_shell_policy_instructions(&autonomy);
-
-        assert!(instructions.contains("## Shell Policy"));
-        assert!(instructions.contains("Autonomy level: `supervised`"));
-        assert!(instructions.contains("`cat`"));
-        assert!(instructions.contains("`grep`"));
-    }
-
-    #[test]
-    fn build_shell_policy_instructions_handles_wildcard() {
-        let mut autonomy = crate::config::AutonomyConfig::default();
-        autonomy.level = crate::security::AutonomyLevel::Full;
-        autonomy.allowed_commands = vec!["*".into()];
-
-        let instructions = build_shell_policy_instructions(&autonomy);
-
-        assert!(instructions.contains("Autonomy level: `full`"));
-        assert!(instructions.contains("wildcard `*`"));
-    }
-
-    #[test]
-    fn build_shell_policy_instructions_read_only_disables_shell() {
-        let mut autonomy = crate::config::AutonomyConfig::default();
-        autonomy.level = crate::security::AutonomyLevel::ReadOnly;
-
-        let instructions = build_shell_policy_instructions(&autonomy);
-
-        assert!(instructions.contains("Autonomy level: `read_only`"));
-        assert!(instructions.contains("Shell execution is disabled"));
-    }
-
-    #[test]
     fn tools_to_openai_format_produces_valid_schema() {
         use crate::security::SecurityPolicy;
         let security = Arc::new(SecurityPolicy::from_config(
             &crate::config::AutonomyConfig::default(),
             std::path::Path::new("/tmp"),
         ));
-        let tools = tools::default_tools(security);
+        let tools = crate::tools::default_tools(security);
         let formatted = tools_to_openai_format(&tools);
 
         assert!(!formatted.is_empty());
@@ -6676,7 +6428,7 @@ Tail"#;
         .await
         .unwrap();
 
-        let context = build_context(&mem, "status updates", 0.0, None).await;
+        let context = context::build_context(&mem, "status updates", 0.0, None).await;
         assert!(context.contains("user_msg_real"));
         assert!(!context.contains("assistant_resp_poisoned"));
         assert!(!context.contains("fabricated event"));
@@ -7290,68 +7042,6 @@ Let me check the result."#;
         assert_eq!(history.len(), 3); // system + 2 kept
         assert_eq!(history[0].role, "system");
         assert_eq!(history[1].content, "new msg");
-    }
-
-    #[test]
-    fn native_tools_system_prompt_contains_zero_xml() {
-        let tool_specs = vec![
-            crate::tools::ToolSpec {
-                name: "shell".to_string(),
-                description: "Execute shell commands".to_string(),
-                parameters: serde_json::json!({}),
-            },
-            crate::tools::ToolSpec {
-                name: "file_read".to_string(),
-                description: "Read files".to_string(),
-                parameters: serde_json::json!({}),
-            },
-        ];
-
-        let system_prompt = crate::channels::build_system_prompt_with_mode(
-            std::path::Path::new("/tmp"),
-            &tool_specs,
-            &[],  // no skills
-            None, // no identity config
-            None, // no bootstrap_max_chars
-            true, // native_tools
-            crate::config::SkillsPromptInjectionMode::Full,
-            false,
-            None,
-            None,
-            None,
-        );
-
-        // Must contain zero XML protocol artifacts
-        assert!(
-            !system_prompt.contains("<tool_call>"),
-            "Native prompt must not contain <tool_call>"
-        );
-        assert!(
-            !system_prompt.contains("</tool_call>"),
-            "Native prompt must not contain </tool_call>"
-        );
-        assert!(
-            !system_prompt.contains("<tool_result>"),
-            "Native prompt must not contain <tool_result>"
-        );
-        assert!(
-            !system_prompt.contains("</tool_result>"),
-            "Native prompt must not contain </tool_result>"
-        );
-        assert!(
-            !system_prompt.contains("## Tool Use\n"),
-            "Native prompt must not contain XML protocol header"
-        );
-
-        // Positive: native prompt should still list tools and contain task instructions
-        assert!(
-            system_prompt.contains("shell"),
-            "Native prompt must list tool names"
-        );
-        assert!(
-            system_prompt.contains("## Your Task"),
-            "Native prompt should contain task instructions"
-        );
     }
 
     // ── Cross-Alias & GLM Shortened Body Tests ──────────────────────────

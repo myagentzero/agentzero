@@ -932,7 +932,10 @@ mod tests {
         let code = guard.generate_paircode();
 
         assert!(guard.is_paired(), "existing token should survive");
-        assert!(guard.is_authenticated("zc_existing"), "existing token still valid");
+        assert!(
+            guard.is_authenticated("zc_existing"),
+            "existing token still valid"
+        );
         assert_eq!(guard.pairing_code(), Some(code));
     }
 
@@ -946,7 +949,10 @@ mod tests {
         let code2 = guard.generate_paircode();
         let token2 = guard.try_pair(&code2, "device2").await.unwrap().unwrap();
 
-        assert!(guard.is_authenticated(&token1), "device1 still authenticated");
+        assert!(
+            guard.is_authenticated(&token1),
+            "device1 still authenticated"
+        );
         assert!(guard.is_authenticated(&token2), "device2 authenticated");
         assert_eq!(guard.paired_devices().len(), 2);
     }

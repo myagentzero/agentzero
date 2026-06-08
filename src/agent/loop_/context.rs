@@ -1,3 +1,4 @@
+use crate::config::Config;
 use crate::memory::{self, Memory, MemoryCategory, decay, retrieval};
 use std::fmt::Write;
 
@@ -70,6 +71,67 @@ pub(super) async fn build_context(
     }
 
     context
+}
+
+/// Build memory + hardware RAG context for a user message.
+///
+/// `hardware_rag` and `board_names` are loaded once at startup by
+/// [`load_peripheral_hardware_state`] and threaded through every call so the
+/// datasheet directory is not re-read on each turn.
+pub(super) async fn build_injected_context(
+    config: &Config,
+    mem: &dyn Memory,
+    message: &str,
+    session_id: Option<&str>,
+    hardware_rag: Option<&crate::hardware::datasheet::HardwareRag>,
+    board_names: &[String],
+) -> String {
+    let mem_context = build_context(
+        mem,
+        message,
+        config.memory.min_relevance_score,
+        session_id,
+    )
+    .await;
+    let rag_limit = if config.agent.compact_context { 2 } else { 5 };
+    let hw_context = hardware_rag
+        .map(|r| build_hardware_context(r, message, board_names, rag_limit))
+        .unwrap_or_default();
+    format!("{mem_context}{hw_context}")
+}
+
+/// Load the hardware RAG index and configured board names from disk.
+///
+/// Call once per long-lived entry point (REPL session, daemon message
+/// handler) and reuse the result; the load walks the datasheet directory
+/// and chunks every file, so per-turn calls are wasteful.
+pub(super) fn load_peripheral_hardware_state(
+    config: &Config,
+) -> (
+    Option<crate::hardware::datasheet::HardwareRag>,
+    Vec<String>,
+) {
+    let board_names: Vec<String> = config
+        .peripherals
+        .boards
+        .iter()
+        .map(|b| b.board.clone())
+        .collect();
+
+    let hardware_rag = config
+        .peripherals
+        .datasheet_dir
+        .as_ref()
+        .filter(|d| !d.trim().is_empty())
+        .map(|dir| crate::hardware::datasheet::HardwareRag::load(&config.workspace_dir, dir.trim()))
+        .and_then(Result::ok)
+        .filter(|r| !r.is_empty());
+
+    if let Some(ref rag) = hardware_rag {
+        tracing::info!(chunks = rag.len(), "Hardware RAG loaded");
+    }
+
+    (hardware_rag, board_names)
 }
 
 /// Build hardware docs context from RAG.

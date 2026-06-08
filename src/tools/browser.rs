@@ -1765,7 +1765,8 @@ fn parse_browser_action(action_str: &str, args: &Value) -> anyhow::Result<Browse
             let selector = args
                 .get("selector")
                 .and_then(|v| v.as_str())
-                .ok_or_else(|| anyhow::anyhow!("Missing 'selector' for click"))?;
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| anyhow::anyhow!("Missing or empty 'selector' for click"))?;
             Ok(BrowserAction::Click {
                 selector: selector.into(),
             })
@@ -1774,7 +1775,8 @@ fn parse_browser_action(action_str: &str, args: &Value) -> anyhow::Result<Browse
             let selector = args
                 .get("selector")
                 .and_then(|v| v.as_str())
-                .ok_or_else(|| anyhow::anyhow!("Missing 'selector' for fill"))?;
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| anyhow::anyhow!("Missing or empty 'selector' for fill"))?;
             let value = args
                 .get("value")
                 .and_then(|v| v.as_str())
@@ -1788,7 +1790,8 @@ fn parse_browser_action(action_str: &str, args: &Value) -> anyhow::Result<Browse
             let selector = args
                 .get("selector")
                 .and_then(|v| v.as_str())
-                .ok_or_else(|| anyhow::anyhow!("Missing 'selector' for type"))?;
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| anyhow::anyhow!("Missing or empty 'selector' for type"))?;
             let text = args
                 .get("text")
                 .and_then(|v| v.as_str())
@@ -1802,6 +1805,7 @@ fn parse_browser_action(action_str: &str, args: &Value) -> anyhow::Result<Browse
             let selector = args
                 .get("selector")
                 .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
                 .map(String::from);
             Ok(BrowserAction::GetText { selector })
         }
@@ -1818,6 +1822,7 @@ fn parse_browser_action(action_str: &str, args: &Value) -> anyhow::Result<Browse
             selector: args
                 .get("selector")
                 .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
                 .map(String::from),
             ms: args.get("ms").and_then(serde_json::Value::as_u64),
             text: args.get("text").and_then(|v| v.as_str()).map(String::from),
@@ -1833,7 +1838,8 @@ fn parse_browser_action(action_str: &str, args: &Value) -> anyhow::Result<Browse
             let selector = args
                 .get("selector")
                 .and_then(|v| v.as_str())
-                .ok_or_else(|| anyhow::anyhow!("Missing 'selector' for hover"))?;
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| anyhow::anyhow!("Missing or empty 'selector' for hover"))?;
             Ok(BrowserAction::Hover {
                 selector: selector.into(),
             })
@@ -1855,7 +1861,8 @@ fn parse_browser_action(action_str: &str, args: &Value) -> anyhow::Result<Browse
             let selector = args
                 .get("selector")
                 .and_then(|v| v.as_str())
-                .ok_or_else(|| anyhow::anyhow!("Missing 'selector' for is_visible"))?;
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| anyhow::anyhow!("Missing or empty 'selector' for is_visible"))?;
             Ok(BrowserAction::IsVisible {
                 selector: selector.into(),
             })

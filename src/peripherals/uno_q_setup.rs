@@ -13,9 +13,7 @@ const BRIDGE_APP_NAME: &str = "uno-q-bridge";
 /// Deploy the Bridge app from workspace. If host is Some, scp and start remotely.
 /// If host is None, copy to local ArduinoApps directory and start locally.
 pub fn setup_uno_q_bridge(host: Option<&str>, workspace_dir: &Path) -> Result<()> {
-    let bridge_dir = workspace_dir
-        .join("firmware")
-        .join("uno-q-bridge");
+    let bridge_dir = workspace_dir.join("firmware").join("uno-q-bridge");
 
     if !bridge_dir.exists() {
         anyhow::bail!(

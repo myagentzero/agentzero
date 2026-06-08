@@ -181,7 +181,6 @@ pub use zeroclaw::{
     ServiceCommands, SkillCommands,
 };
 
-
 #[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
 enum EstopLevelArg {
     #[value(name = "kill-all")]
@@ -254,7 +253,6 @@ Examples:
   zeroclaw agent                              # interactive session
   zeroclaw agent -m \"Summarize today's logs\"  # single message
   zeroclaw agent -p anthropic --model claude-sonnet-4-20250514
-  zeroclaw agent --peripheral nucleo-f401re:/dev/ttyACM0
   zeroclaw agent --autonomy-level full --max-actions-per-hour 100
   zeroclaw agent -m \"quick task\" --memory-backend none --compact-context")]
     Agent {
@@ -273,10 +271,6 @@ Examples:
         /// Temperature (0.0 - 2.0)
         #[arg(short, long, default_value = "0.7", value_parser = parse_temperature)]
         temperature: f64,
-
-        /// Attach a peripheral (board:path, e.g. nucleo-f401re:/dev/ttyACM0)
-        #[arg(long)]
-        peripheral: Vec<String>,
 
         /// Autonomy level (read_only, supervised, full)
         #[arg(long, value_parser = clap::value_parser!(security::AutonomyLevel))]
@@ -890,7 +884,6 @@ async fn main() -> Result<()> {
         unsafe { std::env::set_var("ZEROCLAW_CONFIG_DIR", config_dir) };
     }
 
-
     // Initialize logging - respects RUST_LOG env var, defaults to INFO
     // Detect if running under systemd (which adds its own timestamps)
     let under_systemd =
@@ -1006,7 +999,6 @@ async fn main() -> Result<()> {
             provider,
             model,
             temperature,
-            peripheral,
             autonomy_level,
             max_actions_per_hour,
             max_tool_iterations,
@@ -1042,7 +1034,6 @@ async fn main() -> Result<()> {
                 provider,
                 model,
                 temperature,
-                peripheral,
                 interactive,
                 None,
             ))
@@ -1655,7 +1646,6 @@ fn print_estop_status(state: &security::EstopState) {
         println!("  updated_at:     {updated_at}");
     }
 }
-
 
 async fn handle_security_command(
     config: &Config,
@@ -2572,7 +2562,6 @@ mod tests {
             other => panic!("expected onboard command, got {other:?}"),
         }
     }
-
 
     #[test]
     fn onboard_cli_accepts_no_totp_flag() {

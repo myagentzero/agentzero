@@ -456,6 +456,50 @@ export default function Cron() {
                 </span>
               </div>
 
+              {selectedJob.delivery && selectedJob.delivery.mode !== 'none' && (
+                <div className="border-t border-gray-800 pt-5">
+                  <div className="text-xs uppercase tracking-wide text-gray-500 mb-3">
+                    Delivery Configuration
+                  </div>
+                  <div className="space-y-3">
+                    <div>
+                      <div className="text-xs text-gray-400 mb-1">Mode</div>
+                      <div className="text-gray-200 capitalize font-medium">
+                        {selectedJob.delivery.mode}
+                      </div>
+                    </div>
+                    {selectedJob.delivery.channel && (
+                      <div>
+                        <div className="text-xs text-gray-400 mb-1">Channel</div>
+                        <div className="text-gray-200 font-mono text-xs bg-gray-800 border border-gray-700 rounded-md px-3 py-2">
+                          {selectedJob.delivery.channel}
+                        </div>
+                      </div>
+                    )}
+                    {selectedJob.delivery.to && (
+                      <div>
+                        <div className="text-xs text-gray-400 mb-1">Target</div>
+                        <div className="text-gray-200 font-mono text-xs bg-gray-800 border border-gray-700 rounded-md px-3 py-2 break-all">
+                          {selectedJob.delivery.to}
+                        </div>
+                      </div>
+                    )}
+                    <div>
+                      <div className="text-xs text-gray-400 mb-1">Best Effort</div>
+                      <span
+                        className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+                          selectedJob.delivery.best_effort
+                            ? 'bg-amber-900/40 text-amber-400 border border-amber-700/50'
+                            : 'bg-red-900/40 text-red-400 border border-red-700/50'
+                        }`}
+                      >
+                        {selectedJob.delivery.best_effort ? 'Yes' : 'No'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <div className="grid grid-cols-2 gap-4 pt-2 border-t border-gray-800">
                 <div>
                   <div className="text-xs uppercase tracking-wide text-gray-500 mb-1">

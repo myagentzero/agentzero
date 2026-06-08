@@ -65,7 +65,6 @@ mod tests {
         QueryClassificationConfig { enabled, rules }
     }
 
-
     #[test]
     fn classify_with_decision_exposes_priority_of_matched_rule() {
         let config = make_config(

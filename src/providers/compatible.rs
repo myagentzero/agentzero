@@ -2,6 +2,7 @@
 //! Most LLM APIs follow the same `/v1/chat/completions` format.
 //! This module provides a single implementation that works for all of them.
 
+use crate::agent::prompt::build_tool_instructions;
 use crate::multimodal;
 use crate::providers::traits::{
     ChatMessage, ChatRequest as ProviderChatRequest, ChatResponse as ProviderChatResponse,
@@ -2157,7 +2158,7 @@ impl OpenAiCompatibleProvider {
             return messages.to_vec();
         }
 
-        let instructions = crate::providers::traits::build_tool_instructions_text(tools);
+        let instructions = build_tool_instructions(tools, false);
         let mut modified_messages = messages.to_vec();
 
         if let Some(system_message) = modified_messages.iter_mut().find(|m| m.role == "system") {
@@ -4687,7 +4688,7 @@ mod tests {
             OpenAiCompatibleProvider::with_prompt_guided_tool_instructions(&input, Some(&tools));
         assert!(!output.is_empty());
         assert_eq!(output[0].role, "system");
-        assert!(output[0].content.contains("Available Tools"));
+        assert!(output[0].content.contains("Tool Calling (XML Protocol)"));
         assert!(output[0].content.contains("shell_exec"));
     }
 
@@ -5128,7 +5129,7 @@ mod tests {
             .get("content")
             .and_then(|v| v.as_str())
             .expect("fallback system prompt should be plain text");
-        assert!(fallback_system_text.contains("Available Tools"));
+        assert!(fallback_system_text.contains("Tool Calling (XML Protocol)"));
         assert!(fallback_system_text.contains("weather_lookup"));
 
         server.abort();
@@ -5252,7 +5253,7 @@ mod tests {
             .get("content")
             .and_then(|v| v.as_str())
             .expect("fallback system prompt should be plain text");
-        assert!(fallback_system_text.contains("Available Tools"));
+        assert!(fallback_system_text.contains("Tool Calling (XML Protocol)"));
         assert!(fallback_system_text.contains("weather_lookup"));
 
         server.abort();

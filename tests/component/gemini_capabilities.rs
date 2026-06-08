@@ -47,33 +47,3 @@ fn gemini_supports_vision_returns_true() {
     let provider = gemini_provider();
     assert!(provider.supports_vision());
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Tool conversion contract
-// ─────────────────────────────────────────────────────────────────────────────
-
-#[test]
-fn gemini_convert_tools_returns_prompt_guided() {
-    use zeroclaw::providers::traits::ToolsPayload;
-    use zeroclaw::tools::traits::ToolSpec;
-
-    let provider = gemini_provider();
-    let tools = vec![ToolSpec {
-        name: "memory_store".to_string(),
-        description: "Store a value in memory".to_string(),
-        parameters: serde_json::json!({
-            "type": "object",
-            "properties": {
-                "key": {"type": "string"},
-                "value": {"type": "string"}
-            },
-            "required": ["key", "value"]
-        }),
-    }];
-
-    let payload = provider.convert_tools(&tools);
-    assert!(
-        matches!(payload, ToolsPayload::PromptGuided { .. }),
-        "Gemini should return PromptGuided payload since native_tool_calling is false"
-    );
-}

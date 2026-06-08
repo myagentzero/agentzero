@@ -57,6 +57,14 @@ struct CronJob {
     last_output: Option<String>,
     prompt: Option<String>,
     enabled: bool,
+    delivery: CronJobDelivery,
+}
+
+#[derive(Debug, Clone)]
+struct CronJobDelivery {
+    mode: String,
+    channel: Option<String>,
+    to: Option<String>,
 }
 
 #[derive(PartialEq, Eq)]
@@ -481,12 +489,18 @@ fn category_color(cat: &str) -> Color {
 fn format_iso_timestamp_local(ts: &str) -> String {
     // Try parsing as RFC3339 first
     if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(ts) {
-        return dt.with_timezone(&chrono::Local).format("%Y-%m-%d %H:%M:%S").to_string();
+        return dt
+            .with_timezone(&chrono::Local)
+            .format("%Y-%m-%d %H:%M:%S")
+            .to_string();
     }
     // Try parsing as UTC (no timezone)
     if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(ts, "%Y-%m-%dT%H:%M:%S%.fZ") {
         let utc = chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(dt, chrono::Utc);
-        return utc.with_timezone(&chrono::Local).format("%Y-%m-%d %H:%M:%S").to_string();
+        return utc
+            .with_timezone(&chrono::Local)
+            .format("%Y-%m-%d %H:%M:%S")
+            .to_string();
     }
     // Fallback: just replace T
     ts.replace('T', " ")
@@ -513,10 +527,12 @@ fn draw(f: &mut Frame, app: &DashboardApp) {
     }
 }
 
-    fn draw_tab_bar(f: &mut Frame, area: Rect, app: &DashboardApp) {
+fn draw_tab_bar(f: &mut Frame, area: Rect, app: &DashboardApp) {
     let tab_style = |selected: bool| {
         if selected {
-            Style::default().fg(Color::White).add_modifier(Modifier::BOLD | Modifier::REVERSED)
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD | Modifier::REVERSED)
         } else {
             Style::default().fg(Color::DarkGray)
         }
@@ -545,17 +561,29 @@ fn draw_events_tab(f: &mut Frame, area: Rect, s: &EventsState) {
     let filter_height: u16 = if s.filter_mode { 3 } else { 0 };
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(1), Constraint::Min(0), Constraint::Length(filter_height)])
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Min(0),
+            Constraint::Length(filter_height),
+        ])
         .split(area);
 
     // status bar
     let conn = if s.connected {
         Span::styled("● Connected", Style::default().fg(Color::Green))
     } else {
-        Span::styled(format!("○ {}", s.status_msg), Style::default().fg(Color::Red))
+        Span::styled(
+            format!("○ {}", s.status_msg),
+            Style::default().fg(Color::Red),
+        )
     };
     let paused = if s.paused {
-        Span::styled(" ⏸ PAUSED", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
+        Span::styled(
+            " ⏸ PAUSED",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )
     } else {
         Span::raw("")
     };
@@ -595,16 +623,29 @@ fn draw_events_tab(f: &mut Frame, area: Rect, s: &EventsState) {
             let selected = start + i == s.scroll;
             if selected {
                 ListItem::new(Line::from(vec![
-                    Span::styled(format!("{} ", e.timestamp), Style::default().fg(Color::DarkGray).add_modifier(Modifier::REVERSED)),
+                    Span::styled(
+                        format!("{} ", e.timestamp),
+                        Style::default()
+                            .fg(Color::DarkGray)
+                            .add_modifier(Modifier::REVERSED),
+                    ),
                     Span::styled(
                         format!("{:<14}", &e.event_type[..e.event_type.len().min(14)]),
-                        Style::default().fg(color).add_modifier(Modifier::BOLD | Modifier::REVERSED),
+                        Style::default()
+                            .fg(color)
+                            .add_modifier(Modifier::BOLD | Modifier::REVERSED),
                     ),
-                    Span::styled(format!(" {}", e.detail), Style::default().add_modifier(Modifier::REVERSED)),
+                    Span::styled(
+                        format!(" {}", e.detail),
+                        Style::default().add_modifier(Modifier::REVERSED),
+                    ),
                 ]))
             } else {
                 ListItem::new(Line::from(vec![
-                    Span::styled(format!("{} ", e.timestamp), Style::default().fg(Color::DarkGray)),
+                    Span::styled(
+                        format!("{} ", e.timestamp),
+                        Style::default().fg(Color::DarkGray),
+                    ),
                     Span::styled(
                         format!("{:<14}", &e.event_type[..e.event_type.len().min(14)]),
                         Style::default().fg(color).add_modifier(Modifier::BOLD),
@@ -616,7 +657,11 @@ fn draw_events_tab(f: &mut Frame, area: Rect, s: &EventsState) {
         .collect();
 
     f.render_widget(
-        List::new(items).block(Block::default().borders(Borders::ALL).title(" Events  [Enter] detail ")),
+        List::new(items).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(" Events  [Enter] detail "),
+        ),
         chunks[1],
     );
 
@@ -671,8 +716,12 @@ fn draw_events_tab(f: &mut Frame, area: Rect, s: &EventsState) {
 }
 
 fn draw_log_detail_overlay(f: &mut Frame, area: Rect, entry: &LogEntry) {
-    let pw = (area.width * 4 / 5).max(40).min(area.width.saturating_sub(4));
-    let ph = (area.height * 7 / 10).max(10).min(area.height.saturating_sub(4));
+    let pw = (area.width * 4 / 5)
+        .max(40)
+        .min(area.width.saturating_sub(4));
+    let ph = (area.height * 7 / 10)
+        .max(10)
+        .min(area.height.saturating_sub(4));
     let px = area.x + (area.width.saturating_sub(pw)) / 2;
     let py = area.y + (area.height.saturating_sub(ph)) / 2;
     let popup = Rect::new(px, py, pw, ph);
@@ -708,7 +757,10 @@ fn draw_log_detail_overlay(f: &mut Frame, area: Rect, entry: &LogEntry) {
     );
 
     f.render_widget(
-        Paragraph::new(Span::styled("[Esc/q] close", Style::default().fg(Color::DarkGray))),
+        Paragraph::new(Span::styled(
+            "[Esc/q] close",
+            Style::default().fg(Color::DarkGray),
+        )),
         chunks[1],
     );
 }
@@ -718,7 +770,11 @@ fn draw_log_detail_overlay(f: &mut Frame, area: Rect, entry: &LogEntry) {
 fn draw_memory(f: &mut Frame, area: Rect, s: &MemoryState) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(1), Constraint::Length(1), Constraint::Min(0)])
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Min(0),
+        ])
         .split(area);
 
     // hints bar
@@ -727,7 +783,10 @@ fn draw_memory(f: &mut Frame, area: Rect, s: &MemoryState) {
             Span::styled(" Search: ", Style::default().fg(Color::Yellow)),
             Span::styled(&s.search_input, Style::default().fg(Color::White)),
             Span::styled("█", Style::default().fg(Color::White)),
-            Span::styled("  Enter=go  Esc=cancel", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                "  Enter=go  Esc=cancel",
+                Style::default().fg(Color::DarkGray),
+            ),
         ])
     } else {
         Line::from(vec![
@@ -756,7 +815,10 @@ fn draw_memory(f: &mut Frame, area: Rect, s: &MemoryState) {
         );
     } else if s.loading {
         f.render_widget(
-            Paragraph::new(Span::styled(" Loading…", Style::default().fg(Color::DarkGray))),
+            Paragraph::new(Span::styled(
+                " Loading…",
+                Style::default().fg(Color::DarkGray),
+            )),
             chunks[1],
         );
     }
@@ -779,10 +841,20 @@ fn draw_memory(f: &mut Frame, area: Rect, s: &MemoryState) {
                 Style::default()
             };
             let cat_color = category_color(&e.category);
-            let preview: String = e.content.lines().next().unwrap_or("").chars().take(60).collect();
+            let preview: String = e
+                .content
+                .lines()
+                .next()
+                .unwrap_or("")
+                .chars()
+                .take(60)
+                .collect();
             let ts_formatted = format_iso_timestamp_local(&e.timestamp);
             ListItem::new(Line::from(vec![
-                Span::styled(format!("{:<28}", &e.key[..e.key.len().min(28)]), base.fg(Color::White)),
+                Span::styled(
+                    format!("{:<28}", &e.key[..e.key.len().min(28)]),
+                    base.fg(Color::White),
+                ),
                 Span::styled(
                     format!(" {:<12}", &e.category[..e.category.len().min(12)]),
                     base.fg(cat_color),
@@ -808,8 +880,12 @@ fn draw_memory(f: &mut Frame, area: Rect, s: &MemoryState) {
 
 fn draw_memory_overlay(f: &mut Frame, area: Rect, entry: &MemoryEntry, confirm_delete: bool) {
     // Centered popup — 80% width, 70% height
-    let pw = (area.width * 4 / 5).max(40).min(area.width.saturating_sub(4));
-    let ph = (area.height * 7 / 10).max(10).min(area.height.saturating_sub(4));
+    let pw = (area.width * 4 / 5)
+        .max(40)
+        .min(area.width.saturating_sub(4));
+    let ph = (area.height * 7 / 10)
+        .max(10)
+        .min(area.height.saturating_sub(4));
     let px = area.x + (area.width.saturating_sub(pw)) / 2;
     let py = area.y + (area.height.saturating_sub(ph)) / 2;
     let popup = Rect::new(px, py, pw, ph);
@@ -827,7 +903,11 @@ fn draw_memory_overlay(f: &mut Frame, area: Rect, entry: &MemoryEntry, confirm_d
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(0), Constraint::Length(1), Constraint::Length(1)])
+        .constraints([
+            Constraint::Min(0),
+            Constraint::Length(1),
+            Constraint::Length(1),
+        ])
         .split(inner);
 
     f.render_widget(
@@ -849,9 +929,17 @@ fn draw_memory_overlay(f: &mut Frame, area: Rect, entry: &MemoryEntry, confirm_d
         f.render_widget(
             Paragraph::new(Line::from(vec![
                 Span::styled("Delete this entry? ", Style::default().fg(Color::Red)),
-                Span::styled("[y]", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "[y]",
+                    Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                ),
                 Span::styled("es  ", Style::default().fg(Color::Red)),
-                Span::styled("[n]", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "[n]",
+                    Style::default()
+                        .fg(Color::White)
+                        .add_modifier(Modifier::BOLD),
+                ),
                 Span::styled("o / Esc", Style::default().fg(Color::White)),
             ])),
             chunks[2],
@@ -872,12 +960,19 @@ fn draw_memory_overlay(f: &mut Frame, area: Rect, entry: &MemoryEntry, confirm_d
 fn draw_cron(f: &mut Frame, area: Rect, s: &CronState) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(1), Constraint::Length(1), Constraint::Min(0)])
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Min(0),
+        ])
         .split(area);
 
     // hints bar
     let hint = Line::from(vec![
-        Span::styled(format!(" {} jobs", s.jobs.len()), Style::default().fg(Color::DarkGray)),
+        Span::styled(
+            format!(" {} jobs", s.jobs.len()),
+            Style::default().fg(Color::DarkGray),
+        ),
         Span::styled(
             "  [r]efresh  [Enter]detail  [d]elete",
             Style::default().fg(Color::DarkGray),
@@ -887,14 +982,21 @@ fn draw_cron(f: &mut Frame, area: Rect, s: &CronState) {
 
     // status / loading banner
     if let Some(ref msg) = s.status {
-        let color = if msg.starts_with("Error") { Color::Red } else { Color::Green };
+        let color = if msg.starts_with("Error") {
+            Color::Red
+        } else {
+            Color::Green
+        };
         f.render_widget(
             Paragraph::new(Span::styled(format!(" {msg}"), Style::default().fg(color))),
             chunks[1],
         );
     } else if s.loading {
         f.render_widget(
-            Paragraph::new(Span::styled(" Loading…", Style::default().fg(Color::DarkGray))),
+            Paragraph::new(Span::styled(
+                " Loading…",
+                Style::default().fg(Color::DarkGray),
+            )),
             chunks[1],
         );
     }
@@ -917,7 +1019,11 @@ fn draw_cron(f: &mut Frame, area: Rect, s: &CronState) {
                 Style::default()
             };
             let enabled_indicator = if job.enabled { "●" } else { "○" };
-            let enabled_color = if job.enabled { Color::Green } else { Color::DarkGray };
+            let enabled_color = if job.enabled {
+                Color::Green
+            } else {
+                Color::DarkGray
+            };
             let label = job.name.as_deref().unwrap_or(&job.command);
             let label_preview: String = label.chars().take(30).collect();
             let status_str = job.last_status.as_deref().unwrap_or("-");
@@ -955,8 +1061,12 @@ fn draw_cron(f: &mut Frame, area: Rect, s: &CronState) {
 }
 
 fn draw_cron_overlay(f: &mut Frame, area: Rect, job: &CronJob, confirm_delete: bool) {
-    let pw = (area.width * 4 / 5).max(40).min(area.width.saturating_sub(4));
-    let ph = (area.height * 7 / 10).max(14).min(area.height.saturating_sub(4));
+    let pw = (area.width * 4 / 5)
+        .max(40)
+        .min(area.width.saturating_sub(4));
+    let ph = (area.height * 7 / 10)
+        .max(14)
+        .min(area.height.saturating_sub(4));
     let px = area.x + (area.width.saturating_sub(pw)) / 2;
     let py = area.y + (area.height.saturating_sub(ph)) / 2;
     let popup = Rect::new(px, py, pw, ph);
@@ -981,7 +1091,10 @@ fn draw_cron_overlay(f: &mut Frame, area: Rect, job: &CronJob, confirm_delete: b
     // build detail text
     let enabled_str = if job.enabled { "enabled" } else { "disabled" };
     let next_run_formatted = format_iso_timestamp_local(&job.next_run);
-    let last_run_formatted = job.last_run.as_ref().map(|lr| format_iso_timestamp_local(lr));
+    let last_run_formatted = job
+        .last_run
+        .as_ref()
+        .map(|lr| format_iso_timestamp_local(lr));
     let last_status_str = job.last_status.as_deref().unwrap_or("-");
     let last_output_str = job.last_output.as_deref().unwrap_or("");
 
@@ -1000,7 +1113,14 @@ fn draw_cron_overlay(f: &mut Frame, area: Rect, job: &CronJob, confirm_delete: b
         ]),
         Line::from(vec![
             Span::styled("Status:   ", Style::default().fg(Color::DarkGray)),
-            Span::styled(enabled_str, Style::default().fg(if job.enabled { Color::Green } else { Color::DarkGray })),
+            Span::styled(
+                enabled_str,
+                Style::default().fg(if job.enabled {
+                    Color::Green
+                } else {
+                    Color::DarkGray
+                }),
+            ),
         ]),
         Line::from(vec![
             Span::styled("Command:  ", Style::default().fg(Color::DarkGray)),
@@ -1029,11 +1149,32 @@ fn draw_cron_overlay(f: &mut Frame, area: Rect, job: &CronJob, confirm_delete: b
             ),
         ]),
     ];
+    // Delivery configuration
+    if job.delivery.mode != "none" && !job.delivery.mode.is_empty() {
+        lines.push(Line::from(vec![
+            Span::styled("Delivery: ", Style::default().fg(Color::DarkGray)),
+            Span::styled(&job.delivery.mode, Style::default().fg(Color::Yellow)),
+        ]));
+        if let Some(ref channel) = job.delivery.channel {
+            lines.push(Line::from(vec![
+                Span::styled("  Channel: ", Style::default().fg(Color::DarkGray)),
+                Span::styled(channel, Style::default().fg(Color::Cyan)),
+            ]));
+        }
+        if let Some(ref to) = job.delivery.to {
+            lines.push(Line::from(vec![
+                Span::styled("  Target:  ", Style::default().fg(Color::DarkGray)),
+                Span::styled(to, Style::default().fg(Color::White)),
+            ]));
+        }
+    }
+
     if let Some(ref prompt) = job.prompt {
         if !prompt.is_empty() {
-            lines.push(Line::from(vec![
-                Span::styled("Prompt:", Style::default().fg(Color::DarkGray)),
-            ]));
+            lines.push(Line::from(vec![Span::styled(
+                "Prompt:",
+                Style::default().fg(Color::DarkGray),
+            )]));
             for l in prompt.lines().take(6) {
                 lines.push(Line::from(Span::styled(
                     format!("  {l}"),
@@ -1043,9 +1184,10 @@ fn draw_cron_overlay(f: &mut Frame, area: Rect, job: &CronJob, confirm_delete: b
         }
     }
     if !last_output_str.is_empty() {
-        lines.push(Line::from(vec![
-            Span::styled("Last output:", Style::default().fg(Color::DarkGray)),
-        ]));
+        lines.push(Line::from(vec![Span::styled(
+            "Last output:",
+            Style::default().fg(Color::DarkGray),
+        )]));
         for l in last_output_str.lines().take(5) {
             lines.push(Line::from(Span::styled(
                 format!("  {l}"),
@@ -1060,9 +1202,17 @@ fn draw_cron_overlay(f: &mut Frame, area: Rect, job: &CronJob, confirm_delete: b
         f.render_widget(
             Paragraph::new(Line::from(vec![
                 Span::styled("Delete this job? ", Style::default().fg(Color::Red)),
-                Span::styled("[y]", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "[y]",
+                    Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                ),
                 Span::styled("es  ", Style::default().fg(Color::Red)),
-                Span::styled("[n]", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "[n]",
+                    Style::default()
+                        .fg(Color::White)
+                        .add_modifier(Modifier::BOLD),
+                ),
                 Span::styled("o / Esc", Style::default().fg(Color::White)),
             ])),
             chunks[1],
@@ -1104,14 +1254,21 @@ fn draw_costs(f: &mut Frame, area: Rect, s: &CostsState) {
 
     // status / loading banner
     if let Some(ref msg) = s.status {
-        let color = if msg.starts_with("Error") { Color::Red } else { Color::Green };
+        let color = if msg.starts_with("Error") {
+            Color::Red
+        } else {
+            Color::Green
+        };
         f.render_widget(
             Paragraph::new(Span::styled(format!(" {msg}"), Style::default().fg(color))),
             chunks[1],
         );
     } else if s.loading {
         f.render_widget(
-            Paragraph::new(Span::styled(" Loading…", Style::default().fg(Color::DarkGray))),
+            Paragraph::new(Span::styled(
+                " Loading…",
+                Style::default().fg(Color::DarkGray),
+            )),
             chunks[1],
         );
     }
@@ -1124,13 +1281,22 @@ fn draw_costs(f: &mut Frame, area: Rect, s: &CostsState) {
         .unwrap_or_else(|| "—".to_string());
     let status_line = Line::from(vec![
         Span::styled("Version: ", Style::default().fg(Color::DarkGray)),
-        Span::styled(version_str, Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            version_str,
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::styled("    Uptime:  ", Style::default().fg(Color::DarkGray)),
-        Span::styled(uptime_str, Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            uptime_str,
+            Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD),
+        ),
     ]);
     f.render_widget(
-        Paragraph::new(status_line)
-            .block(Block::default().borders(Borders::ALL).title(" Status ")),
+        Paragraph::new(status_line).block(Block::default().borders(Borders::ALL).title(" Status ")),
         chunks[2],
     );
 
@@ -1140,17 +1306,23 @@ fn draw_costs(f: &mut Frame, area: Rect, s: &CostsState) {
             Span::styled("Hourly:  ", Style::default().fg(Color::DarkGray)),
             Span::styled(
                 format!("${:>8.4}", s.summary.hourly_cost_usd),
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
             ),
             Span::styled("    Daily:  ", Style::default().fg(Color::DarkGray)),
             Span::styled(
                 format!("${:>8.4}", s.summary.daily_cost_usd),
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
             ),
             Span::styled("    Monthly: ", Style::default().fg(Color::DarkGray)),
             Span::styled(
                 format!("${:>8.2}", s.summary.monthly_cost_usd),
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
             ),
         ]),
         Line::from(vec![
@@ -1178,33 +1350,41 @@ fn draw_costs(f: &mut Frame, area: Rect, s: &CostsState) {
     let start = s.scroll_offset;
     let end = (start + visible).min(s.summary.by_model.len());
 
-    let header = ListItem::new(Line::from(vec![
-        Span::styled(
-            format!(" {:<32} {:<10} {:>12} {:>10} {:>10}", "model", "channel", "cost", "tokens", "requests"),
-            Style::default().fg(Color::DarkGray).add_modifier(Modifier::BOLD),
+    let header = ListItem::new(Line::from(vec![Span::styled(
+        format!(
+            " {:<32} {:<10} {:>12} {:>10} {:>10}",
+            "model", "channel", "cost", "tokens", "requests"
         ),
-    ]));
+        Style::default()
+            .fg(Color::DarkGray)
+            .add_modifier(Modifier::BOLD),
+    )]));
 
     let mut items: Vec<ListItem> = vec![header];
-    items.extend(s.summary.by_model[start..end].iter().enumerate().map(|(i, row)| {
-        let abs = start + i;
-        let selected = abs == s.cursor;
-        let base = if selected {
-            Style::default().add_modifier(Modifier::REVERSED)
-        } else {
-            Style::default()
-        };
-        let model_preview: String = row.model.chars().take(32).collect();
-        let channel_str = row.channel.as_deref().unwrap_or("-");
-        let channel_preview: String = channel_str.chars().take(10).collect();
-        ListItem::new(Line::from(vec![
-            Span::styled(format!(" {:<32}", model_preview), base.fg(Color::White)),
-            Span::styled(format!(" {:<10}", channel_preview), base.fg(Color::Cyan)),
-            Span::styled(format!(" ${:>11.4}", row.cost_usd), base.fg(Color::Yellow)),
-            Span::styled(format!(" {:>10}", row.total_tokens), base.fg(Color::White)),
-            Span::styled(format!(" {:>10}", row.request_count), base.fg(Color::White)),
-        ]))
-    }));
+    items.extend(
+        s.summary.by_model[start..end]
+            .iter()
+            .enumerate()
+            .map(|(i, row)| {
+                let abs = start + i;
+                let selected = abs == s.cursor;
+                let base = if selected {
+                    Style::default().add_modifier(Modifier::REVERSED)
+                } else {
+                    Style::default()
+                };
+                let model_preview: String = row.model.chars().take(32).collect();
+                let channel_str = row.channel.as_deref().unwrap_or("-");
+                let channel_preview: String = channel_str.chars().take(10).collect();
+                ListItem::new(Line::from(vec![
+                    Span::styled(format!(" {:<32}", model_preview), base.fg(Color::White)),
+                    Span::styled(format!(" {:<10}", channel_preview), base.fg(Color::Cyan)),
+                    Span::styled(format!(" ${:>11.4}", row.cost_usd), base.fg(Color::Yellow)),
+                    Span::styled(format!(" {:>10}", row.total_tokens), base.fg(Color::White)),
+                    Span::styled(format!(" {:>10}", row.request_count), base.fg(Color::White)),
+                ]))
+            }),
+    );
 
     f.render_widget(
         List::new(items).block(Block::default().borders(Borders::ALL).title(" By Model ")),
@@ -1217,7 +1397,11 @@ fn draw_costs(f: &mut Frame, area: Rect, s: &CostsState) {
 fn draw_metrics(f: &mut Frame, area: Rect, s: &MetricsState) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(1), Constraint::Length(1), Constraint::Min(0)])
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Min(0),
+        ])
         .split(area);
 
     // hints bar
@@ -1226,20 +1410,30 @@ fn draw_metrics(f: &mut Frame, area: Rect, s: &MetricsState) {
             format!(" {} metrics", s.families.len()),
             Style::default().fg(Color::DarkGray),
         ),
-        Span::styled("  [r]efresh  [j/k] scroll", Style::default().fg(Color::DarkGray)),
+        Span::styled(
+            "  [r]efresh  [j/k] scroll",
+            Style::default().fg(Color::DarkGray),
+        ),
     ]);
     f.render_widget(Paragraph::new(hint), chunks[0]);
 
     // status / loading banner
     if let Some(ref msg) = s.status {
-        let color = if msg.starts_with("Error") { Color::Red } else { Color::Green };
+        let color = if msg.starts_with("Error") {
+            Color::Red
+        } else {
+            Color::Green
+        };
         f.render_widget(
             Paragraph::new(Span::styled(format!(" {msg}"), Style::default().fg(color))),
             chunks[1],
         );
     } else if s.loading {
         f.render_widget(
-            Paragraph::new(Span::styled(" Loading…", Style::default().fg(Color::DarkGray))),
+            Paragraph::new(Span::styled(
+                " Loading…",
+                Style::default().fg(Color::DarkGray),
+            )),
             chunks[1],
         );
     }
@@ -1249,8 +1443,16 @@ fn draw_metrics(f: &mut Frame, area: Rect, s: &MetricsState) {
     for fam in &s.families {
         // family header: name (type) — help
         lines.push(Line::from(vec![
-            Span::styled(fam.name.clone(), Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-            Span::styled(format!(" ({})", fam.kind), Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                fam.name.clone(),
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!(" ({})", fam.kind),
+                Style::default().fg(Color::DarkGray),
+            ),
         ]));
         if !fam.help.is_empty() {
             lines.push(Line::from(Span::styled(
@@ -1270,7 +1472,10 @@ fn draw_metrics(f: &mut Frame, area: Rect, s: &MetricsState) {
                 format!("{{{}}}", parts.join(","))
             };
             lines.push(Line::from(vec![
-                Span::styled(format!("  {labels:<48} "), Style::default().fg(Color::White)),
+                Span::styled(
+                    format!("  {labels:<48} "),
+                    Style::default().fg(Color::White),
+                ),
                 Span::styled(sample.value.clone(), Style::default().fg(Color::Yellow)),
             ]));
         }
@@ -1314,12 +1519,20 @@ fn parse_event_stream_message(raw: &str) -> Option<LogEntry> {
     let data_str = data_lines.join("\n");
     let (final_type, timestamp, detail) =
         if let Ok(v) = serde_json::from_str::<serde_json::Value>(&data_str) {
-            let t = v.get("type").and_then(|x| x.as_str()).unwrap_or(&event_type).to_string();
+            let t = v
+                .get("type")
+                .and_then(|x| x.as_str())
+                .unwrap_or(&event_type)
+                .to_string();
             let ts = v
                 .get("timestamp")
                 .and_then(|x| x.as_str())
                 .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
-                .map(|dt| dt.with_timezone(&chrono::Local).format("%Y-%m-%d %H:%M:%S").to_string())
+                .map(|dt| {
+                    dt.with_timezone(&chrono::Local)
+                        .format("%Y-%m-%d %H:%M:%S")
+                        .to_string()
+                })
                 .unwrap_or_else(|| chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string());
             let detail = v
                 .get("message")
@@ -1341,10 +1554,18 @@ fn parse_event_stream_message(raw: &str) -> Option<LogEntry> {
                 });
             (t, ts, detail)
         } else {
-            (event_type, chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(), data_str)
+            (
+                event_type,
+                chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+                data_str,
+            )
         };
 
-    Some(LogEntry { event_type: final_type, timestamp, detail })
+    Some(LogEntry {
+        event_type: final_type,
+        timestamp,
+        detail,
+    })
 }
 
 // ── Async tasks ───────────────────────────────────────────────────────────────
@@ -1411,7 +1632,9 @@ async fn run_event_stream_task(url: String, token: Option<String>, tx: mpsc::Syn
             }
         }
 
-        let _ = tx.send(Msg::EventStreamDisconnected("Stream ended — reconnecting…".to_string()));
+        let _ = tx.send(Msg::EventStreamDisconnected(
+            "Stream ended — reconnecting…".to_string(),
+        ));
         tokio::time::sleep(Duration::from_secs(2)).await;
     }
 }
@@ -1430,7 +1653,7 @@ async fn run_memory_task(
     let auth_header = token.map(|t| format!("Bearer {t}"));
 
     // Initial load
-    fetch_memory(&client, &base_url, &auth_header, None, &tx).await;
+    fetch_memory(&client, &base_url, auth_header.as_ref(), None, &tx).await;
 
     // Action loop — run on a blocking thread since mpsc::Receiver is sync
     loop {
@@ -1440,7 +1663,14 @@ async fn run_memory_task(
         };
         match action {
             Action::FetchMemory { query } => {
-                fetch_memory(&client, &base_url, &auth_header, query.as_deref(), &tx).await;
+                fetch_memory(
+                    &client,
+                    &base_url,
+                    auth_header.as_ref(),
+                    query.as_deref(),
+                    &tx,
+                )
+                .await;
             }
             Action::DeleteMemory { key } => {
                 let url = format!("{base_url}/api/memory/{}", urlencoding(&key));
@@ -1453,7 +1683,10 @@ async fn run_memory_task(
                         let _ = tx.send(Msg::MemoryDeleted(key));
                     }
                     Ok(r) => {
-                        let _ = tx.send(Msg::MemoryError(format!("Delete failed: HTTP {}", r.status())));
+                        let _ = tx.send(Msg::MemoryError(format!(
+                            "Delete failed: HTTP {}",
+                            r.status()
+                        )));
                     }
                     Err(e) => {
                         let _ = tx.send(Msg::MemoryError(format!("Delete failed: {e}")));
@@ -1467,7 +1700,7 @@ async fn run_memory_task(
 async fn fetch_memory(
     client: &reqwest::Client,
     base_url: &str,
-    auth_header: &Option<String>,
+    auth_header: Option<&String>,
     query: Option<&str>,
     tx: &mpsc::SyncSender<Msg>,
 ) {
@@ -1507,10 +1740,26 @@ fn parse_memory_entries(body: &serde_json::Value) -> Vec<MemoryEntry> {
         .map(|arr| {
             arr.iter()
                 .map(|v| MemoryEntry {
-                    id: v.get("id").and_then(|x| x.as_str()).unwrap_or("").to_string(),
-                    key: v.get("key").and_then(|x| x.as_str()).unwrap_or("").to_string(),
-                    content: v.get("content").and_then(|x| x.as_str()).unwrap_or("").to_string(),
-                    category: v.get("category").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+                    id: v
+                        .get("id")
+                        .and_then(|x| x.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    key: v
+                        .get("key")
+                        .and_then(|x| x.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    content: v
+                        .get("content")
+                        .and_then(|x| x.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    category: v
+                        .get("category")
+                        .and_then(|x| x.as_str())
+                        .unwrap_or("")
+                        .to_string(),
                     timestamp: v
                         .get("timestamp")
                         .and_then(|x| x.as_str())
@@ -1557,7 +1806,10 @@ async fn run_cron_task(
                         let _ = tx.send(Msg::CronDeleted(id));
                     }
                     Ok(r) => {
-                        let _ = tx.send(Msg::CronError(format!("Delete failed: HTTP {}", r.status())));
+                        let _ = tx.send(Msg::CronError(format!(
+                            "Delete failed: HTTP {}",
+                            r.status()
+                        )));
                     }
                     Err(e) => {
                         let _ = tx.send(Msg::CronError(format!("Delete failed: {e}")));
@@ -1604,17 +1856,70 @@ fn parse_cron_jobs(body: &serde_json::Value) -> Vec<CronJob> {
         .map(|arr| {
             arr.iter()
                 .map(|v| CronJob {
-                    id: v.get("id").and_then(|x| x.as_str()).unwrap_or("").to_string(),
-                    name: v.get("name").and_then(|x| x.as_str()).map(|s| s.to_string()),
-                    command: v.get("command").and_then(|x| x.as_str()).unwrap_or("").to_string(),
-                    expression: v.get("expression").and_then(|x| x.as_str()).unwrap_or("").to_string(),
-                    job_type: v.get("job_type").and_then(|x| x.as_str()).unwrap_or("shell").to_string(),
-                    next_run: v.get("next_run").and_then(|x| x.as_str()).unwrap_or("").to_string(),
-                    last_run: v.get("last_run").and_then(|x| x.as_str()).map(|s| s.to_string()),
-                    last_status: v.get("last_status").and_then(|x| x.as_str()).map(|s| s.to_string()),
-                    last_output: v.get("last_output").and_then(|x| x.as_str()).map(|s| s.to_string()),
-                    prompt: v.get("prompt").and_then(|x| x.as_str()).map(|s| s.to_string()),
+                    id: v
+                        .get("id")
+                        .and_then(|x| x.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    name: v
+                        .get("name")
+                        .and_then(|x| x.as_str())
+                        .map(|s| s.to_string()),
+                    command: v
+                        .get("command")
+                        .and_then(|x| x.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    expression: v
+                        .get("expression")
+                        .and_then(|x| x.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    job_type: v
+                        .get("job_type")
+                        .and_then(|x| x.as_str())
+                        .unwrap_or("shell")
+                        .to_string(),
+                    next_run: v
+                        .get("next_run")
+                        .and_then(|x| x.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    last_run: v
+                        .get("last_run")
+                        .and_then(|x| x.as_str())
+                        .map(|s| s.to_string()),
+                    last_status: v
+                        .get("last_status")
+                        .and_then(|x| x.as_str())
+                        .map(|s| s.to_string()),
+                    last_output: v
+                        .get("last_output")
+                        .and_then(|x| x.as_str())
+                        .map(|s| s.to_string()),
+                    prompt: v
+                        .get("prompt")
+                        .and_then(|x| x.as_str())
+                        .map(|s| s.to_string()),
                     enabled: v.get("enabled").and_then(|x| x.as_bool()).unwrap_or(true),
+                    delivery: {
+                        let delivery_obj = v.get("delivery").and_then(|x| x.as_object());
+                        CronJobDelivery {
+                            mode: delivery_obj
+                                .and_then(|d| d.get("mode"))
+                                .and_then(|x| x.as_str())
+                                .unwrap_or("none")
+                                .to_string(),
+                            channel: delivery_obj
+                                .and_then(|d| d.get("channel"))
+                                .and_then(|x| x.as_str())
+                                .map(|s| s.to_string()),
+                            to: delivery_obj
+                                .and_then(|d| d.get("to"))
+                                .and_then(|x| x.as_str())
+                                .map(|s| s.to_string()),
+                        }
+                    },
                 })
                 .collect()
         })
@@ -1693,7 +1998,9 @@ async fn fetch_costs(
     let (version, uptime_seconds) = match status_res {
         Ok(r) if r.status().is_success() => match r.json::<serde_json::Value>().await {
             Ok(body) => (
-                body.get("version").and_then(|x| x.as_str()).map(|s| s.to_string()),
+                body.get("version")
+                    .and_then(|x| x.as_str())
+                    .map(|s| s.to_string()),
                 body.get("uptime_seconds").and_then(|x| x.as_u64()),
             ),
             Err(_) => (None, None),
@@ -1965,23 +2272,43 @@ fn parse_cost_summary(body: &serde_json::Value) -> CostSummary {
                         .to_string(),
                     cost_usd: v.get("cost_usd").and_then(|x| x.as_f64()).unwrap_or(0.0),
                     total_tokens: v.get("total_tokens").and_then(|x| x.as_u64()).unwrap_or(0),
-                    request_count: v
-                        .get("request_count")
-                        .and_then(|x| x.as_u64())
-                        .unwrap_or(0) as usize,
-                    channel: v.get("channel").and_then(|x| x.as_str()).map(|s| s.to_string()),
+                    request_count: v.get("request_count").and_then(|x| x.as_u64()).unwrap_or(0)
+                        as usize,
+                    channel: v
+                        .get("channel")
+                        .and_then(|x| x.as_str())
+                        .map(|s| s.to_string()),
                 })
                 .collect()
         })
         .unwrap_or_default();
-    by_model.sort_by(|a, b| b.cost_usd.partial_cmp(&a.cost_usd).unwrap_or(std::cmp::Ordering::Equal));
+    by_model.sort_by(|a, b| {
+        b.cost_usd
+            .partial_cmp(&a.cost_usd)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     CostSummary {
-        hourly_cost_usd: cost.get("hourly_cost_usd").and_then(|x| x.as_f64()).unwrap_or(0.0),
-        daily_cost_usd: cost.get("daily_cost_usd").and_then(|x| x.as_f64()).unwrap_or(0.0),
-        monthly_cost_usd: cost.get("monthly_cost_usd").and_then(|x| x.as_f64()).unwrap_or(0.0),
-        total_tokens: cost.get("total_tokens").and_then(|x| x.as_u64()).unwrap_or(0),
-        request_count: cost.get("request_count").and_then(|x| x.as_u64()).unwrap_or(0) as usize,
+        hourly_cost_usd: cost
+            .get("hourly_cost_usd")
+            .and_then(|x| x.as_f64())
+            .unwrap_or(0.0),
+        daily_cost_usd: cost
+            .get("daily_cost_usd")
+            .and_then(|x| x.as_f64())
+            .unwrap_or(0.0),
+        monthly_cost_usd: cost
+            .get("monthly_cost_usd")
+            .and_then(|x| x.as_f64())
+            .unwrap_or(0.0),
+        total_tokens: cost
+            .get("total_tokens")
+            .and_then(|x| x.as_u64())
+            .unwrap_or(0),
+        request_count: cost
+            .get("request_count")
+            .and_then(|x| x.as_u64())
+            .unwrap_or(0) as usize,
         by_model,
     }
 }
@@ -2028,7 +2355,11 @@ async fn pair_with_gateway(base_url: &str, code: &str) -> Result<String> {
         .header("X-Pairing-Code", code)
         .send()
         .await?;
-    anyhow::ensure!(resp.status().is_success(), "Pairing failed: HTTP {}", resp.status());
+    anyhow::ensure!(
+        resp.status().is_success(),
+        "Pairing failed: HTTP {}",
+        resp.status()
+    );
     let body: serde_json::Value = resp.json().await?;
     body.get("token")
         .and_then(|t| t.as_str())
@@ -2047,7 +2378,9 @@ pub async fn run(config: &Config) -> Result<()> {
     let token = if let Some(t) = load_cached_token(config) {
         Some(t)
     } else if config.gateway.require_pairing {
-        eprintln!("No cached token found. Enter the 6-digit pairing code shown in the gateway terminal:");
+        eprintln!(
+            "No cached token found. Enter the 6-digit pairing code shown in the gateway terminal:"
+        );
         eprint!("> ");
         let mut code = String::new();
         std::io::stdin().read_line(&mut code)?;
@@ -2065,10 +2398,29 @@ pub async fn run(config: &Config) -> Result<()> {
     let (costs_action_tx, costs_action_rx) = mpsc::sync_channel::<CostsAction>(64);
     let (metrics_action_tx, metrics_action_rx) = mpsc::sync_channel::<MetricsAction>(64);
 
-    tokio::spawn(run_event_stream_task(sse_url.clone(), token.clone(), msg_tx.clone()));
-    tokio::spawn(run_memory_task(base_url.clone(), token.clone(), msg_tx.clone(), action_rx));
-    tokio::spawn(run_cron_task(base_url.clone(), token.clone(), msg_tx.clone(), cron_action_rx));
-    tokio::spawn(run_costs_task(base_url.clone(), token.clone(), msg_tx.clone(), costs_action_rx));
+    tokio::spawn(run_event_stream_task(
+        sse_url.clone(),
+        token.clone(),
+        msg_tx.clone(),
+    ));
+    tokio::spawn(run_memory_task(
+        base_url.clone(),
+        token.clone(),
+        msg_tx.clone(),
+        action_rx,
+    ));
+    tokio::spawn(run_cron_task(
+        base_url.clone(),
+        token.clone(),
+        msg_tx.clone(),
+        cron_action_rx,
+    ));
+    tokio::spawn(run_costs_task(
+        base_url.clone(),
+        token.clone(),
+        msg_tx.clone(),
+        costs_action_rx,
+    ));
     tokio::spawn(run_metrics_task(base_url, token, msg_tx, metrics_action_rx));
 
     tokio::task::block_in_place(move || {
@@ -2131,7 +2483,9 @@ fn run_tui(
                     }
                     Ok(Msg::MemoryDeleted(key)) => {
                         app.memory.entries.retain(|e| e.key != key);
-                        if app.memory.cursor >= app.memory.entries.len() && !app.memory.entries.is_empty() {
+                        if app.memory.cursor >= app.memory.entries.len()
+                            && !app.memory.entries.is_empty()
+                        {
                             app.memory.cursor = app.memory.entries.len() - 1;
                         }
                         app.memory.mode = MemoryMode::List;
@@ -2350,7 +2704,9 @@ fn handle_memory_key(
         MemoryMode::ConfirmDelete => match key.code {
             KeyCode::Char('y') => {
                 if let Some(entry) = s.selected() {
-                    let _ = action_tx.try_send(Action::DeleteMemory { key: entry.key.clone() });
+                    let _ = action_tx.try_send(Action::DeleteMemory {
+                        key: entry.key.clone(),
+                    });
                 }
             }
             KeyCode::Char('n') | KeyCode::Esc => s.mode = MemoryMode::Detail,

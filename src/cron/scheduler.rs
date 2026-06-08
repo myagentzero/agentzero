@@ -159,7 +159,6 @@ fn build_agent_run_config(config: &Config, job: &CronJob) -> Config {
     run_config.skip_input_autosave = true;
     if job.light_context {
         run_config.agent.compact_context = true;
-        run_config.skip_bootstrap_files = true;
     }
     run_config
 }
@@ -204,7 +203,6 @@ async fn run_agent_job(
                 None,
                 model_override,
                 config.default_temperature,
-                vec![],
                 false,
                 None,
             ))
@@ -604,7 +602,6 @@ mod tests {
         let run_config = build_agent_run_config(&config, &job);
 
         assert!(run_config.skip_input_autosave);
-        assert!(run_config.skip_bootstrap_files);
         assert!(run_config.agent.compact_context);
     }
 
@@ -617,7 +614,7 @@ mod tests {
 
         let run_config = build_agent_run_config(&config, &job);
 
-        assert!(!run_config.skip_bootstrap_files);
+        assert!(!run_config.agent.compact_context);
     }
 
     #[tokio::test]

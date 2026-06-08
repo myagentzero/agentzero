@@ -157,8 +157,8 @@ pub fn remove_job(config: &Config, id: &str) -> Result<()> {
 }
 
 pub fn due_jobs(config: &Config, now: DateTime<Utc>) -> Result<Vec<CronJob>> {
-    let lim = i64::try_from(config.cron.max_tasks.max(1))
-        .context("Cron max_tasks overflows i64")?;
+    let lim =
+        i64::try_from(config.cron.max_tasks.max(1)).context("Cron max_tasks overflows i64")?;
     with_connection(config, |conn| {
         let mut stmt = conn.prepare(
             "SELECT id, expression, command, schedule, job_type, prompt, name, session_target, model,

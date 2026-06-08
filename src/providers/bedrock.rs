@@ -7,7 +7,7 @@
 use crate::providers::traits::{
     ChatMessage, ChatRequest as ProviderChatRequest, ChatResponse as ProviderChatResponse,
     NormalizedStopReason, Provider, ProviderCapabilities, StreamChunk, StreamError, StreamOptions,
-    StreamResult, TokenUsage, ToolCall as ProviderToolCall, ToolsPayload,
+    StreamResult, TokenUsage, ToolCall as ProviderToolCall,
 };
 use crate::tools::ToolSpec;
 use async_trait::async_trait;
@@ -1323,22 +1323,6 @@ impl Provider for BedrockProvider {
 
     fn supports_native_tools(&self) -> bool {
         true
-    }
-
-    fn convert_tools(&self, tools: &[ToolSpec]) -> ToolsPayload {
-        let tool_values: Vec<serde_json::Value> = tools
-            .iter()
-            .map(|t| {
-                serde_json::json!({
-                    "toolSpec": {
-                        "name": t.name,
-                        "description": t.description,
-                        "inputSchema": { "json": t.parameters }
-                    }
-                })
-            })
-            .collect();
-        ToolsPayload::Anthropic { tools: tool_values }
     }
 
     async fn chat_with_system(

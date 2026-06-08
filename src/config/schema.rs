@@ -179,9 +179,6 @@ pub struct Config {
     /// Path to config.toml - computed from home, not serialized
     #[serde(skip)]
     pub config_path: PathBuf,
-    /// Runtime-only: skip workspace bootstrap file injection (set by cron light_context)
-    #[serde(skip)]
-    pub skip_bootstrap_files: bool,
     /// Runtime-only: skip auto-saving the input message to Conversation memory (set by cron scheduler)
     #[serde(skip)]
     pub skip_input_autosave: bool,
@@ -400,6 +397,10 @@ pub struct Config {
     /// GitHub agent tool (`[github]`).
     #[serde(default)]
     pub github: GitHubToolConfig,
+
+    /// ServiceNow agent tool (`[servicenow]`).
+    #[serde(default)]
+    pub servicenow: ServiceNowConfig,
 }
 
 /// Named provider profile definition compatible with Codex app-server style config.
@@ -1187,7 +1188,7 @@ fn default_safety_heartbeat_turn_interval() -> usize {
 impl Default for AgentConfig {
     fn default() -> Self {
         Self {
-            compact_context: true,
+            compact_context: false,
             session: AgentSessionConfig::default(),
             max_tool_iterations: default_agent_max_tool_iterations(),
             max_history_messages: default_agent_max_history_messages(),
@@ -5663,6 +5664,61 @@ impl Default for GitHubToolConfig {
     }
 }
 
+// -- ServiceNow agent tool --
+
+/// ServiceNow agent tool configuration (`[servicenow]`).
+///
+/// Exposes read/write actions against the ServiceNow Table API
+/// (gated by `allowed_actions` and the security policy's Read/Act split).
+///
+/// Authentication uses OAuth2 client credentials. The `client_id` and
+/// `client_secret` are encrypted at rest via the zeroclaw secret store
+/// (`enc2:` prefix) when `[secrets].encrypt = true`.
+///
+/// `client_secret` falls back to the `SERVICENOW_CLIENT_SECRET` env var when blank.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct ServiceNowConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    /// e.g. `https://yourcompany.service-now.com` (no trailing slash).
+    #[serde(default)]
+    pub base_url: String,
+    /// OAuth2 client id (encrypted at rest).
+    #[serde(default)]
+    pub client_id: String,
+    /// OAuth2 client secret (encrypted at rest). Falls back to
+    /// `SERVICENOW_CLIENT_SECRET` env var when blank.
+    #[serde(default)]
+    pub client_secret: String,
+    /// Action allowlist (e.g. `list_records`, `get_record`, `create_record`,
+    /// `update_record`).
+    #[serde(default = "default_servicenow_allowed_actions")]
+    pub allowed_actions: Vec<String>,
+    #[serde(default = "default_servicenow_timeout")]
+    pub timeout_secs: u64,
+}
+
+fn default_servicenow_allowed_actions() -> Vec<String> {
+    vec!["get_record".into(), "list_records".into()]
+}
+
+fn default_servicenow_timeout() -> u64 {
+    30
+}
+
+impl Default for ServiceNowConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            base_url: String::new(),
+            client_id: String::new(),
+            client_secret: String::new(),
+            allowed_actions: default_servicenow_allowed_actions(),
+            timeout_secs: default_servicenow_timeout(),
+        }
+    }
+}
+
 // -- Notion --
 
 /// Notion integration configuration (`[notion]`).
@@ -5738,7 +5794,6 @@ impl Default for Config {
         Self {
             workspace_dir: zeroclaw_dir.join("workspace"),
             config_path: zeroclaw_dir.join("config.toml"),
-            skip_bootstrap_files: false,
             skip_input_autosave: false,
             api_key: None,
             api_url: None,
@@ -5794,6 +5849,7 @@ impl Default for Config {
             atlassian: AtlassianConfig::default(),
             elasticsearch: ElasticsearchConfig::default(),
             github: GitHubToolConfig::default(),
+            servicenow: ServiceNowConfig::default(),
             local_context: LocalContextConfig::default(),
         }
     }
@@ -6655,6 +6711,22 @@ impl Config {
                     &store,
                     &mut config.github.access_token,
                     "config.github.access_token",
+                )?;
+            }
+
+            // ServiceNow OAuth2 credentials
+            if !config.servicenow.client_id.is_empty() {
+                decrypt_secret(
+                    &store,
+                    &mut config.servicenow.client_id,
+                    "config.servicenow.client_id",
+                )?;
+            }
+            if !config.servicenow.client_secret.is_empty() {
+                decrypt_secret(
+                    &store,
+                    &mut config.servicenow.client_secret,
+                    "config.servicenow.client_secret",
                 )?;
             }
 
@@ -7753,6 +7825,35 @@ impl Config {
             }
         }
 
+        // ServiceNow
+        if self.servicenow.enabled {
+            let base_url = self.servicenow.base_url.trim();
+            if base_url.is_empty() {
+                anyhow::bail!(
+                    "servicenow.base_url must not be empty when servicenow.enabled = true"
+                );
+            }
+            if base_url.ends_with('/') {
+                anyhow::bail!("servicenow.base_url must not have a trailing slash");
+            }
+            if self.servicenow.client_id.trim().is_empty() {
+                anyhow::bail!(
+                    "servicenow.client_id must not be empty when servicenow.enabled = true"
+                );
+            }
+            if self.servicenow.client_secret.trim().is_empty()
+                && std::env::var("SERVICENOW_CLIENT_SECRET").is_err()
+            {
+                anyhow::bail!(
+                    "servicenow.client_secret must not be empty when servicenow.enabled = true, \
+                    or SERVICENOW_CLIENT_SECRET env var must be set"
+                );
+            }
+            if self.servicenow.timeout_secs == 0 {
+                anyhow::bail!("servicenow.timeout_secs must be greater than 0");
+            }
+        }
+
         Ok(())
     }
 
@@ -8377,6 +8478,22 @@ impl Config {
             )?;
         }
 
+        // ServiceNow OAuth2 credentials
+        if !config_to_save.servicenow.client_id.is_empty() {
+            encrypt_secret(
+                &store,
+                &mut config_to_save.servicenow.client_id,
+                "config.servicenow.client_id",
+            )?;
+        }
+        if !config_to_save.servicenow.client_secret.is_empty() {
+            encrypt_secret(
+                &store,
+                &mut config_to_save.servicenow.client_secret,
+                "config.servicenow.client_secret",
+            )?;
+        }
+
         let toml_str =
             toml::to_string_pretty(&config_to_save).context("Failed to serialize config")?;
 
@@ -8912,7 +9029,6 @@ default_temperature = 0.7
         let config = Config {
             workspace_dir: PathBuf::from("/tmp/test/workspace"),
             config_path: PathBuf::from("/tmp/test/config.toml"),
-            skip_bootstrap_files: false,
             skip_input_autosave: false,
             api_key: Some("sk-test-key".into()),
             api_url: None,
@@ -9022,6 +9138,7 @@ default_temperature = 0.7
             atlassian: AtlassianConfig::default(),
             elasticsearch: ElasticsearchConfig::default(),
             github: GitHubToolConfig::default(),
+            servicenow: ServiceNowConfig::default(),
             local_context: LocalContextConfig::default(),
         };
 
@@ -9192,7 +9309,7 @@ reasoning_level = "high"
     #[test]
     async fn agent_config_defaults() {
         let cfg = AgentConfig::default();
-        assert!(cfg.compact_context);
+        assert!(!cfg.compact_context);
         assert_eq!(cfg.max_tool_iterations, 20);
         assert_eq!(cfg.max_history_messages, 50);
         assert!(!cfg.parallel_tools);
@@ -9253,7 +9370,6 @@ denied_tools = ["shell"]
         let config = Config {
             workspace_dir: dir.join("workspace"),
             config_path: config_path.clone(),
-            skip_bootstrap_files: false,
             skip_input_autosave: false,
             api_key: Some("sk-roundtrip".into()),
             api_url: None,
@@ -9309,6 +9425,7 @@ denied_tools = ["shell"]
             atlassian: AtlassianConfig::default(),
             elasticsearch: ElasticsearchConfig::default(),
             github: GitHubToolConfig::default(),
+            servicenow: ServiceNowConfig::default(),
             local_context: LocalContextConfig::default(),
         };
 

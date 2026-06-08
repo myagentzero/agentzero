@@ -59,6 +59,7 @@ pub mod provider_status;
 pub mod reaction;
 pub mod read_skill;
 pub mod schema;
+pub mod servicenow_tool;
 pub mod shell;
 pub mod subagent_list;
 pub mod subagent_manage;
@@ -110,6 +111,7 @@ pub use reaction::ReactionTool;
 pub use read_skill::ReadSkillTool;
 #[allow(unused_imports)]
 pub use schema::{CleaningStrategy, SchemaCleanr};
+pub use servicenow_tool::ServiceNowTool;
 pub use shell::ShellTool;
 pub use subagent_list::SubAgentListTool;
 pub use subagent_manage::SubAgentManageTool;
@@ -363,7 +365,6 @@ pub fn all_tools_with_runtime(
         tool_arcs.push(Arc::new(LocalContextTool::new(&root_config.local_context)));
     }
 
-
     // LiteLLM proxy status tool — only when using a custom provider
     if root_config
         .default_provider
@@ -578,6 +579,33 @@ pub fn all_tools_with_runtime(
                 root_config.github.allowed_actions.clone(),
                 security.clone(),
                 root_config.github.timeout_secs,
+            )));
+        }
+    }
+
+    // ServiceNow agent tool (conditionally registered)
+    if root_config.servicenow.enabled {
+        let base_url = root_config.servicenow.base_url.trim();
+        let client_id = root_config.servicenow.client_id.trim();
+        let client_secret = if root_config.servicenow.client_secret.trim().is_empty() {
+            std::env::var("SERVICENOW_CLIENT_SECRET").unwrap_or_default()
+        } else {
+            root_config.servicenow.client_secret.trim().to_string()
+        };
+
+        if base_url.is_empty() || client_id.is_empty() || client_secret.trim().is_empty() {
+            tracing::warn!(
+                "ServiceNow tool enabled but missing required config in [servicenow] section \
+                 (base_url, client_id, client_secret or SERVICENOW_CLIENT_SECRET env var)"
+            );
+        } else {
+            tool_arcs.push(Arc::new(ServiceNowTool::new(
+                base_url.to_string(),
+                client_id.to_string(),
+                client_secret,
+                root_config.servicenow.allowed_actions.clone(),
+                security.clone(),
+                root_config.servicenow.timeout_secs,
             )));
         }
     }

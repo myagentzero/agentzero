@@ -7,6 +7,7 @@ pub mod memory_loader;
 pub mod prompt;
 pub mod research;
 pub mod session;
+pub mod tools_registry;
 
 #[cfg(test)]
 mod tests;

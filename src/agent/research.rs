@@ -10,9 +10,9 @@
 //! - Prompt-guided tool calling (Gemini and other providers without native support)
 
 use crate::agent::dispatcher::{ToolDispatcher, XmlToolDispatcher};
+use crate::agent::prompt::build_tool_instructions;
 use crate::config::{ResearchPhaseConfig, ResearchTrigger};
 use crate::observability::Observer;
-use crate::providers::traits::build_tool_instructions_text;
 use crate::providers::{ChatMessage, ChatRequest, ChatResponse, Provider, ToolCall};
 use crate::tools::{Tool, ToolResult, ToolSpec};
 use anyhow::Result;
@@ -128,11 +128,10 @@ pub async fn run_research_phase(
     let system_prompt = if uses_native_tools {
         base_prompt
     } else {
-        // Prompt-guided: append tool instructions
         format!(
             "{}\n\n{}",
             base_prompt,
-            build_tool_instructions_text(&tool_specs)
+            build_tool_instructions(&tool_specs, false)
         )
     };
 

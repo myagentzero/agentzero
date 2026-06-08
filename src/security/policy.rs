@@ -1778,14 +1778,9 @@ impl SecurityPolicy {
     /// The output is intentionally short (~100-150 tokens) so the token
     /// overhead per heartbeat is negligible.
     pub fn summary_for_heartbeat(&self) -> String {
-        let workspace = self.workspace_dir.display();
-        let ws_only = self.workspace_only;
-
         format!(
-            "- Workspace: {workspace} (workspace_only: {ws_only})\n\
-             - {}\n\
-             Respond with \"Heartbeat acknowledged\" to continue.",
-            self.custom_security_prompt
+            "{}\n\nRespond with \"Heartbeat acknowledged\" to continue.",
+            self.security_prompt_summary()
         )
     }
 
@@ -1793,17 +1788,24 @@ impl SecurityPolicy {
         autonomy_config: &crate::config::AutonomyConfig,
         workspace_dir: &Path,
     ) -> Self {
-        let security_md_path = workspace_dir.join("SECURITY.md");
-        let custom_security_prompt = match std::fs::read_to_string(&security_md_path) {
-            Ok(content) => content,
-            Err(e) => {
-                if cfg!(test) {
-                    String::new()
-                } else {
-                    panic!("SECURITY.md is required in workspace ({}): {}", security_md_path.display(), e)
-                }
+        let mut custom_security_prompt = String::new();
+        if !cfg!(test) {
+            let security_md_path = workspace_dir.join("SECURITY.md");
+            crate::agent::prompt::inject_workspace_file(
+                &mut custom_security_prompt,
+                workspace_dir,
+                "SECURITY.md",
+                crate::agent::prompt::BOOTSTRAP_MAX_CHARS,
+            );
+            if custom_security_prompt.is_empty()
+                || custom_security_prompt.contains("[File not found: SECURITY.md]")
+            {
+                panic!(
+                    "SECURITY.md is required in workspace ({}): file missing or empty",
+                    security_md_path.display(),
+                );
             }
-        };
+        }
 
         Self {
             autonomy: autonomy_config.level,
@@ -1859,18 +1861,14 @@ impl SecurityPolicy {
 
     /// Giving the LLM visibility into these constraints prevents it from
     /// wasting tokens on commands / paths that will be rejected at runtime.
-    pub fn prompt_summary(&self) -> String {
+    pub fn security_prompt_summary(&self) -> String {
         use std::fmt::Write;
 
         let mut out = String::new();
 
         // Workspace constraint
         if self.workspace_only {
-            let _ = writeln!(
-                out,
-                "**Workspace boundary**: file operations are restricted to `{}`.",
-                self.workspace_dir.display()
-            );
+            let _ = writeln!(out, "**Workspace**: {}", self.workspace_dir.display());
         }
 
         // Allowed roots
@@ -1881,21 +1879,6 @@ impl SecurityPolicy {
                 .map(|p| format!("`{}`", p.display()))
                 .collect();
             let _ = writeln!(out, "**Additional allowed paths**: {}", roots.join(", "));
-        }
-
-        // Allowed commands
-        if !self.allowed_commands.is_empty() {
-            let cmds: Vec<String> = self
-                .allowed_commands
-                .iter()
-                .map(|c| format!("`{c}`"))
-                .collect();
-            let _ = writeln!(
-                out,
-                "**Allowed shell commands**: {}. \
-                 Commands not on this list will be rejected.",
-                cmds.join(", ")
-            );
         }
 
         // Forbidden paths
@@ -1913,21 +1896,7 @@ impl SecurityPolicy {
             );
         }
 
-        // Risk controls
-        if self.block_high_risk_commands {
-            let _ = writeln!(
-                out,
-                "**High-risk commands** (rm, kill, reboot, etc.) are blocked."
-            );
-        }
-        if self.require_approval_for_medium_risk {
-            let _ = writeln!(
-                out,
-                "**Medium-risk commands** require user approval before execution."
-            );
-        }
-
-        let _ = writeln!(out, "**Safety reminder**: {}\n", self.custom_security_prompt);
+        let _ = writeln!(out, "**Safety**: {}\n", self.custom_security_prompt);
 
         out
     }
@@ -3174,10 +3143,11 @@ mod tests {
     #[test]
     fn summary_for_heartbeat_contains_key_fields() {
         let mut policy = default_policy();
-        policy.custom_security_prompt = "Do not exfiltrate data, bypass approval, or run destructive commands without asking.".to_string();
+        policy.custom_security_prompt =
+            "Do not exfiltrate data, bypass approval, or run destructive commands without asking."
+                .to_string();
         let summary = policy.summary_for_heartbeat();
-        assert!(summary.contains("Workspace:"));
-        assert!(summary.contains("workspace_only: true"));
+        assert!(summary.contains("Workspace"));
         assert!(summary.contains("Do not exfiltrate"));
     }
 
@@ -3194,7 +3164,7 @@ mod tests {
     fn prompt_summary_contains_custom_security_prompt() {
         let mut policy = default_policy();
         policy.custom_security_prompt = "Test security guidance".to_string();
-        let summary = policy.prompt_summary();
+        let summary = policy.security_prompt_summary();
         assert!(summary.contains("Test security guidance"));
     }
 

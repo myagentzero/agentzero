@@ -75,8 +75,8 @@ fn agent_config_default_tool_dispatcher() {
 fn agent_config_default_compact_context_on() {
     let agent = AgentConfig::default();
     assert!(
-        agent.compact_context,
-        "compact_context should default to true"
+        !agent.compact_context,
+        "compact_context should default to false"
     );
 }
 
@@ -205,8 +205,8 @@ default_temperature = 0.7
     assert_eq!(parsed.agent.max_tool_iterations, 20);
     assert_eq!(parsed.agent.max_history_messages, 50);
     assert!(
-        parsed.agent.compact_context,
-        "AgentConfig::default() enables compact_context"
+        !parsed.agent.compact_context,
+        "AgentConfig::default() disables compact_context"
     );
 }
 

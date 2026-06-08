@@ -21,7 +21,6 @@ pub struct ToolExecutionResult {
 pub trait ToolDispatcher: Send + Sync {
     fn parse_response(&self, response: &ChatResponse) -> (String, Vec<ParsedToolCall>);
     fn format_results(&self, results: &[ToolExecutionResult]) -> ConversationMessage;
-    fn prompt_instructions(&self, tools: &[Box<dyn Tool>]) -> String;
     fn to_provider_messages(&self, history: &[ConversationMessage]) -> Vec<ChatMessage>;
     fn should_send_tool_specs(&self) -> bool;
 }
@@ -116,29 +115,6 @@ impl ToolDispatcher for XmlToolDispatcher {
         ConversationMessage::Chat(ChatMessage::user(format!("[Tool results]\n{content}")))
     }
 
-    fn prompt_instructions(&self, tools: &[Box<dyn Tool>]) -> String {
-        let mut instructions = String::new();
-        instructions.push_str("## Tool Use Protocol\n\n");
-        instructions
-            .push_str("To use a tool, wrap a JSON object in <tool_call></tool_call> tags:\n\n");
-        instructions.push_str(
-            "```\n<tool_call>\n{\"name\": \"tool_name\", \"arguments\": {\"param\": \"value\"}}\n</tool_call>\n```\n\n",
-        );
-        instructions.push_str("### Available Tools\n\n");
-
-        for tool in tools {
-            let _ = writeln!(
-                instructions,
-                "- **{}**: {}\n  Parameters: `{}`",
-                tool.name(),
-                tool.description(),
-                tool.parameters_schema()
-            );
-        }
-
-        instructions
-    }
-
     fn to_provider_messages(&self, history: &[ConversationMessage]) -> Vec<ChatMessage> {
         history
             .iter()
@@ -203,10 +179,6 @@ impl ToolDispatcher for NativeToolDispatcher {
             })
             .collect();
         ConversationMessage::ToolResults(messages)
-    }
-
-    fn prompt_instructions(&self, _tools: &[Box<dyn Tool>]) -> String {
-        String::new()
     }
 
     fn to_provider_messages(&self, history: &[ConversationMessage]) -> Vec<ChatMessage> {

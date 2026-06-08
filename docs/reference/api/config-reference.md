@@ -472,7 +472,7 @@ and must not end with `/`.
 | `max_actions_per_hour` | `20` | per-policy action budget |
 | `max_cost_per_day_cents` | `500` | per-policy spend guardrail |
 | `require_approval_for_medium_risk` | `true` | approval gate for medium-risk commands |
-| `block_high_risk_commands` | `true` | hard block for high-risk commands |
+| `block_high_risk_commands` | `true` | hard block for high-risk commands (`rm`, `mkfs`, `dd`, `shutdown`, `reboot`, `halt`, `poweroff`, `sudo`, `su`, `chown`, `chmod`, `useradd`, `userdel`, `usermod`, `passwd`, `mount`, `umount`, `iptables`, `ufw`, `firewall-cmd`, `curl`, `wget`, `nc`, `ncat`, `netcat`, `scp`, `ssh`, `ftp`, `telnet`) |
 | `auto_approve` | `[]` | tool operations always auto-approved |
 | `always_ask` | `[]` | tool operations that always require approval |
 

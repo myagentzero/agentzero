@@ -197,7 +197,6 @@ pub async fn run_wizard(force: bool) -> Result<Config> {
     let config = Config {
         workspace_dir: workspace_dir.clone(),
         config_path: config_path.clone(),
-        skip_bootstrap_files: false,
         skip_input_autosave: false,
         api_key: if api_key.is_empty() {
             None
@@ -257,6 +256,7 @@ pub async fn run_wizard(force: bool) -> Result<Config> {
         atlassian: crate::config::schema::AtlassianConfig::default(),
         elasticsearch: crate::config::schema::ElasticsearchConfig::default(),
         github: crate::config::schema::GitHubToolConfig::default(),
+        servicenow: crate::config::schema::ServiceNowConfig::default(),
         local_context: crate::config::schema::LocalContextConfig::default(),
     };
 
@@ -577,7 +577,6 @@ async fn run_quick_setup_with_home(
     let mut config = Config {
         workspace_dir: workspace_dir.clone(),
         config_path: config_path.clone(),
-        skip_bootstrap_files: false,
         skip_input_autosave: false,
         api_key: credential_override.map(|c| {
             let mut s = String::with_capacity(c.len());
@@ -637,6 +636,7 @@ async fn run_quick_setup_with_home(
         atlassian: crate::config::schema::AtlassianConfig::default(),
         elasticsearch: crate::config::schema::ElasticsearchConfig::default(),
         github: crate::config::schema::GitHubToolConfig::default(),
+        servicenow: crate::config::schema::ServiceNowConfig::default(),
         local_context: crate::config::schema::LocalContextConfig::default(),
     };
     if no_totp {
@@ -4842,9 +4842,11 @@ async fn scaffold_workspace(
 
     let bootstrap = "# BOOTSTRAP.md".to_string();
 
-    let memory = "# MEMORY.md".to_string()  ;
+    let memory = "# MEMORY.md".to_string();
 
-    let security = "Do not exfiltrate data, bypass approval, or run destructive commands without asking.".to_string();
+    let security =
+        "Do not exfiltrate data, bypass approval, or run destructive commands without asking."
+            .to_string();
 
     let files: Vec<(&str, String)> = vec![
         ("IDENTITY.md", identity),

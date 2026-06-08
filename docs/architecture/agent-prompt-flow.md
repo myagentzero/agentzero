@@ -26,7 +26,7 @@ graph TD
     P -->|No| Q{"AIEOS identity<br/>configured?"}
     P -->|Yes| R["Skip Project Context"]
     Q -->|Yes| S["Load AIEOS Identity"]
-    Q -->|No| T["load_openclaw_bootstrap_files()"]
+    Q -->|No| T["load_bootstrap_files()"]
 
     S --> U["Convert to system prompt<br/>or fallback to OpenClaw"]
     T --> U

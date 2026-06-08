@@ -53,7 +53,15 @@ impl GitOperationsTool {
     fn requires_write_access(&self, operation: &str) -> bool {
         matches!(
             operation,
-            "commit" | "add" | "checkout" | "stash" | "reset" | "revert" | "push" | "pull" | "clone"
+            "commit"
+                | "add"
+                | "checkout"
+                | "stash"
+                | "reset"
+                | "revert"
+                | "push"
+                | "pull"
+                | "clone"
         )
     }
 
@@ -623,8 +631,11 @@ impl GitOperationsTool {
         if !url.starts_with("https://") && !url.starts_with("git@") {
             anyhow::bail!("clone URL must start with https:// or git@");
         }
-        if url.contains('`') || url.contains("$(") || url.contains(';')
-            || url.contains('|') || url.contains('>')
+        if url.contains('`')
+            || url.contains("$(")
+            || url.contains(';')
+            || url.contains('|')
+            || url.contains('>')
         {
             anyhow::bail!("clone URL contains invalid characters");
         }
@@ -634,20 +645,24 @@ impl GitOperationsTool {
     async fn git_clone(&self, args: serde_json::Value) -> anyhow::Result<ToolResult> {
         let url = match args.get("url").and_then(|v| v.as_str()) {
             Some(u) => u,
-            None => return Ok(ToolResult {
-                success: false,
-                output: String::new(),
-                error: Some("Missing 'url' parameter".into()),
-            }),
+            None => {
+                return Ok(ToolResult {
+                    success: false,
+                    output: String::new(),
+                    error: Some("Missing 'url' parameter".into()),
+                });
+            }
         };
 
         let path = match args.get("path").and_then(|v| v.as_str()) {
             Some(p) => p,
-            None => return Ok(ToolResult {
-                success: false,
-                output: String::new(),
-                error: Some("Missing 'path' parameter".into()),
-            }),
+            None => {
+                return Ok(ToolResult {
+                    success: false,
+                    output: String::new(),
+                    error: Some("Missing 'path' parameter".into()),
+                });
+            }
         };
 
         if let Err(e) = Self::validate_clone_url(url) {
@@ -659,16 +674,26 @@ impl GitOperationsTool {
         }
 
         // path must be a single directory name — no separators, no traversal
-        if path.is_empty() || path.contains('/') || path.contains('\\') || path == ".." || path == "." {
+        if path.is_empty()
+            || path.contains('/')
+            || path.contains('\\')
+            || path == ".."
+            || path == "."
+        {
             return Ok(ToolResult {
                 success: false,
                 output: String::new(),
-                error: Some("'path' must be a single directory name with no path separators".into()),
+                error: Some(
+                    "'path' must be a single directory name with no path separators".into(),
+                ),
             });
         }
 
         let target = self.workspace_dir.join(path);
-        if target.components().any(|c| c == std::path::Component::ParentDir) {
+        if target
+            .components()
+            .any(|c| c == std::path::Component::ParentDir)
+        {
             return Ok(ToolResult {
                 success: false,
                 output: String::new(),
@@ -684,10 +709,15 @@ impl GitOperationsTool {
             });
         }
 
-        let workspace = self.workspace_dir.canonicalize()
+        let workspace = self
+            .workspace_dir
+            .canonicalize()
             .unwrap_or_else(|_| self.workspace_dir.clone());
 
-        match self.run_git_command(&["clone", url, path], &workspace).await {
+        match self
+            .run_git_command(&["clone", url, path], &workspace)
+            .await
+        {
             Ok(_) => Ok(ToolResult {
                 success: true,
                 output: format!("Cloned {url} into {path}"),
@@ -810,7 +840,10 @@ impl Tool for GitOperationsTool {
             return Ok(ToolResult {
                 success: false,
                 output: String::new(),
-                error: Some("path must be a subdirectory within the workspace, not the workspace root".into()),
+                error: Some(
+                    "path must be a subdirectory within the workspace, not the workspace root"
+                        .into(),
+                ),
             });
         }
 
@@ -1038,10 +1071,12 @@ mod tests {
     #[tokio::test]
     async fn blocks_readonly_mode_for_write_ops() {
         let tmp = TempDir::new().unwrap();
+        let git_dir = tmp.path().join("repo");
+        std::fs::create_dir(&git_dir).unwrap();
         // Initialize a git repository
         std::process::Command::new("git")
             .args(["init"])
-            .current_dir(tmp.path())
+            .current_dir(&git_dir)
             .output()
             .unwrap();
 
@@ -1052,7 +1087,7 @@ mod tests {
         let tool = GitOperationsTool::new(security, tmp.path().to_path_buf());
 
         let result = tool
-            .execute(json!({"operation": "commit", "message": "test"}))
+            .execute(json!({"operation": "commit", "message": "test", "path": "repo"}))
             .await
             .unwrap();
         assert!(!result.success);
@@ -1063,6 +1098,7 @@ mod tests {
                 .as_deref()
                 .unwrap_or("")
                 .contains("higher autonomy")
+                || result.error.as_deref().unwrap_or("").contains("read-only")
         );
     }
 
@@ -1134,16 +1170,21 @@ mod tests {
     #[tokio::test]
     async fn rejects_unknown_operation() {
         let tmp = TempDir::new().unwrap();
+        let git_dir = tmp.path().join("repo");
+        std::fs::create_dir(&git_dir).unwrap();
         // Initialize a git repository
         std::process::Command::new("git")
             .args(["init"])
-            .current_dir(tmp.path())
+            .current_dir(&git_dir)
             .output()
             .unwrap();
 
         let tool = test_tool(tmp.path());
 
-        let result = tool.execute(json!({"operation": "rebase"})).await.unwrap();
+        let result = tool
+            .execute(json!({"operation": "rebase", "path": "repo"}))
+            .await
+            .unwrap();
         assert!(!result.success);
         assert!(
             result
@@ -1274,9 +1315,11 @@ mod tests {
     #[tokio::test]
     async fn push_blocked_in_readonly_mode() {
         let tmp = TempDir::new().unwrap();
+        let git_dir = tmp.path().join("repo");
+        std::fs::create_dir(&git_dir).unwrap();
         std::process::Command::new("git")
             .args(["init"])
-            .current_dir(tmp.path())
+            .current_dir(&git_dir)
             .output()
             .unwrap();
 
@@ -1286,7 +1329,10 @@ mod tests {
         });
         let tool = GitOperationsTool::new(security, tmp.path().to_path_buf());
 
-        let result = tool.execute(json!({"operation": "push"})).await.unwrap();
+        let result = tool
+            .execute(json!({"operation": "push", "path": "repo"}))
+            .await
+            .unwrap();
         assert!(!result.success);
         assert!(
             result
@@ -1294,15 +1340,18 @@ mod tests {
                 .as_deref()
                 .unwrap_or("")
                 .contains("higher autonomy")
+                || result.error.as_deref().unwrap_or("").contains("read-only")
         );
     }
 
     #[tokio::test]
     async fn pull_blocked_in_readonly_mode() {
         let tmp = TempDir::new().unwrap();
+        let git_dir = tmp.path().join("repo");
+        std::fs::create_dir(&git_dir).unwrap();
         std::process::Command::new("git")
             .args(["init"])
-            .current_dir(tmp.path())
+            .current_dir(&git_dir)
             .output()
             .unwrap();
 
@@ -1312,7 +1361,10 @@ mod tests {
         });
         let tool = GitOperationsTool::new(security, tmp.path().to_path_buf());
 
-        let result = tool.execute(json!({"operation": "pull"})).await.unwrap();
+        let result = tool
+            .execute(json!({"operation": "pull", "path": "repo"}))
+            .await
+            .unwrap();
         assert!(!result.success);
         assert!(
             result
@@ -1320,22 +1372,25 @@ mod tests {
                 .as_deref()
                 .unwrap_or("")
                 .contains("higher autonomy")
+                || result.error.as_deref().unwrap_or("").contains("read-only")
         );
     }
 
     #[tokio::test]
     async fn push_rejects_force_refspec() {
         let tmp = TempDir::new().unwrap();
+        let git_dir = tmp.path().join("repo");
+        std::fs::create_dir(&git_dir).unwrap();
         std::process::Command::new("git")
             .args(["init"])
-            .current_dir(tmp.path())
+            .current_dir(&git_dir)
             .output()
             .unwrap();
 
         let tool = test_tool(tmp.path());
 
         let result = tool
-            .execute(json!({"operation": "push", "branch": "+main"}))
+            .execute(json!({"operation": "push", "path": "repo", "branch": "+main"}))
             .await;
         // Should be rejected — either as Err (branch validation) or Ok with success=false
         match result {
@@ -1367,45 +1422,55 @@ mod tests {
             .output()
             .unwrap();
 
-        // Clone it into a working repo
-        let work = TempDir::new().unwrap();
+        // Set up workspace with a subdirectory containing the cloned repo
+        let workspace = TempDir::new().unwrap();
+        let git_dir = workspace.path().join("repo");
+        std::fs::create_dir(&git_dir).unwrap();
+
+        // Clone the bare repo into the subdirectory
         std::process::Command::new("git")
             .args(["clone", bare.path().to_str().unwrap(), "."])
-            .current_dir(work.path())
+            .current_dir(&git_dir)
             .output()
             .unwrap();
         std::process::Command::new("git")
             .args(["config", "user.email", "test@test.com"])
-            .current_dir(work.path())
+            .current_dir(&git_dir)
             .output()
             .unwrap();
         std::process::Command::new("git")
             .args(["config", "user.name", "Test"])
-            .current_dir(work.path())
+            .current_dir(&git_dir)
             .output()
             .unwrap();
 
         // Create a commit to push
-        std::fs::write(work.path().join("file.txt"), "hello").unwrap();
+        std::fs::write(git_dir.join("file.txt"), "hello").unwrap();
         std::process::Command::new("git")
             .args(["add", "file.txt"])
-            .current_dir(work.path())
+            .current_dir(&git_dir)
             .output()
             .unwrap();
         std::process::Command::new("git")
             .args(["commit", "-m", "initial"])
-            .current_dir(work.path())
+            .current_dir(&git_dir)
             .output()
             .unwrap();
 
-        let tool = test_tool(work.path());
+        let tool = test_tool(workspace.path());
 
         // Push should succeed
-        let result = tool.execute(json!({"operation": "push"})).await.unwrap();
+        let result = tool
+            .execute(json!({"operation": "push", "path": "repo"}))
+            .await
+            .unwrap();
         assert!(result.success, "Push failed: {:?}", result.error);
 
         // Pull should succeed (nothing new, but no error)
-        let result = tool.execute(json!({"operation": "pull"})).await.unwrap();
+        let result = tool
+            .execute(json!({"operation": "pull", "path": "repo"}))
+            .await
+            .unwrap();
         assert!(result.success, "Pull failed: {:?}", result.error);
     }
 }

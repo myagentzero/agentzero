@@ -22,7 +22,7 @@ use crate::runtime;
 use crate::security::SecurityPolicy;
 use crate::security::pairing::{PairingGuard, constant_time_eq, is_public_bind};
 use crate::tools::traits::ToolSpec;
-use crate::tools::{self, Tool};
+use crate::tools::Tool;
 use anyhow::{Context, Result};
 use axum::{
     Router,
@@ -413,30 +413,16 @@ pub async fn run_gateway(
         &config.workspace_dir,
     ));
 
-    let (composio_key, composio_entity_id) = if config.composio.enabled {
-        (
-            config.composio.api_key.as_deref(),
-            Some(config.composio.entity_id.as_str()),
+    let tools_registry_exec: Arc<Vec<Box<dyn Tool>>> = Arc::new(
+        crate::agent::tools_registry::build_tools_registry(
+            &config,
+            &security,
+            runtime,
+            Arc::clone(&mem),
+            crate::agent::tools_registry::ToolsRegistryOptions::MINIMAL,
         )
-    } else {
-        (None, None)
-    };
-
-    let tools_registry_exec: Arc<Vec<Box<dyn Tool>>> = Arc::new(tools::all_tools_with_runtime(
-        Arc::new(config.clone()),
-        &security,
-        runtime,
-        Arc::clone(&mem),
-        composio_key,
-        composio_entity_id,
-        &config.browser,
-        &config.http_request,
-        &config.web_fetch,
-        &config.workspace_dir,
-        &config.agents,
-        config.api_key.as_deref(),
-        &config,
-    ));
+        .await?,
+    );
     let tools_registry: Arc<Vec<ToolSpec>> =
         Arc::new(tools_registry_exec.iter().map(|t| t.spec()).collect());
     let max_tool_iterations = config.agent.max_tool_iterations;
@@ -724,9 +710,7 @@ fn find_prometheus_observer(
 
     // Peel SharedPrometheusObserver (factory hands these out so every component
     // shares the singleton registry).
-    if let Some(shared) =
-        any.downcast_ref::<crate::observability::SharedPrometheusObserver>()
-    {
+    if let Some(shared) = any.downcast_ref::<crate::observability::SharedPrometheusObserver>() {
         return Some(shared.inner());
     }
 
@@ -916,18 +900,11 @@ async fn prepare_gateway_messages_for_provider(
     // workspace-aware system context before model invocation.
     let system_prompt = {
         let config_guard = state.config.lock();
-        crate::channels::build_system_prompt_with_mode(
-            &config_guard.workspace_dir,
+        crate::agent::prompt::build_system_prompt_with_mode(
+            &config_guard,
             &[], // tools - empty for simple chat
-            &[], // skills
-            Some(&config_guard.identity),
-            None, // bootstrap_max_chars - use default
             false,
-            config_guard.skills.prompt_injection_mode,
-            false,
-            None,
-            None,
-            Some(&config_guard.hardware),
+            "gateway",
         )
     };
 
@@ -1916,8 +1893,7 @@ mod tests {
             Box::new(prom),
             Box::new(crate::observability::NoopObserver),
         ]);
-        let bridged =
-            crate::plugins::bridge::observer::ObserverBridge::new_box(Box::new(multi));
+        let bridged = crate::plugins::bridge::observer::ObserverBridge::new_box(Box::new(multi));
         let (event_tx, _event_rx) = tokio::sync::broadcast::channel(16);
         let observer: Arc<dyn crate::observability::Observer> = Arc::new(
             sse::BroadcastObserver::new(Box::new(bridged), event_tx.clone()),
@@ -1978,13 +1954,12 @@ mod tests {
         let cost_config = crate::config::schema::CostConfig::default();
 
         // ── Heartbeat-worker style chain (no SSE wrapper). Mirrors `daemon::run_heartbeat_worker`.
-        let heartbeat_observer: Arc<dyn crate::observability::Observer> = Arc::from(
-            crate::observability::create_observer_with_cost_tracking(
+        let heartbeat_observer: Arc<dyn crate::observability::Observer> =
+            Arc::from(crate::observability::create_observer_with_cost_tracking(
                 &observability,
                 None,
                 &cost_config,
-            ),
-        );
+            ));
 
         // ── Gateway-style chain (Broadcast + Bridge wrappers). Mirrors `gateway::run_gateway`.
         let gateway_base = crate::observability::create_observer_with_cost_tracking(
@@ -2000,8 +1975,7 @@ mod tests {
 
         // Record on the heartbeat chain only.
         for _ in 0..3 {
-            heartbeat_observer
-                .record_event(&crate::observability::ObserverEvent::HeartbeatTick);
+            heartbeat_observer.record_event(&crate::observability::ObserverEvent::HeartbeatTick);
         }
 
         // Read /metrics through the gateway chain — must see the heartbeat events.

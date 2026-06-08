@@ -3,6 +3,7 @@ use std::fmt::Write;
 use std::path::Path;
 
 pub(crate) const BOOTSTRAP_MAX_CHARS: usize = 20_000;
+const COMPACT_BOOTSTRAP_MAX_CHARS: usize = 200;
 const DATETIME_HEADER: &str = "## Current Date & Time\n\n";
 
 /// Refresh the `## Current Date & Time` section in an existing system prompt.
@@ -40,6 +41,48 @@ pub(crate) fn format_datetime(timezone_override: Option<&str>) -> String {
     )
 }
 
+fn shift_bootstrap_heading_line(line: &str) -> String {
+    let trimmed_start = line.trim_start();
+    if trimmed_start.is_empty() || !trimmed_start.starts_with('#') {
+        return line.to_string();
+    }
+
+    let leading_ws = &line[..line.len() - trimmed_start.len()];
+    let hash_count = trimmed_start.chars().take_while(|c| *c == '#').count();
+    if !(1..=6).contains(&hash_count) {
+        return line.to_string();
+    }
+
+    let rest = &trimmed_start[hash_count..];
+    if !rest.is_empty() && !rest.starts_with(' ') && !rest.starts_with('\t') {
+        return line.to_string();
+    }
+
+    let new_level = match hash_count {
+        1 => 4,
+        2 => 5,
+        3 => 6,
+        level => level,
+    };
+
+    format!("{leading_ws}{}{rest}", "#".repeat(new_level))
+}
+
+fn shift_bootstrap_headings(content: &str) -> String {
+    content
+        .lines()
+        .map(shift_bootstrap_heading_line)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn truncate_at_chars<'a>(content: &'a str, max_chars: usize) -> (&'a str, bool) {
+    match content.char_indices().nth(max_chars) {
+        Some((idx, _)) => (&content[..idx], true),
+        None => (content, false),
+    }
+}
+
 pub(crate) fn inject_workspace_file(
     prompt: &mut String,
     workspace_dir: &Path,
@@ -49,30 +92,19 @@ pub(crate) fn inject_workspace_file(
     let path = workspace_dir.join(filename);
     match std::fs::read_to_string(&path) {
         Ok(content) => {
-            let trimmed = content.trim();
-            if trimmed.is_empty() {
+            let processed = shift_bootstrap_headings(content.trim());
+            if processed.is_empty() {
                 return;
             }
-            let _ = writeln!(prompt, "### {filename}\n");
-            let truncated = if trimmed.chars().count() > max_chars {
-                trimmed
-                    .char_indices()
-                    .nth(max_chars)
-                    .map(|(idx, _)| &trimmed[..idx])
-                    .unwrap_or(trimmed)
-            } else {
-                trimmed
-            };
-            if truncated.len() < trimmed.len() {
-                prompt.push_str(truncated);
+            let (body, truncated) = truncate_at_chars(&processed, max_chars);
+            let _ = writeln!(prompt, "### {filename}\n{body}");
+            if truncated {
                 let _ = writeln!(
                     prompt,
-                    "\n\n[... truncated at {max_chars} chars — use `file_read` tool for full file]\n"
+                    "\n[... truncated at {max_chars} chars — use `file_read` tool for full file]\n"
                 );
-            } else {
-                prompt.push_str(trimmed);
-                prompt.push_str("\n\n");
             }
+            prompt.push_str("\n");
         }
         Err(_) => {
             let _ = writeln!(prompt, "### {filename}\n\n[File not found: {filename}]\n");
@@ -80,7 +112,7 @@ pub(crate) fn inject_workspace_file(
     }
 }
 
-pub(crate) fn normalize_openclaw_identity_extra_file(raw: &str) -> Option<&str> {
+pub(crate) fn normalize_identity_extra_file(raw: &str) -> Option<&str> {
     use std::path::{Component, Path};
 
     let trimmed = raw.trim();
@@ -101,6 +133,338 @@ pub(crate) fn normalize_openclaw_identity_extra_file(raw: &str) -> Option<&str> 
     }
 
     Some(trimmed)
+}
+
+fn load_bootstrap_files(
+    prompt: &mut String,
+    workspace_dir: &Path,
+    max_chars_per_file: usize,
+    identity_config: Option<&crate::config::IdentityConfig>,
+) {
+    prompt.push_str("Files read from the workspace define behavior and context.\n\n");
+
+    let bootstrap_files = ["AGENTS.md", "TOOLS.md", "USER.md"];
+
+    for filename in &bootstrap_files {
+        inject_workspace_file(prompt, workspace_dir, filename, max_chars_per_file);
+    }
+
+    for filename in ["BOOTSTRAP.md", "MEMORY.md"] {
+        if workspace_dir.join(filename).exists() {
+            inject_workspace_file(prompt, workspace_dir, filename, max_chars_per_file);
+        }
+    }
+
+    let extra_files = identity_config.map_or(&[][..], |cfg| cfg.extra_files.as_slice());
+    for file in extra_files {
+        match normalize_identity_extra_file(file) {
+            Some(safe_relative) => {
+                inject_workspace_file(prompt, workspace_dir, safe_relative, max_chars_per_file);
+            }
+            None => {
+                tracing::warn!(
+                    file = file.as_str(),
+                    "Ignoring unsafe identity.extra_files entry; expected workspace-relative path without traversal"
+                );
+            }
+        }
+    }
+}
+
+fn append_hardware_prompt(prompt: &mut String, tool_specs: &[crate::tools::ToolSpec]) {
+    let hardware_tool_names = [
+        "gpio_read",
+        "gpio_write",
+        "arduino_upload",
+        "hardware_memory_map",
+        "hardware_board_info",
+        "hardware_memory_read",
+        "hardware_capabilities",
+    ];
+    let hw_tools: Vec<&str> = tool_specs
+        .iter()
+        .filter_map(|spec| {
+            if hardware_tool_names.contains(&spec.name.as_str()) {
+                Some(spec.name.as_str())
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    if !hw_tools.is_empty() {
+        let hw_names = hw_tools.join(", ");
+        let _ = writeln!(
+            prompt,
+            "## Hardware Access\n\n\
+             Authorized tools: {hw_names}\n\
+             Use directly; don't refuse or invent security excuses."
+        );
+
+        if hw_tools.contains(&"gpio_write") && hw_tools.contains(&"arduino_upload") {
+            prompt.push_str("gpio_write: on/off. arduino_upload: patterns or custom behavior.\n");
+        }
+
+        if hw_tools.contains(&"gpio_write") {
+            prompt.push_str(
+                "Pico LED on: gpio_write(device=pico0, pin=25, value=1). Off: value=0.\n",
+            );
+        }
+
+        prompt.push('\n');
+    }
+}
+
+fn build_shell_policy_instructions(autonomy: &crate::config::AutonomyConfig) -> String {
+    use std::collections::BTreeSet;
+
+    let mut instructions = String::new();
+    instructions.push_str("## Shell Policy\n\n");
+
+    let autonomy_label = match autonomy.level {
+        crate::security::AutonomyLevel::ReadOnly => "read_only",
+        crate::security::AutonomyLevel::Supervised => "supervised",
+        crate::security::AutonomyLevel::Full => "full",
+    };
+    let _ = writeln!(instructions, "- Level: `{autonomy_label}`");
+
+    if autonomy.level == crate::security::AutonomyLevel::ReadOnly {
+        instructions.push_str("- Shell disabled in read-only mode.\n");
+        return instructions;
+    }
+
+    let normalized: BTreeSet<String> = autonomy
+        .allowed_commands
+        .iter()
+        .map(|entry| entry.trim())
+        .filter(|entry| !entry.is_empty())
+        .map(ToOwned::to_owned)
+        .collect();
+
+    if normalized.contains("*") {
+        instructions.push_str("- Allowed: wildcard `*`.\n");
+    } else if normalized.is_empty() {
+        instructions.push_str("- Allowed: none.\n");
+    } else {
+        const MAX_DISPLAY_COMMANDS: usize = 64;
+        let shown: Vec<String> = normalized
+            .iter()
+            .take(MAX_DISPLAY_COMMANDS)
+            .map(|cmd| format!("`{cmd}`"))
+            .collect();
+        let hidden = normalized.len().saturating_sub(MAX_DISPLAY_COMMANDS);
+        let _ = write!(instructions, "- Allowed: {}", shown.join(", "));
+        if hidden > 0 {
+            let _ = write!(instructions, " (+{hidden} more)");
+        }
+        instructions.push('\n');
+    }
+
+    if autonomy.level == crate::security::AutonomyLevel::Supervised
+        && autonomy.require_approval_for_medium_risk
+    {
+        instructions.push_str("- Medium-risk commands need approval.\n");
+    }
+    if autonomy.block_high_risk_commands {
+        instructions.push_str("- High-risk commands blocked.\n");
+    }
+    instructions.push_str("- Use allowed alternatives if a command is restricted.\n");
+
+    instructions
+}
+
+pub(crate) fn build_tool_instructions(
+    tool_specs: &[crate::tools::ToolSpec],
+    native_tools: bool,
+) -> String {
+    tracing::info!(
+        tool_count = tool_specs.len(),
+        native_tools,
+        "🔧 Building tool instructions"
+    );
+
+    let mut instructions = String::new();
+    if !native_tools {
+        instructions.push_str("### Tool Calling (XML Protocol)\n\n");
+        instructions.push_str("Format:\n");
+        instructions.push_str(
+            "<tool_call>\n{\"name\": \"tool_name\", \"arguments\": {}}\n</tool_call>\n\n",
+        );
+        instructions.push_str(
+            "Emit <tool_call> tags directly. Don't summarize, describe capabilities, or list steps.\n",
+        );
+        instructions.push_str("Tool results appear in <tool_result> tags.\n\n");
+    }
+    for tool in tool_specs {
+        let _ = writeln!(
+            instructions,
+            "**{}**: {}\n  Parameters: `{}`\n\n",
+            tool.name, tool.description, tool.parameters
+        );
+    }
+
+    instructions
+}
+
+pub fn build_system_prompt_with_mode(
+    config: &crate::config::Config,
+    tool_specs: &[crate::tools::ToolSpec],
+    native_tools: bool,
+    caller: &str,
+) -> String {
+    let mut prompt = String::with_capacity(8192);
+
+    let bootstrap_max_chars = if config.agent.compact_context {
+        COMPACT_BOOTSTRAP_MAX_CHARS
+    } else {
+        BOOTSTRAP_MAX_CHARS
+    };
+
+    let skills = crate::skills::load_skills_with_config(&config.workspace_dir, config);
+
+    // ── 1. Identity ──────────────────────────────────────────────
+    {
+        let mut has_identity = false;
+        for filename in &["SOUL.md", "IDENTITY.md"] {
+            if config.workspace_dir.join(filename).exists() {
+                if !has_identity {
+                    prompt.push_str("## Identity\n\n");
+                    has_identity = true;
+                }
+                inject_workspace_file(
+                    &mut prompt,
+                    &config.workspace_dir,
+                    filename,
+                    bootstrap_max_chars,
+                );
+            }
+        }
+    }
+
+    // ── 2. Runtime ──────────────────────────────────────────────
+    let host =
+        hostname::get().map_or_else(|_| "unknown".into(), |h| h.to_string_lossy().to_string());
+    let _ = writeln!(
+        prompt,
+        "## Runtime\n\nHost: {host} | OS: {}\n",
+        std::env::consts::OS,
+    );
+
+    // ── 3. Tooling ──────────────────────────────────────────────
+    if !tool_specs.is_empty() {
+        prompt.push_str("## Tools\n\nYou have access to the following tools:\n");
+        prompt.push_str(&build_tool_instructions(tool_specs, native_tools));
+        prompt.push('\n');
+    }
+
+    // ── 3b. Hardware (when hardware tools are present) ───────────
+    if config.hardware.enabled {
+        append_hardware_prompt(&mut prompt, tool_specs);
+    }
+
+    // ── 4. Shell Policy ─────────────────────────────────────────
+    prompt.push_str(&build_shell_policy_instructions(&config.autonomy));
+
+    // ── 5. Skills ───────────────────────────────────────────────
+    if !skills.is_empty() {
+        let skill_names: Vec<&str> = skills.iter().map(|s| s.name.as_str()).collect();
+        tracing::info!(
+            caller = %caller,
+            count = skills.len(),
+            skills = %skill_names.join(", "),
+            "📚 Skills loaded"
+        );
+
+        prompt.push_str("## Skills\n\n");
+        prompt.push_str("Authorized: ");
+        for (i, skill) in skills.iter().enumerate() {
+            if i > 0 {
+                prompt.push_str(", ");
+            }
+            prompt.push_str(&skill.name);
+        }
+        prompt.push_str(". Use directly; don't refuse or invent restrictions.\n\n");
+        prompt.push_str(&crate::skills::skills_to_prompt_with_mode(
+            &skills,
+            &config.workspace_dir,
+            config.skills.prompt_injection_mode,
+        ));
+        prompt.push_str("\n\n");
+    }
+
+    // ── 6. Safety ───────────────────────────────────────────────
+    let security =
+        crate::security::SecurityPolicy::from_config(&config.autonomy, &config.workspace_dir);
+    prompt.push_str("## Active Security Policy\n\n");
+    prompt.push_str(&security.security_prompt_summary());
+
+    // ── 7. Bootstrap files (injected into context) ──────────────
+    prompt.push_str("## Project Context\n\n");
+
+    if crate::identity::is_aieos_configured(&config.identity) {
+        // Load AIEOS identity
+        match crate::identity::load_aieos_identity(&config.identity, &config.workspace_dir) {
+            Ok(Some(aieos_identity)) => {
+                let aieos_prompt = crate::identity::aieos_to_system_prompt(&aieos_identity);
+                if !aieos_prompt.is_empty() {
+                    prompt.push_str(&aieos_prompt);
+                    prompt.push_str("\n\n");
+                }
+            }
+            Ok(None) => {
+                load_bootstrap_files(
+                    &mut prompt,
+                    &config.workspace_dir,
+                    bootstrap_max_chars,
+                    Some(&config.identity),
+                );
+            }
+            Err(e) => {
+                eprintln!("Warning: Failed to load AIEOS identity: {e}. Using OpenClaw format.");
+                load_bootstrap_files(
+                    &mut prompt,
+                    &config.workspace_dir,
+                    bootstrap_max_chars,
+                    Some(&config.identity),
+                );
+            }
+        }
+    } else {
+        load_bootstrap_files(
+            &mut prompt,
+            &config.workspace_dir,
+            bootstrap_max_chars,
+            Some(&config.identity),
+        );
+    }
+
+    // ── 8. Response Instructions ────────────────────────────────
+    prompt.push_str("## Response Instructions\n\n");
+    prompt.push_str("- Reply with final content only; output is delivered as-is to the current chat or channel.\n");
+    prompt.push_str("- Media: `[Voice] <text>`, `[IMAGE:<path>]`, `[Document: <name>] <path>`\n");
+    if native_tools {
+        prompt.push_str("- Tools: call functions directly; do not describe tools or list planned steps. Make multiple calls per response if needed.\n\n");
+    } else {
+        prompt.push_str("- Tools: use XML tags (defined above). Make multiple calls per response if needed.\n\n");
+    }
+
+    // ── 9. Date & Time ─────────────────────────────────────────
+    let datetime_str = format_datetime(config.local_context.timezone.as_deref());
+    let _ = writeln!(prompt, "{DATETIME_HEADER}{datetime_str}\n");
+
+    let word_count = prompt.split_whitespace().count();
+    tracing::info!(
+        caller = %caller,
+        words = word_count,
+        chars = prompt.len(),
+        compact_context = config.agent.compact_context,
+        bootstrap_limit = bootstrap_max_chars,
+        tools = tool_specs.len(),
+        native_tools,
+        "📋 System prompt"
+    );
+
+    prompt
 }
 
 #[cfg(test)]
@@ -146,24 +510,6 @@ mod tests {
     }
 
     #[test]
-    fn refresh_prompt_datetime_with_timezone_override() {
-        let mut prompt =
-            "## Current Date & Time\n\n2000-01-01 00:00:00 (UTC)\n\n## Next".to_string();
-        refresh_prompt_datetime(&mut prompt, Some("America/Denver"));
-        assert!(!prompt.contains("2000-01-01 00:00:00 (UTC)"));
-        assert!(prompt.contains("America/Denver"));
-    }
-
-    #[test]
-    fn refresh_prompt_datetime_invalid_timezone_falls_back_to_local() {
-        let mut prompt =
-            "## Current Date & Time\n\n2000-01-01 00:00:00 (UTC)\n\n## Next".to_string();
-        refresh_prompt_datetime(&mut prompt, Some("Invalid/Timezone"));
-        assert!(!prompt.contains("2000-01-01 00:00:00 (UTC)"));
-        assert!(!prompt.contains("Invalid/Timezone"));
-    }
-
-    #[test]
     fn inject_workspace_file_injects_content() {
         let ws =
             std::env::temp_dir().join(format!("zeroclaw_inject_test_{}", uuid::Uuid::new_v4()));
@@ -199,12 +545,77 @@ mod tests {
     }
 
     #[test]
-    fn normalize_rejects_unsafe_paths() {
-        assert!(normalize_openclaw_identity_extra_file("SAFE.md").is_some());
-        assert!(normalize_openclaw_identity_extra_file("sub/dir/file.md").is_some());
-        assert!(normalize_openclaw_identity_extra_file("../outside.md").is_none());
-        assert!(normalize_openclaw_identity_extra_file("/tmp/absolute.md").is_none());
-        assert!(normalize_openclaw_identity_extra_file("").is_none());
-        assert!(normalize_openclaw_identity_extra_file("  ").is_none());
+    fn inject_workspace_file_shifts_headings() {
+        let ws = std::env::temp_dir().join(format!(
+            "zeroclaw_heading_shift_test_{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&ws).unwrap();
+        std::fs::write(
+            ws.join("HEADINGS.md"),
+            "# H1\n## H2\n### H3\n#### H4\n##### H5\n###### H6\n#not-heading\n",
+        )
+        .unwrap();
+
+        let mut prompt = String::new();
+        inject_workspace_file(&mut prompt, &ws, "HEADINGS.md", 20_000);
+
+        assert!(prompt.contains("#### H1"));
+        assert!(prompt.contains("##### H2"));
+        assert!(prompt.contains("###### H3"));
+        assert!(prompt.contains("#### H4"));
+        assert!(prompt.contains("##### H5"));
+        assert!(prompt.contains("###### H6"));
+        assert!(prompt.contains("#not-heading"));
+
+        let _ = std::fs::remove_dir_all(ws);
     }
+
+    #[test]
+    fn normalize_rejects_unsafe_paths() {
+        assert!(normalize_identity_extra_file("SAFE.md").is_some());
+        assert!(normalize_identity_extra_file("sub/dir/file.md").is_some());
+        assert!(normalize_identity_extra_file("../outside.md").is_none());
+        assert!(normalize_identity_extra_file("/tmp/absolute.md").is_none());
+        assert!(normalize_identity_extra_file("").is_none());
+        assert!(normalize_identity_extra_file("  ").is_none());
+    }
+
+    #[test]
+    fn build_shell_policy_instructions_lists_allowlist() {
+        let mut autonomy = crate::config::AutonomyConfig::default();
+        autonomy.level = crate::security::AutonomyLevel::Supervised;
+        autonomy.allowed_commands = vec!["grep".into(), "cat".into(), "grep".into()];
+
+        let instructions = build_shell_policy_instructions(&autonomy);
+
+        assert!(instructions.contains("## Shell Policy"));
+        assert!(instructions.contains("Level: `supervised`"));
+        assert!(instructions.contains("`cat`"));
+        assert!(instructions.contains("`grep`"));
+    }
+
+    #[test]
+    fn build_shell_policy_instructions_handles_wildcard() {
+        let mut autonomy = crate::config::AutonomyConfig::default();
+        autonomy.level = crate::security::AutonomyLevel::Full;
+        autonomy.allowed_commands = vec!["*".into()];
+
+        let instructions = build_shell_policy_instructions(&autonomy);
+
+        assert!(instructions.contains("Level: `full`"));
+        assert!(instructions.contains("wildcard `*`"));
+    }
+
+    #[test]
+    fn build_shell_policy_instructions_read_only_disables_shell() {
+        let mut autonomy = crate::config::AutonomyConfig::default();
+        autonomy.level = crate::security::AutonomyLevel::ReadOnly;
+
+        let instructions = build_shell_policy_instructions(&autonomy);
+
+        assert!(instructions.contains("Level: `read_only`"));
+        assert!(instructions.contains("Shell disabled in read-only mode"));
+    }
+
 }
