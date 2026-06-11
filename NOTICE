@@ -1,17 +1,3 @@
-ZeroClaw
-Copyright 2025 ZeroClaw Labs
-
-This product includes software developed at ZeroClaw Labs (https://github.com/myagentzero).
-
-Official Repository
-===================
-
-The only official ZeroClaw repository is:
-https://github.com/myagentzero/zeroclaw
-
-Any other repository claiming to be ZeroClaw is unauthorized.
-See TRADEMARK.md for the full trademark policy.
-
 License
 =======
 
@@ -25,10 +11,6 @@ See CLA.md for the contributor license agreement.
 
 Contributors
 ============
-
-This NOTICE file is maintained by repository automation.
-For the latest contributor list, see the repository contributors page:
-https://github.com/myagentzero/zeroclaw/graphs/contributors
 
 All contributors retain copyright ownership of their contributions.
 Contributions are permanently attributed in the repository commit history.

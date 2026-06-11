@@ -871,7 +871,7 @@ export const CONFIG_SECTIONS: SectionDef[] = [
   // ── ServiceNow ─────────────────────────────────────────────────────
   {
     path: 'servicenow',
-    category: 'tools',
+    category: 'productivity',
     title: 'ServiceNow',
     description: 'Read/write ServiceNow records via the Table API (OAuth2 client credentials)',
     icon: Ticket,

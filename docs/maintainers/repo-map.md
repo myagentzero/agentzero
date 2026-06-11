@@ -89,25 +89,28 @@ Providers: `anthropic`, `openai`, `openai_codex`, `openrouter`, `gemini`, `ollam
 
 | Module | Key Files | Role |
 |---|---|---|
-| `channels/` | `traits.rs`, `mod.rs` (6.6k), + 10 channel files | **Input/output transports.** `Channel` trait: `send()`, `listen()`, `health_check()`, `start_typing()`, draft updates. Factory in `mod.rs` wires config to channel instances, manages per-sender conversation history (max 50 messages). |
+| `channels/` | `traits.rs`, `mod.rs`, + 9 channel files | **Input/output transports.** `Channel` trait: `send()`, `listen()`, `health_check()`, `start_typing()`, draft updates. Factory in `mod.rs` wires config to channel instances, manages per-sender conversation history (max 50 messages). |
 
-Channels: `telegram` (4.6k), `discord`, `slack`, `whatsapp`, `whatsapp_web`, `matrix`, `signal`, `email_channel`, `qq`, `dingtalk`, `lark`, `imessage`, `irc`, `nostr`, `mattermost`, `nextcloud_talk`, `wati`, `linq`, `clawdtalk`, `cli`
+Channels: `discord`, `slack`, `email_channel`, `irc`, `cli`, `notion` (webhook), `transcription`, `ack_reaction` (helpers), `acp_server`
 
 ### Tools (Agent Capabilities)
 
 | Module | Key Files | Role |
 |---|---|---|
-| `tools/` | `traits.rs`, `mod.rs` (635), + 34 tool files | **What the agent can do.** `Tool` trait: `name()`, `description()`, `parameters_schema()`, `execute()`. Two registries: `default_tools()` (6 essentials) and `all_tools_with_runtime()` (full set, config-gated). |
+| `tools/` | `traits.rs`, `mod.rs`, + 51 tool files | **What the agent can do.** `Tool` trait: `name()`, `description()`, `parameters_schema()`, `execute()`. Factory registers tools by name and conditionally gates them (config/availability). |
 
 Tool categories:
-- **File/Shell**: `shell`, `file_read`, `file_write`, `file_edit`, `glob_search`, `content_search`
-- **Memory**: `memory_store`, `memory_recall`, `memory_forget`
-- **Web**: `browser`, `web_fetch`, `web_search_tool`, `http_request`
-- **Scheduling**: `cron_add`, `cron_list`, `cron_remove`, `schedule`
-- **Delegation**: `delegate` (sub-agent spawning), `composio` (OAuth integrations)
+- **File/Shell**: `shell`, `file_read`, `file_write`, `file_edit`, `file_remove`, `glob_search`, `content_search`
+- **Memory**: `memory_store`, `memory_recall`, `memory_forget`, `local_context`
+- **Web**: `browser`, `web_fetch`, `web_search_tool`, `http_request`, `url_validation`
+- **Scheduling**: `cron_add`, `cron_list`, `cron_remove`
+- **Delegation**: `delegate` (sub-agent spawning), `delegate_coordination_status`, `subagent_spawn`, `subagent_manage`, `subagent_registry`, `subagent_list`
 - **Hardware**: `hardware_board_info`, `hardware_memory_map`, `hardware_memory_read`
-- **SOP**: `sop_execute`, `sop_advance`, `sop_approve`, `sop_list`, `sop_status`
-- **Utility**: `git_operations`, `pushover`, `cli_discovery`, `schema`
+- **Integrations**: `github_tool`, `jira_tool`, `confluence_tool`, `notion_tool`, `servicenow_tool`
+- **Utilities**: `git_operations`, `schema`, `calculator`, `weather_tool`, `ess_query`, `provider_status`, `read_skill`
+- **System**: `bg_run`, `agent_selection`, `agent_load_tracker`, `orchestration_settings`
+- **MCP**: `mcp_tool`, `mcp_client`, `mcp_protocol`, `mcp_transport`
+- **Other**: `composio` (OAuth), `pipeline`, `reaction`
 
 ### Memory
 
@@ -131,7 +134,7 @@ Sandboxing: `bubblewrap.rs`, `firejail.rs`, `landlock.rs`, `docker.rs`, `detect.
 
 | Module | Key Files | Role |
 |---|---|---|
-| `gateway/` | `mod.rs` (2.8k), `api.rs` (1.4k), `sse.rs`, `ws.rs`, `static_files.rs` | **Axum HTTP server.** Webhook receivers (WhatsApp, WATI, Linq, Nextcloud Talk), REST API, SSE streaming, WebSocket support. Rate limiting, idempotency keys, 64KB body limit, 30s timeout. |
+| `gateway/` | `mod.rs`, `api.rs`, `sse.rs`, `ws.rs`, `openai_compat.rs`, `openclaw_compat.rs`, `static_files.rs` | **Axum HTTP server.** REST API, SSE streaming, WebSocket support, OpenAI-compatible endpoint, webhook receiver. Rate limiting, idempotency keys, 64KB body limit, 30s timeout. Bearer token & pairing auth. |
 
 ### Hardware & Peripherals
 

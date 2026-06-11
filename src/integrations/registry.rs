@@ -53,6 +53,18 @@ pub fn all_integrations() -> Vec<IntegrationEntry> {
                 }
             },
         },
+        IntegrationEntry {
+            name: "IRC",
+            description: "Internet Relay Chat over TLS",
+            category: IntegrationCategory::Chat,
+            status_fn: |c| {
+                if c.channels_config.irc.is_some() {
+                    IntegrationStatus::Active
+                } else {
+                    IntegrationStatus::Available
+                }
+            },
+        },
         // ── AI Models ───────────────────────────────────────────
         IntegrationEntry {
             name: "Custom",
@@ -237,6 +249,18 @@ pub fn all_integrations() -> Vec<IntegrationEntry> {
             category: IntegrationCategory::ToolsAutomation,
             status_fn: |_| IntegrationStatus::Active,
         },
+        IntegrationEntry {
+            name: "ServiceNow",
+            description: "Table API for incidents, changes & requests",
+            category: IntegrationCategory::ToolsAutomation,
+            status_fn: |c| {
+                if c.servicenow.enabled && !c.servicenow.base_url.is_empty() {
+                    IntegrationStatus::Active
+                } else {
+                    IntegrationStatus::Available
+                }
+            },
+        },
         // ── Platforms ───────────────────────────────────────────
         IntegrationEntry {
             name: "macOS",
@@ -291,8 +315,8 @@ mod tests {
     fn registry_has_entries() {
         let entries = all_integrations();
         assert!(
-            entries.len() >= 20,
-            "Expected 20+ integrations, got {}",
+            entries.len() >= 22,
+            "Expected 22+ integrations, got {}",
             entries.len()
         );
     }

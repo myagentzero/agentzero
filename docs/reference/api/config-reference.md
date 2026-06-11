@@ -2,7 +2,7 @@
 
 This is a high-signal reference for common config sections and defaults.
 
-Last verified: **February 21, 2026**.
+Last verified: **June 11, 2026**.
 
 Config path resolution at startup:
 
@@ -445,6 +445,36 @@ Notes:
 - Validation rejects duplicate `(service, resource)` pairs and duplicate methods within a single entry.
 - See `docs/superpowers/specs/2026-03-19-google-workspace-operation-allowlist.md` for the full policy model and verified workflow examples.
 
+## `[servicenow]`
+
+ServiceNow Table API integration for reading and writing incidents, changes, and other service records.
+
+| Key | Default | Purpose |
+|---|---|---|
+| `base_url` | _required_ | ServiceNow instance base URL (e.g. `https://dev12345.service-now.com`) |
+| `client_id` | _required_ | OAuth2 client ID |
+| `client_secret` | _required_ | OAuth2 client secret (stored encrypted; also checks `SERVICENOW_CLIENT_SECRET` env var) |
+| `allowed_actions` | `["list_records", "get_record"]` | Allowed actions: `list_records`, `get_record`, `create_record`, `update_record` |
+| `timeout_secs` | `30` | Per-request timeout in seconds |
+
+Notes:
+
+- `base_url` must not have a trailing slash.
+- OAuth2 credentials use `client_credentials` grant type.
+- `allowed_actions` gates which operations the agent may perform. Default allows read-only access.
+- `client_secret` is encrypted at rest when `secrets.encrypt = true` (the default). If blank in config, reads from `SERVICENOW_CLIENT_SECRET` environment variable.
+
+Example:
+
+```toml
+[servicenow]
+base_url = "https://dev12345.service-now.com"
+client_id = "your-oauth-client-id"
+client_secret = "your-oauth-client-secret"  # or set SERVICENOW_CLIENT_SECRET env var
+allowed_actions = ["list_records", "get_record", "create_record"]
+timeout_secs = 30
+```
+
 ## `[gateway]`
 
 | Key | Default | Purpose |
@@ -610,13 +640,11 @@ Top-level channel options are configured under `channels_config`.
 
 Examples:
 
-- `[channels_config.telegram]`
 - `[channels_config.discord]`
-- `[channels_config.whatsapp]`
-- `[channels_config.linq]`
-- `[channels_config.nextcloud_talk]`
+- `[channels_config.slack]`
+- `[channels_config.webhook]`
 - `[channels_config.email]`
-- `[channels_config.nostr]`
+- `[channels_config.irc]`
 
 Notes:
 
@@ -626,88 +654,67 @@ Notes:
 - If using cloud APIs (OpenAI, Anthropic, etc.), you can reduce this to `60` or lower.
 - Values below `30` are clamped to `30` to avoid immediate timeout churn.
 - When a timeout occurs, users receive: `⚠️ Request timed out while waiting for the model. Please try again.`
-- Telegram-only interruption behavior is controlled with `channels_config.telegram.interrupt_on_new_message` (default `false`).
-  When enabled, a newer message from the same sender in the same chat cancels the in-flight request and preserves interrupted user context.
 - While `zeroclaw channel start` is running, updates to `default_provider`, `default_model`, `default_temperature`, `api_key`, `api_url`, and `reliability.*` are hot-applied from `config.toml` on the next inbound message.
 
-### `[channels_config.nostr]`
+### `[channels_config.webhook]`
+
+HTTP endpoint for webhook triggers (`POST /webhook`).
 
 | Key | Default | Purpose |
 |---|---|---|
-| `private_key` | _required_ | Nostr private key (hex or `nsec1…` bech32); encrypted at rest when `secrets.encrypt = true` |
-| `relays` | see note | List of relay WebSocket URLs; defaults to `relay.damus.io`, `nos.lol`, `relay.primal.net`, `relay.snort.social` |
-| `allowed_pubkeys` | `[]` (deny all) | Sender allowlist (hex or `npub1…`); use `"*"` to allow all senders |
+| `port` | _required_ | Port to listen on for incoming webhooks |
+| `secret` | optional | Shared secret for webhook signature verification (`X-Webhook-Secret` header) |
 
 Notes:
 
-- Supports both NIP-04 (legacy encrypted DMs) and NIP-17 (gift-wrapped private messages). Replies mirror the sender's protocol automatically.
-- The `private_key` is a high-value secret; keep `secrets.encrypt = true` (the default) in production.
+- Webhooks support bearer token authentication (from pairing) and optional `X-Webhook-Secret` header verification.
+- Rate limiting: `[gateway].webhook_rate_limit_per_minute` (default `60`)
+- Idempotency: use `X-Idempotency-Key` header to deduplicate requests
+- See [channels-reference.md](channels-reference.md) for full webhook integration examples
 
-See detailed channel matrix and allowlist behavior in [channels-reference.md](channels-reference.md).
+Example:
 
-### `[channels_config.whatsapp]`
+```toml
+[channels_config.webhook]
+port = 8080
+secret = "your-shared-secret"
+```
 
-WhatsApp supports two backends under one config table.
+### `[channels_config.irc]`
 
-Cloud API mode (Meta webhook):
+Internet Relay Chat over TLS.
 
-| Key | Required | Purpose |
+| Key | Default | Purpose |
 |---|---|---|
-| `access_token` | Yes | Meta Cloud API bearer token |
-| `phone_number_id` | Yes | Meta phone number ID |
-| `verify_token` | Yes | Webhook verification token |
-| `app_secret` | Optional | Enables webhook signature verification (`X-Hub-Signature-256`) |
-| `allowed_numbers` | Recommended | Allowed inbound numbers (`[]` = deny all, `"*"` = allow all) |
-
-WhatsApp Web mode (native client):
-
-| Key | Required | Purpose |
-|---|---|---|
-| `session_path` | Yes | Persistent SQLite session path |
-| `pair_phone` | Optional | Pair-code flow phone number (digits only) |
-| `pair_code` | Optional | Custom pair code (otherwise auto-generated) |
-| `allowed_numbers` | Recommended | Allowed inbound numbers (`[]` = deny all, `"*"` = allow all) |
+| `server` | _required_ | IRC server hostname |
+| `port` | `6697` | IRC server port (typically 6697 for TLS) |
+| `nickname` | _required_ | Bot nickname on the IRC server |
+| `username` | nickname | Username (defaults to nickname if not set) |
+| `channels` | `[]` | List of channels to join (e.g. `["#support", "#general"]`) |
+| `allowed_users` | `[]` | Allowed nicknames (case-insensitive) or `["*"]` to allow all |
+| `server_password` | optional | Server password (for bouncers like ZNC) |
+| `nickserv_password` | optional | NickServ IDENTIFY password |
+| `sasl_password` | optional | SASL PLAIN password (IRCv3) |
+| `verify_tls` | `true` | Verify TLS certificate |
 
 Notes:
 
-- WhatsApp Web requires build flag `whatsapp-web`.
-- If both Cloud and Web fields are present, Cloud mode wins for backward compatibility.
+- IRC responses are formatted as plain text only (no markdown, no code fences) to accommodate IRC clients.
+- Supports SASL authentication (recommended for public networks).
+- DMs and channel messages are both supported.
 
-### `[channels_config.linq]`
+Example:
 
-Linq Partner V3 API integration for iMessage, RCS, and SMS.
-
-| Key | Required | Purpose |
-|---|---|---|
-| `api_token` | Yes | Linq Partner API bearer token |
-| `from_phone` | Yes | Phone number to send from (E.164 format) |
-| `signing_secret` | Optional | Webhook signing secret for HMAC-SHA256 signature verification |
-| `allowed_senders` | Recommended | Allowed inbound phone numbers (`[]` = deny all, `"*"` = allow all) |
-
-Notes:
-
-- Webhook endpoint is `POST /linq`.
-- `ZEROCLAW_LINQ_SIGNING_SECRET` overrides `signing_secret` when set.
-- Signatures use `X-Webhook-Signature` and `X-Webhook-Timestamp` headers; stale timestamps (>300s) are rejected.
-- See [channels-reference.md](channels-reference.md) for full config examples.
-
-### `[channels_config.nextcloud_talk]`
-
-Native Nextcloud Talk bot integration (webhook receive + OCS send API).
-
-| Key | Required | Purpose |
-|---|---|---|
-| `base_url` | Yes | Nextcloud base URL (e.g. `https://cloud.example.com`) |
-| `app_token` | Yes | Bot app token used for OCS bearer auth |
-| `webhook_secret` | Optional | Enables webhook signature verification |
-| `allowed_users` | Recommended | Allowed Nextcloud actor IDs (`[]` = deny all, `"*"` = allow all) |
-| `bot_name` | Optional | Display name of the bot in Nextcloud Talk (e.g. `"zeroclaw"`). Used to filter out the bot's own messages and prevent feedback loops. |
-
-Notes:
-
-- Webhook endpoint is `POST /nextcloud-talk`.
-- `ZEROCLAW_NEXTCLOUD_TALK_WEBHOOK_SECRET` overrides `webhook_secret` when set.
-- See [nextcloud-talk-setup.md](../../setup-guides/nextcloud-talk-setup.md) for setup and troubleshooting.
+```toml
+[channels_config.irc]
+server = "irc.libera.chat"
+port = 6697
+nickname = "zeroclaw-bot"
+channels = ["#support"]
+allowed_users = ["admin", "moderator"]
+sasl_password = "bot-password"
+verify_tls = true
+```
 
 ## `[hardware]`
 

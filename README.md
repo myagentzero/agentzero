@@ -13,7 +13,7 @@
   <a href="https://www.rust-lang.org"><img src="https://img.shields.io/badge/rust-edition%202024-orange?logo=rust" alt="Rust Edition 2024" /></a>
 </p>
 
-AgentZero is an agent runtime — a single Rust binary you configure and run. It talks to LLM providers (Anthropic, OpenAI, Ollama, and ~20 others). It answers you on the channels you already use ( Slack, Discord, IRC, Email, and more). It has a web dashboard for real-time control and can connect to hardware peripherals (ESP32, STM32, Arduino, Raspberry Pi). The Gateway is the control plane — the product is the assistant.
+AgentZero is an agent runtime — a single Rust binary you configure and run. It talks to LLM providers (Anthropic, OpenAI, Ollama, and ~20 others). It answers you on the channels you already use (Slack, Discord, IRC, Email, Webhooks, and more). It has a web dashboard for real-time control and can connect to hardware peripherals (ESP32, STM32, Arduino, Raspberry Pi). The Gateway is the control plane — the product is the assistant.
 
 If you want a personal, single-user assistant that feels local, fast, and always-on, this is it.
 
@@ -52,7 +52,7 @@ Full walkthrough: [Quick start](#quick-start) — or skip the safety gates with 
 
 ## What AgentZero does
 
-- **Multi-channel** — one agent answering you across [every channel you configure](docs/reference/api/channels-reference.md). Inbound messages from Discord, Telegram, Matrix, email, webhooks, CLI — all delivered to the same agent loop.
+- **Multi-channel** — one agent answering you across [every channel you configure](docs/reference/api/channels-reference.md). Inbound messages from Discord, Telegram, Matrix, email, webhooks, CLI — all delivered to the same agent loop. Gateway supports webhook signature verification and rate limiting.
 - **Provider-agnostic** — [model providers](docs/reference/api/providers-reference.md) are pluggable. Configure Anthropic, OpenAI, local Ollama, or any OpenAI-compatible endpoint. Fallback chains and routing keep the agent running when a provider flakes.
 - **Security-first, with escape hatches** — default autonomy is `supervised`: medium-risk ops require approval, high-risk blocked. Workspace boundaries, command policy, OS-level sandboxes (Landlock / Bubblewrap / Seatbelt / Docker), and cryptographic [tool receipts](docs/security/README.md) on every action. YOLO mode exists for trusted dev environments.
 - **Hardware-capable** — GPIO / I2C / SPI / USB on Raspberry Pi, STM32, Arduino, and ESP32 via the `Peripheral` trait. See [Hardware](docs/hardware/README.md).
