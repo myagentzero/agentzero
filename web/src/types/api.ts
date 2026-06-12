@@ -148,6 +148,11 @@ export interface SkillToolSummary {
   kind: string;
 }
 
+export interface SkillUsage {
+  call_count: number;
+  last_called: string;
+}
+
 export interface SkillSummary {
   name: string;
   description: string;
@@ -156,6 +161,25 @@ export interface SkillSummary {
   tags: string[];
   tools: SkillToolSummary[];
   location: string | null;
+  usage: SkillUsage | null;
+}
+
+export interface WorkspaceFileNode {
+  name: string;
+  path: string;
+  kind: 'file' | 'dir';
+  children?: WorkspaceFileNode[];
+}
+
+export interface WorkspaceTree {
+  workspace: string;
+  tree: WorkspaceFileNode[];
+}
+
+export interface WorkspaceFileContent {
+  path: string;
+  content: string;
+  ext: string;
 }
 
 export interface SSEEvent {

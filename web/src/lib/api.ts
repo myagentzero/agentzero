@@ -11,6 +11,8 @@ import type {
   CliTool,
   HealthSnapshot,
   SkillSummary,
+  WorkspaceTree,
+  WorkspaceFileContent,
 } from '../types/api';
 import { clearToken, getToken, setToken } from './auth';
 
@@ -302,5 +304,19 @@ export function getSkills(): Promise<SkillSummary[]> {
 export function getCliTools(): Promise<CliTool[]> {
   return apiFetch<CliTool[] | { cli_tools: CliTool[] }>('/api/cli-tools').then((data) =>
     unwrapField(data, 'cli_tools'),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Workspace
+// ---------------------------------------------------------------------------
+
+export function getWorkspaceFiles(): Promise<WorkspaceTree> {
+  return apiFetch<WorkspaceTree>('/api/workspace/files');
+}
+
+export function getWorkspaceFile(path: string): Promise<WorkspaceFileContent> {
+  return apiFetch<WorkspaceFileContent>(
+    `/api/workspace/file?path=${encodeURIComponent(path)}`,
   );
 }

@@ -647,6 +647,8 @@ pub async fn run_gateway(
         .route("/api/cli-tools", get(api::handle_api_cli_tools))
         .route("/api/skills", get(api::handle_api_skills))
         .route("/api/health", get(api::handle_api_health))
+        .route("/api/workspace/files", get(api::handle_api_workspace_files))
+        .route("/api/workspace/file", get(api::handle_api_workspace_file))
         .route("/api/node-control", post(handle_node_control))
         // ── SSE event stream ──
         .route("/api/events", get(sse::handle_sse_events))

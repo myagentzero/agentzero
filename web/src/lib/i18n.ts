@@ -32,8 +32,9 @@ const translations: Record<Locale, Record<string, string>> = {
     'nav.devices': 'Devices',
     'nav.config': 'Configuration',
     'nav.cost': 'Cost Tracker',
-    'nav.logs': 'Logs',
+    'nav.logs': 'Mission Control',
     'nav.doctor': 'Doctor',
+    'nav.workspace': 'Workspace',
 
     // Dashboard
     'dashboard.title': 'Dashboard',
@@ -148,8 +149,8 @@ const translations: Record<Locale, Record<string, string>> = {
     'cost.requests': 'Requests',
     'cost.usd': 'Cost (USD)',
 
-    // Logs
-    'logs.title': 'Live Logs',
+    // Mission Control
+    'logs.title': 'Mission Control',
     'logs.clear': 'Clear',
     'logs.pause': 'Pause',
     'logs.resume': 'Resume',

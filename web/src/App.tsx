@@ -11,8 +11,9 @@ import Memory from './pages/Memory';
 import Devices from './pages/Devices';
 import Config from './pages/Config';
 import Cost from './pages/Cost';
-import Logs from './pages/Logs';
+import MissionControl from './pages/MissionControl';
 import Doctor from './pages/Doctor';
+import Workspace from './pages/Workspace';
 import { AuthProvider, useAuth } from './hooks/useAuth';
 import { coerceLocale, setLocale, type Locale } from './lib/i18n';
 
@@ -147,8 +148,9 @@ function AppContent() {
           <Route path="/devices" element={<Devices />} />
           <Route path="/config" element={<Config />} />
           <Route path="/cost" element={<Cost />} />
-          <Route path="/logs" element={<Logs />} />
+          <Route path="/mission-control" element={<MissionControl />} />
           <Route path="/doctor" element={<Doctor />} />
+          <Route path="/workspace" element={<Workspace />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>

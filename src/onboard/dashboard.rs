@@ -26,7 +26,7 @@ const TICK_MS: u64 = 100;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Tab {
-    Logs,
+    MissionControl,
     Memory,
     Cron,
     Costs,
@@ -467,12 +467,15 @@ fn event_type_color(t: &str) -> Color {
     match t.to_lowercase().as_str() {
         "error" => Color::Red,
         "warn" | "warning" => Color::Yellow,
-        "tool_call" | "tool_result" => Color::Magenta,
+        "tool_call" | "tool_result" | "tool_call_start" => Color::Magenta,
         "message" | "chat" => Color::Blue,
-        "health" | "status" | "connected" => Color::Green,
+        "health" | "status" | "connected" | "heartbeat_tick" => Color::Green,
         "llm_response" => Color::Cyan,
         "llm_request" => Color::LightBlue,
         "agent_start" | "agent_end" => Color::LightYellow,
+        "turn_complete" => Color::LightGreen,
+        "channel_message" => Color::LightMagenta,
+        "webhook_auth_failure" => Color::LightRed,
         _ => Color::DarkGray,
     }
 }
@@ -519,7 +522,7 @@ fn draw(f: &mut Frame, app: &DashboardApp) {
     draw_tab_bar(f, outer[0], app);
 
     match app.tab {
-        Tab::Logs => draw_events_tab(f, outer[1], &app.events),
+        Tab::MissionControl => draw_events_tab(f, outer[1], &app.events),
         Tab::Memory => draw_memory(f, outer[1], &app.memory),
         Tab::Cron => draw_cron(f, outer[1], &app.cron),
         Tab::Costs => draw_costs(f, outer[1], &app.costs),
@@ -546,7 +549,7 @@ fn draw_tab_bar(f: &mut Frame, area: Rect, app: &DashboardApp) {
             Span::raw(" "),
             Span::styled(" [3] Cron ", tab_style(app.tab == Tab::Cron)),
             Span::raw(" "),
-            Span::styled(" [4] Logs ", tab_style(app.tab == Tab::Logs)),
+            Span::styled(" [4] Mission Control ", tab_style(app.tab == Tab::MissionControl)),
             Span::raw(" "),
             Span::styled(" [5] Metrics ", tab_style(app.tab == Tab::Metrics)),
             Span::styled("   [q]uit", Style::default().fg(Color::DarkGray)),
@@ -2580,7 +2583,7 @@ fn run_tui(
                         continue;
                     }
                     if key.code == KeyCode::Char('4') {
-                        app.tab = Tab::Logs;
+                        app.tab = Tab::MissionControl;
                         continue;
                     }
                     if key.code == KeyCode::Char('5') {
@@ -2593,7 +2596,7 @@ fn run_tui(
                     }
 
                     match app.tab {
-                        Tab::Logs => handle_events_key(&mut app.events, key),
+                        Tab::MissionControl => handle_events_key(&mut app.events, key),
                         Tab::Memory => handle_memory_key(&mut app.memory, &action_tx, key),
                         Tab::Cron => handle_cron_key(&mut app.cron, &cron_action_tx, key),
                         Tab::Costs => handle_costs_key(&mut app.costs, &costs_action_tx, key),

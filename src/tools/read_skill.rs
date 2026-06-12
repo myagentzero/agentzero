@@ -96,6 +96,7 @@ impl Tool for ReadSkillTool {
         match tokio::fs::read_to_string(location).await {
             Ok(output) => {
                 tracing::info!("📖 read_skill: successfully loaded skill '{}'", skill.name);
+                crate::skills::usage_tracker::record_skill_usage(&self.workspace_dir, &skill.name);
                 Ok(ToolResult {
                     success: true,
                     output,

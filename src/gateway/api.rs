@@ -254,10 +254,15 @@ pub async fn handle_api_skills(
 
     let config_guard = state.config.lock();
     let skills = crate::skills::load_skills_with_config(&config_guard.workspace_dir, &config_guard);
+    let usage_stats = crate::skills::usage_tracker::load_usage_stats(&config_guard.workspace_dir);
 
     let skills_json: Vec<serde_json::Value> = skills
         .into_iter()
         .map(|s| {
+            let usage = usage_stats.get(&s.name).map(|u| serde_json::json!({
+                "call_count": u.call_count,
+                "last_called": u.last_called.to_rfc3339(),
+            }));
             serde_json::json!({
                 "name": s.name,
                 "description": s.description,
@@ -270,6 +275,7 @@ pub async fn handle_api_skills(
                     "kind": t.kind,
                 })).collect::<Vec<_>>(),
                 "location": s.location.map(|p| p.display().to_string()),
+                "usage": usage,
             })
         })
         .collect();
@@ -1131,6 +1137,168 @@ pub async fn handle_api_pairing_device_revoke(
     }
 
     Json(serde_json::json!({"status": "ok", "revoked": true, "id": id})).into_response()
+}
+
+// ── Workspace file explorer ─────────────────────────────────────
+
+#[derive(Deserialize)]
+pub struct WorkspaceFileQuery {
+    pub path: Option<String>,
+}
+
+#[derive(serde::Serialize)]
+struct FileNode {
+    name: String,
+    path: String,
+    kind: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    children: Option<Vec<FileNode>>,
+}
+
+fn build_tree(dir: &std::path::Path, base: &std::path::Path, depth: u32) -> Vec<FileNode> {
+    if depth > 8 {
+        return vec![];
+    }
+    let mut entries = match std::fs::read_dir(dir) {
+        Ok(e) => e.flatten().collect::<Vec<_>>(),
+        Err(_) => return vec![],
+    };
+    entries.sort_by_key(|e| {
+        let is_dir = e.file_type().map(|t| t.is_dir()).unwrap_or(false);
+        (!is_dir, e.file_name())
+    });
+    entries
+        .iter()
+        .filter_map(|entry| {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if name.starts_with('.') {
+                return None;
+            }
+            let full_path = entry.path();
+            let rel = full_path.strip_prefix(base).ok()?;
+            let path_str = rel.to_string_lossy().into_owned();
+            let ft = entry.file_type().ok()?;
+            if ft.is_dir() {
+                Some(FileNode {
+                    name,
+                    path: path_str,
+                    kind: "dir",
+                    children: Some(build_tree(&full_path, base, depth + 1)),
+                })
+            } else {
+                Some(FileNode {
+                    name,
+                    path: path_str,
+                    kind: "file",
+                    children: None,
+                })
+            }
+        })
+        .collect()
+}
+
+/// GET /api/workspace/files — directory tree of workspace folder
+pub async fn handle_api_workspace_files(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    if let Err(e) = require_auth(&state, &headers) {
+        return e.into_response();
+    }
+
+    let workspace_dir = state.config.lock().workspace_dir.clone();
+    let tree = build_tree(&workspace_dir, &workspace_dir, 0);
+    Json(serde_json::json!({ "workspace": workspace_dir.to_string_lossy(), "tree": tree }))
+        .into_response()
+}
+
+const VIEWABLE_EXTENSIONS: &[&str] = &["md", "json", "jsonl"];
+
+/// GET /api/workspace/file?path=<rel_path> — read a file from the workspace
+pub async fn handle_api_workspace_file(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(params): Query<WorkspaceFileQuery>,
+) -> impl IntoResponse {
+    if let Err(e) = require_auth(&state, &headers) {
+        return e.into_response();
+    }
+
+    let rel = match params.path {
+        Some(p) => p,
+        None => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": "Missing ?path= query parameter"})),
+            )
+                .into_response();
+        }
+    };
+
+    // Reject any path that tries to escape the workspace
+    if rel.contains("..") || std::path::Path::new(&rel).is_absolute() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "Invalid path"})),
+        )
+            .into_response();
+    }
+
+    let ext = std::path::Path::new(&rel)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+
+    if !VIEWABLE_EXTENSIONS.contains(&ext.as_str()) {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({"error": "Only .md, .json, and .jsonl files can be viewed"})),
+        )
+            .into_response();
+    }
+
+    let workspace_dir = state.config.lock().workspace_dir.clone();
+    let full_path = workspace_dir.join(&rel);
+
+    // Canonicalize and re-check confinement
+    let canonical = match full_path.canonicalize() {
+        Ok(p) => p,
+        Err(_) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({"error": "File not found"})),
+            )
+                .into_response();
+        }
+    };
+    let canonical_ws = match workspace_dir.canonicalize() {
+        Ok(p) => p,
+        Err(_) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Workspace not found"})),
+            )
+                .into_response();
+        }
+    };
+    if !canonical.starts_with(&canonical_ws) {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({"error": "Path outside workspace"})),
+        )
+            .into_response();
+    }
+
+    match std::fs::read_to_string(&canonical) {
+        Ok(content) => Json(serde_json::json!({ "path": rel, "content": content, "ext": ext }))
+            .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": format!("Failed to read file: {e}")})),
+        )
+            .into_response(),
+    }
 }
 
 // ── Helpers ─────────────────────────────────────────────────────

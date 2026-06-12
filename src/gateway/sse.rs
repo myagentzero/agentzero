@@ -47,77 +47,47 @@ fn evaluate_sse_auth(
 /// Returns `None` for event types that are not broadcast over SSE.
 fn runtime_trace_event_to_sse_json(event: &RuntimeTraceEvent) -> Option<serde_json::Value> {
     let event_type = event.event_type.as_str();
+    // Build base event with type, timestamp, and optional fields
+    let mut obj = serde_json::json!({
+        "type": event_type,
+        "timestamp": event.timestamp,
+    });
+
+    // Add provider and model if present
+    if let Some(provider) = &event.provider {
+        obj["provider"] = serde_json::Value::String(provider.clone());
+    }
+    if let Some(model) = &event.model {
+        obj["model"] = serde_json::Value::String(model.clone());
+    }
+    if let Some(channel) = &event.channel {
+        obj["channel"] = serde_json::Value::String(channel.clone());
+    }
+    if let Some(success) = event.success {
+        obj["success"] = serde_json::Value::Bool(success);
+    }
+    if let Some(message) = &event.message {
+        obj["message"] = serde_json::Value::String(message.clone());
+    }
+
+    // Add entire payload object
+    if !event.payload.is_null() && !event.payload.as_object().map(|o| o.is_empty()).unwrap_or(true) {
+        obj["payload"] = event.payload.clone();
+    }
+
+    // Only return if this is a known event type
     match event_type {
-        "llm_request" => Some(serde_json::json!({
-            "type": "llm_request",
-            "provider": event.provider,
-            "model": event.model,
-            "messages_count": event.payload.get("messages_count").and_then(|v| v.as_u64()),
-            "timestamp": event.timestamp,
-        })),
-        "tool_call" => Some(serde_json::json!({
-            "type": "tool_call",
-            "tool": event.payload.get("tool").and_then(|v| v.as_str()).unwrap_or("unknown"),
-            "duration_ms": event.payload.get("duration_ms").and_then(|v| v.as_u64()).unwrap_or(0),
-            "success": event.success.unwrap_or(true),
-            "timestamp": event.timestamp,
-        })),
-        "tool_call_start" => Some(serde_json::json!({
-            "type": "tool_call_start",
-            "tool": event.payload.get("tool").and_then(|v| v.as_str()).unwrap_or("unknown"),
-            "timestamp": event.timestamp,
-        })),
-        "error" => Some(serde_json::json!({
-            "type": "error",
-            "component": event.payload.get("component").and_then(|v| v.as_str()).unwrap_or("unknown"),
-            "message": event.message.as_deref().unwrap_or(""),
-            "timestamp": event.timestamp,
-        })),
-        "agent_start" => Some(serde_json::json!({
-            "type": "agent_start",
-            "provider": event.provider,
-            "model": event.model,
-            "timestamp": event.timestamp,
-        })),
-        "agent_end" => Some(serde_json::json!({
-            "type": "agent_end",
-            "provider": event.provider,
-            "model": event.model,
-            "duration_ms": event.payload.get("duration_ms").and_then(|v| v.as_u64()).unwrap_or(0),
-            "tokens_used": event.payload.get("tokens_used").and_then(|v| v.as_u64()),
-            "cost_usd": event.payload.get("cost_usd").and_then(|v| v.as_f64()),
-            "timestamp": event.timestamp,
-        })),
-        "llm_response" => {
-            let tokens_used = event
-                .payload
-                .get("tokens_used")
-                .and_then(|v| v.as_u64())
-                .or_else(|| {
-                    let input = event
-                        .payload
-                        .get("input_tokens")
-                        .and_then(|v| v.as_u64())
-                        .unwrap_or(0);
-                    let output = event
-                        .payload
-                        .get("output_tokens")
-                        .and_then(|v| v.as_u64())
-                        .unwrap_or(0);
-                    if input > 0 || output > 0 {
-                        Some(input + output)
-                    } else {
-                        None
-                    }
-                });
-            Some(serde_json::json!({
-                "type": "llm_response",
-                "provider": event.provider,
-                "model": event.model,
-                "tokens_used": tokens_used,
-                "timestamp": event.timestamp,
-            }))
-        }
+        "llm_request"
+        | "tool_call"
+        | "tool_call_start"
+        | "error"
+        | "agent_start"
+        | "agent_end"
+        | "llm_response"
+        | "turn_complete"
+        | "channel_message"
+        | "webhook_auth_failure"
+        | "heartbeat_tick" => Some(obj),
         _ => None,
     }
 }
@@ -344,7 +314,33 @@ impl crate::observability::Observer for BroadcastObserver {
                     "timestamp": chrono::Utc::now().to_rfc3339(),
                 })
             }
-            _ => return, // Skip events we don't broadcast
+            crate::observability::ObserverEvent::TurnComplete => serde_json::json!({
+                "type": "turn_complete",
+                "timestamp": chrono::Utc::now().to_rfc3339(),
+            }),
+            crate::observability::ObserverEvent::ChannelMessage { channel, direction } => {
+                serde_json::json!({
+                    "type": "channel_message",
+                    "channel": channel,
+                    "direction": direction,
+                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                })
+            }
+            crate::observability::ObserverEvent::WebhookAuthFailure {
+                channel,
+                signature,
+                bearer,
+            } => serde_json::json!({
+                "type": "webhook_auth_failure",
+                "channel": channel,
+                "signature": signature,
+                "bearer": bearer,
+                "timestamp": chrono::Utc::now().to_rfc3339(),
+            }),
+            crate::observability::ObserverEvent::HeartbeatTick => serde_json::json!({
+                "type": "heartbeat_tick",
+                "timestamp": chrono::Utc::now().to_rfc3339(),
+            }),
         };
 
         let _ = self.tx.send(json);
@@ -425,6 +421,10 @@ mod tests {
             "error",
             "agent_start",
             "agent_end",
+            "turn_complete",
+            "channel_message",
+            "webhook_auth_failure",
+            "heartbeat_tick",
         ];
         for event_type in &known_types {
             let event = make_trace_event(event_type);

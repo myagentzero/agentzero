@@ -6,6 +6,7 @@ use std::process::Command;
 use std::time::{Duration, SystemTime};
 
 mod audit;
+pub mod usage_tracker;
 #[cfg(feature = "skill-creation")]
 pub mod creator;
 #[cfg(feature = "skill-creation")]

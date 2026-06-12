@@ -14,6 +14,7 @@ import {
   DollarSign,
   Activity,
   Stethoscope,
+  FolderOpen,
   X,
 } from 'lucide-react';
 import { t } from '@/lib/i18n';
@@ -23,15 +24,16 @@ const COLLAPSE_BUTTON_DELAY_MS = 1000;
 const navItems = [
   { to: '/', icon: LayoutDashboard, labelKey: 'nav.dashboard' },
   { to: '/agent', icon: MessageSquare, labelKey: 'nav.agent' },
+  { to: '/mission-control', icon: Activity, labelKey: 'nav.logs' },
+  { to: '/cost', icon: DollarSign, labelKey: 'nav.cost' },
+  { to: '/integrations', icon: Puzzle, labelKey: 'nav.integrations' },
   { to: '/tools', icon: Wrench, labelKey: 'nav.tools' },
   { to: '/skills', icon: BookOpen, labelKey: 'nav.skills' },
-  { to: '/cron', icon: Clock, labelKey: 'nav.cron' },
-  { to: '/integrations', icon: Puzzle, labelKey: 'nav.integrations' },
+  { to: '/workspace', icon: FolderOpen, labelKey: 'nav.workspace' },
   { to: '/memory', icon: Brain, labelKey: 'nav.memory' },
+  { to: '/cron', icon: Clock, labelKey: 'nav.cron' },
   { to: '/devices', icon: Smartphone, labelKey: 'nav.devices' },
   { to: '/config', icon: Settings, labelKey: 'nav.config' },
-  { to: '/cost', icon: DollarSign, labelKey: 'nav.cost' },
-  { to: '/logs', icon: Activity, labelKey: 'nav.logs' },
   { to: '/doctor', icon: Stethoscope, labelKey: 'nav.doctor' },
 ];
 

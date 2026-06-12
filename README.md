@@ -48,11 +48,9 @@ zeroclaw service install          # register as systemd/launchctl/Windows Servic
 zeroclaw service start            # run it always-on in the background
 ```
 
-Full walkthrough: [Quick start](#quick-start) — or skip the safety gates with YOLO mode for dev boxes.
-
 ## What AgentZero does
 
-- **Multi-channel** — one agent answering you across [every channel you configure](docs/reference/api/channels-reference.md). Inbound messages from Discord, Telegram, Matrix, email, webhooks, CLI — all delivered to the same agent loop. Gateway supports webhook signature verification and rate limiting.
+- **Multi-channel** — one agent answering you across [every channel you configure](docs/reference/api/channels-reference.md). Inbound messages from Discord, Slack, email, webhooks, CLI — all delivered to the same agent loop. Gateway supports webhook signature verification and rate limiting.
 - **Provider-agnostic** — [model providers](docs/reference/api/providers-reference.md) are pluggable. Configure Anthropic, OpenAI, local Ollama, or any OpenAI-compatible endpoint. Fallback chains and routing keep the agent running when a provider flakes.
 - **Security-first, with escape hatches** — default autonomy is `supervised`: medium-risk ops require approval, high-risk blocked. Workspace boundaries, command policy, OS-level sandboxes (Landlock / Bubblewrap / Seatbelt / Docker), and cryptographic [tool receipts](docs/security/README.md) on every action. YOLO mode exists for trusted dev environments.
 - **Hardware-capable** — GPIO / I2C / SPI / USB on Raspberry Pi, STM32, Arduino, and ESP32 via the `Peripheral` trait. See [Hardware](docs/hardware/README.md).
@@ -100,7 +98,7 @@ Notes:
 └──────────────────────────────────────────────────────────────┘
 ```
 
-Full detail with Mermaid diagrams: [Architecture overview](docs/architecture/README.md) · [Architecture diagrams](docs/assets/architecture-diagrams.md).
+Full detail with Mermaid diagrams: [Architecture overview](docs/architecture/README.md).
 
 
 ## Agent workspace + skills
@@ -131,7 +129,7 @@ AgentZero is dual-licensed for maximum openness and contributor protection:
 | [MIT](LICENSE-MIT) | Open-source, research, academic, personal use |
 | [Apache 2.0](LICENSE-APACHE) | Patent protection, institutional, commercial deployment |
 
-You may choose either license. **Contributors automatically grant rights under both** — see [CLA.md](docs/contributing/cla.md) for the full contributor agreement.
+You may choose either license. **Contributors automatically grant rights under both** — see [CONTRIBUTING.md](CONTRIBUTING.md) for the full contributor agreement.
 
 ### Contributor Protections
 

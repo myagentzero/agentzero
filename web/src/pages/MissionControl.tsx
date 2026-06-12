@@ -5,6 +5,7 @@ import {
   Play,
   ArrowDown,
   Filter,
+  X,
 } from 'lucide-react';
 import type { SSEEvent } from '@/types/api';
 import { SSEClient } from '@/lib/sse';
@@ -23,6 +24,7 @@ function eventTypeBadgeColor(type: string): string {
       return 'bg-yellow-900/50 text-yellow-400 border-yellow-700/50';
     case 'tool_call':
     case 'tool_result':
+    case 'tool_call_start':
       return 'bg-purple-900/50 text-purple-400 border-purple-700/50';
     case 'message':
     case 'chat':
@@ -30,6 +32,7 @@ function eventTypeBadgeColor(type: string): string {
     case 'health':
     case 'status':
     case 'connected':
+    case 'heartbeat_tick':
       return 'bg-green-900/50 text-green-400 border-green-700/50';
     case 'llm_response':
       return 'bg-cyan-900/50 text-cyan-400 border-cyan-700/50';
@@ -38,6 +41,12 @@ function eventTypeBadgeColor(type: string): string {
     case 'agent_start':
     case 'agent_end':
       return 'bg-amber-900/50 text-amber-400 border-amber-700/50';
+    case 'turn_complete':
+      return 'bg-lime-900/50 text-lime-400 border-lime-700/50';
+    case 'channel_message':
+      return 'bg-rose-900/50 text-rose-400 border-rose-700/50';
+    case 'webhook_auth_failure':
+      return 'bg-orange-900/50 text-orange-400 border-orange-700/50';
     default:
       return 'bg-gray-800 text-gray-400 border-gray-700';
   }
@@ -48,12 +57,13 @@ interface LogEntry {
   event: SSEEvent;
 }
 
-export default function Logs() {
+export default function MissionControl() {
   const [entries, setEntries] = useState<LogEntry[]>([]);
   const [paused, setPaused] = useState(false);
   const [connected, setConnected] = useState(false);
   const [autoScroll, setAutoScroll] = useState(true);
   const [typeFilters, setTypeFilters] = useState<Set<string>>(new Set());
+  const [selectedEntry, setSelectedEntry] = useState<LogEntry | null>(null);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const sseRef = useRef<SSEClient | null>(null);
@@ -146,7 +156,7 @@ export default function Logs() {
       <div className="flex items-center justify-between px-6 py-3 border-b border-gray-800 bg-gray-900">
         <div className="flex items-center gap-3">
           <Activity className="h-5 w-5 text-blue-400" />
-          <h2 className="text-base font-semibold text-white">Live Logs</h2>
+          <h2 className="text-base font-semibold text-white">Mission Control</h2>
           <div className="flex items-center gap-2 ml-2">
             <span
               className={`inline-block h-2 w-2 rounded-full ${
@@ -244,22 +254,50 @@ export default function Logs() {
         ) : (
           filteredEntries.map((entry) => {
             const { event } = entry;
-            const detail =
-              event.message ??
-              event.content ??
-              event.data ??
-              JSON.stringify(
-                Object.fromEntries(
-                  Object.entries(event).filter(
-                    ([k]) => k !== 'type' && k !== 'timestamp',
-                  ),
-                ),
+            let detail: string;
+
+            // Fields to exclude from the list display (verbose/redundant data)
+            const verboseFields = new Set([
+              'type',
+              'timestamp',
+              'raw_response',
+              'arguments',
+              'error_traceback',
+              'full_response',
+            ]);
+
+            // Helper to recursively filter out verbose fields
+            const cleanData = (obj: any): any => {
+              if (typeof obj !== 'object' || obj === null) return obj;
+              if (Array.isArray(obj)) return obj.map(cleanData);
+              return Object.fromEntries(
+                Object.entries(obj)
+                  .filter(([k]) => !verboseFields.has(k))
+                  .map(([k, v]) => [k, cleanData(v)])
               );
+            };
+
+            if (event.type === 'turn_complete') {
+              detail = 'Agent completed turn';
+            } else if (event.type === 'channel_message') {
+              detail = `${event.direction === 'inbound' ? 'Received' : 'Sent'} on ${event.channel}`;
+            } else if (event.type === 'webhook_auth_failure') {
+              detail = `Auth failure on ${event.channel} (signature: ${event.signature}, bearer: ${event.bearer})`;
+            } else if (event.type === 'heartbeat_tick') {
+              detail = 'Runtime heartbeat';
+            } else {
+              detail =
+                event.message ??
+                event.content ??
+                event.data ??
+                (JSON.stringify(cleanData(event)) || '');
+            }
 
             return (
               <div
                 key={entry.id}
-                className="bg-gray-900 border border-gray-800 rounded-lg p-3 hover:border-gray-700 transition-colors"
+                onClick={() => setSelectedEntry(entry)}
+                className="bg-gray-900 border border-gray-800 rounded-lg p-3 hover:border-gray-600 hover:bg-gray-800/50 transition-colors cursor-pointer"
               >
                 <div className="flex items-start gap-3">
                   <span className="text-xs text-gray-500 font-mono whitespace-nowrap mt-0.5">
@@ -281,6 +319,100 @@ export default function Logs() {
           })
         )}
       </div>
+
+      {/* Detail Modal */}
+      {selectedEntry && (() => {
+        const { event } = selectedEntry;
+        const metadata: Record<string, unknown> = {};
+        const payload: Record<string, unknown> = {};
+
+        // Separate metadata from payload
+        for (const [key, value] of Object.entries(event)) {
+          if (key === 'type' || key === 'timestamp') {
+            metadata[key] = value;
+          } else if (key === 'payload' && typeof value === 'object' && value !== null) {
+            // If there's a payload object, merge its contents
+            Object.assign(payload, value as Record<string, unknown>);
+          } else {
+            payload[key] = value;
+          }
+        }
+
+        return (
+          <div
+            className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50"
+            onClick={() => setSelectedEntry(null)}
+          >
+            <div
+              className="bg-gray-900 border border-gray-700 rounded-lg p-6 max-w-4xl w-full max-h-[90vh] overflow-auto"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between mb-6">
+                <h3 className="text-lg font-semibold text-white">Event Details</h3>
+                <button
+                  onClick={() => setSelectedEntry(null)}
+                  className="text-gray-400 hover:text-gray-300 transition-colors"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              <div className="space-y-6">
+                {/* Type and Timestamp */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <p className="text-xs text-gray-500 uppercase tracking-wide mb-1 font-semibold">Type</p>
+                    <p
+                      className={`inline-flex items-center px-3 py-1.5 rounded text-sm font-medium border capitalize ${eventTypeBadgeColor(
+                        event.type,
+                      )}`}
+                    >
+                      {event.type}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-500 uppercase tracking-wide mb-1 font-semibold">Timestamp</p>
+                    <p className="text-sm font-mono text-gray-300">
+                      {formatTimestamp(event.timestamp)}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Payload Fields (if any) */}
+                {Object.keys(payload).length > 0 && (
+                  <div>
+                    <p className="text-xs text-gray-500 uppercase tracking-wide mb-3 font-semibold">Payload Data</p>
+                    <div className="bg-gray-800 border border-gray-700 rounded p-4 space-y-4">
+                      {Object.entries(payload).map(([key, value]) => (
+                        <div key={key}>
+                          <p className="text-xs text-gray-600 mb-2 capitalize font-medium">{key}</p>
+                          {typeof value === 'object' && value !== null ? (
+                            <pre className="bg-gray-900 border border-gray-600 rounded p-3 text-xs text-gray-300 overflow-x-auto">
+                              {JSON.stringify(value, null, 2)}
+                            </pre>
+                          ) : (
+                            <p className="text-sm text-gray-300 font-mono bg-gray-900 border border-gray-600 rounded px-3 py-2 inline-block">
+                              {typeof value === 'boolean' ? (value ? 'true' : 'false') : typeof value === 'number' ? value : `"${String(value)}"`}
+                            </p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Full Event JSON */}
+                <div>
+                  <p className="text-xs text-gray-500 uppercase tracking-wide mb-2 font-semibold">Complete Event (JSON)</p>
+                  <pre className="bg-gray-800 border border-gray-700 rounded p-4 text-xs text-gray-300 overflow-x-auto max-h-96 w-full">
+                    {JSON.stringify(event, null, 2)}
+                  </pre>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
