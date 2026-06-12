@@ -463,6 +463,7 @@ fn memory_config_defaults_for_backend(backend: &str) -> MemoryConfig {
         conversation_retention_days: 30,
         daily_retention_days: 30,
         system_retention_days: 7,
+        cost_retention_days: 60,
         embedding_provider: "none".to_string(),
         embedding_model: "text-embedding-3-small".to_string(),
         embedding_dimensions: 1536,

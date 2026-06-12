@@ -10,10 +10,18 @@ import {
 import type { WorkspaceFileNode, WorkspaceTree, WorkspaceFileContent } from '@/types/api';
 import { getWorkspaceFiles, getWorkspaceFile } from '@/lib/api';
 
-const VIEWABLE = new Set(['md', 'json', 'jsonl']);
+const VIEWABLE = new Set(['md', 'json', 'jsonl', 'js', 'py', 'ps1', 'license', 'txt']);
 
 function ext(name: string): string {
   return name.split('.').pop()?.toLowerCase() ?? '';
+}
+
+function isViewable(name: string): boolean {
+  const nameUpper = name.toUpperCase();
+  if (nameUpper === 'LICENSE' || nameUpper === 'README') {
+    return true;
+  }
+  return VIEWABLE.has(ext(name));
 }
 
 interface TreeNodeProps {
@@ -25,8 +33,7 @@ interface TreeNodeProps {
 function TreeNode({ node, onOpen, depth }: TreeNodeProps) {
   const [open, setOpen] = useState(depth === 0);
   const isDir = node.kind === 'dir';
-  const fileExt = isDir ? '' : ext(node.name);
-  const canView = !isDir && VIEWABLE.has(fileExt);
+  const canView = !isDir && isViewable(node.name);
 
   if (isDir) {
     return (
@@ -79,9 +86,9 @@ function TreeNode({ node, onOpen, depth }: TreeNodeProps) {
         className={['h-4 w-4 shrink-0', canView ? 'text-blue-400' : 'text-[#4a5c7a]'].join(' ')}
       />
       <span className="truncate">{node.name}</span>
-      {canView && (
+      {canView && ext(node.name) && (
         <span className="ml-auto shrink-0 rounded bg-[#0f2151] px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-[#5f84cc]">
-          {fileExt}
+          {ext(node.name)}
         </span>
       )}
     </button>
@@ -89,14 +96,16 @@ function TreeNode({ node, onOpen, depth }: TreeNodeProps) {
 }
 
 function renderContent(content: string, fileExt: string) {
-  if (fileExt === 'md') {
+  const ext = fileExt.toLowerCase();
+
+  if (ext === 'md') {
     return (
       <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed text-[#c8d8f0]">
         {content}
       </pre>
     );
   }
-  if (fileExt === 'json') {
+  if (ext === 'json') {
     let formatted = content;
     try {
       formatted = JSON.stringify(JSON.parse(content), null, 2);
@@ -109,31 +118,39 @@ function renderContent(content: string, fileExt: string) {
       </pre>
     );
   }
-  // jsonl — one JSON object per line
+  if (ext === 'jsonl') {
+    // jsonl — one JSON object per line
+    return (
+      <div className="space-y-1">
+        {content
+          .split('\n')
+          .filter(Boolean)
+          .map((line, i) => {
+            let display = line;
+            try {
+              display = JSON.stringify(JSON.parse(line), null, 2);
+            } catch {
+              // keep raw line
+            }
+            return (
+              <details key={i} className="rounded border border-[#1b3670] bg-[#070f27]">
+                <summary className="cursor-pointer px-3 py-1.5 font-mono text-xs text-[#5f84cc] hover:text-white">
+                  Line {i + 1}
+                </summary>
+                <pre className="whitespace-pre-wrap px-3 pb-2 font-mono text-xs leading-relaxed text-[#c8d8f0]">
+                  {display}
+                </pre>
+              </details>
+            );
+          })}
+      </div>
+    );
+  }
+  // js, py, ps1, license, readme, txt — show as preformatted text
   return (
-    <div className="space-y-1">
-      {content
-        .split('\n')
-        .filter(Boolean)
-        .map((line, i) => {
-          let display = line;
-          try {
-            display = JSON.stringify(JSON.parse(line), null, 2);
-          } catch {
-            // keep raw line
-          }
-          return (
-            <details key={i} className="rounded border border-[#1b3670] bg-[#070f27]">
-              <summary className="cursor-pointer px-3 py-1.5 font-mono text-xs text-[#5f84cc] hover:text-white">
-                Line {i + 1}
-              </summary>
-              <pre className="whitespace-pre-wrap px-3 pb-2 font-mono text-xs leading-relaxed text-[#c8d8f0]">
-                {display}
-              </pre>
-            </details>
-          );
-        })}
-    </div>
+    <pre className="whitespace-pre-wrap font-mono text-sm leading-relaxed text-[#c8d8f0]">
+      {content}
+    </pre>
   );
 }
 
@@ -165,14 +182,11 @@ export default function Workspace() {
 
   return (
     <div className="flex h-[calc(100vh-4rem)] flex-col p-6">
-      <div className="mb-4 flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-semibold text-white">Workspace</h1>
-          {treeData && (
-            <p className="mt-0.5 font-mono text-xs text-[#5f84cc]">{treeData.workspace}</p>
-          )}
+      {treeData && (
+        <div className="mb-4">
+          <p className="font-mono text-xs text-[#5f84cc]">{treeData.workspace}</p>
         </div>
-      </div>
+      )}
 
       {error && (
         <div className="rounded-xl border border-rose-800/60 bg-rose-900/20 px-4 py-3 text-sm text-rose-300">
@@ -208,7 +222,7 @@ export default function Workspace() {
           <div className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-[#1e2f5d] bg-[#050b1a]/95">
             {!activeFile && !fileLoading && !fileError && (
               <div className="flex flex-1 items-center justify-center text-sm text-[#4a5c7a]">
-                Select a .md, .json, or .jsonl file to view it
+                Select a file to view it (.md, .json, .jsonl, .js, .py, .ps1, LICENSE, .txt)
               </div>
             )}
 

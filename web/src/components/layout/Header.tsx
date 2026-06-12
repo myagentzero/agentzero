@@ -16,7 +16,9 @@ const routeTitles: Record<string, string> = {
   '/config': 'nav.config',
   '/cost': 'nav.cost',
   '/logs': 'nav.logs',
+  '/mission-control': 'nav.logs',
   '/doctor': 'nav.doctor',
+  '/workspace': 'nav.workspace',
 };
 
 const languageSummary = 'English · 简体中文 · 日本語 · Русский · Français · Tiếng Việt · Ελληνικά';

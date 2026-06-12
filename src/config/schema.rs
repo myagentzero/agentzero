@@ -2979,6 +2979,9 @@ pub struct MemoryConfig {
     /// For sqlite backend: prune system-category rows older than this many days (default: 7)
     #[serde(default = "default_system_retention_days")]
     pub system_retention_days: u32,
+    /// Prune cost records older than this many days (default: 60)
+    #[serde(default = "default_cost_retention_days")]
+    pub cost_retention_days: u32,
     /// Embedding provider: "none" | "openai" | "custom:URL"
     #[serde(default = "default_embedding_provider")]
     pub embedding_provider: String,
@@ -3084,6 +3087,9 @@ fn default_daily_retention_days() -> u32 {
 fn default_system_retention_days() -> u32 {
     7
 }
+fn default_cost_retention_days() -> u32 {
+    60
+}
 fn default_embedding_model() -> String {
     "text-embedding-3-small".into()
 }
@@ -3123,6 +3129,7 @@ impl Default for MemoryConfig {
             conversation_retention_days: default_conversation_retention_days(),
             daily_retention_days: default_daily_retention_days(),
             system_retention_days: default_system_retention_days(),
+            cost_retention_days: default_cost_retention_days(),
             embedding_provider: default_embedding_provider(),
             embedding_model: default_embedding_model(),
             embedding_dimensions: default_embedding_dims(),

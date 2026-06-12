@@ -1,9 +1,10 @@
 use crate::config::MemoryConfig;
-use anyhow::Result;
+use anyhow::{Result, Context};
 use chrono::{DateTime, Duration, Local, NaiveDate, Utc};
 use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
-use std::fs;
+use std::fs::{self, File};
+use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration as StdDuration, SystemTime};
 
@@ -66,6 +67,8 @@ pub fn run_if_due(config: &MemoryConfig, workspace_dir: &Path) -> Result<()> {
         pruned_daily_rows: prune_daily_rows(workspace_dir, config.daily_retention_days)?,
         pruned_system_rows: prune_system_rows(workspace_dir, config.system_retention_days)?,
     };
+
+    prune_cost_records(workspace_dir, config.cost_retention_days)?;
 
     write_state(workspace_dir, &report)?;
 
@@ -427,6 +430,89 @@ fn split_name(filename: &str) -> (&str, &str) {
     }
 }
 
+fn prune_cost_records(workspace_dir: &Path, retention_days: u32) -> Result<()> {
+    if retention_days == 0 {
+        return Ok(());
+    }
+
+    let cost_path = workspace_dir.join("state").join("costs.jsonl");
+    if !cost_path.exists() {
+        return Ok(());
+    }
+
+    let cutoff = (Local::now() - Duration::days(i64::from(retention_days)))
+        .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+
+    let temp_file = cost_path.with_extension("jsonl.tmp");
+    let mut pruned = 0_u64;
+
+    {
+        let input = File::open(&cost_path)
+            .with_context(|| format!("Failed to read cost records from {}", cost_path.display()))?;
+        let reader = BufReader::new(input);
+        let output = fs::File::create(&temp_file).with_context(|| {
+            format!("Failed to create temp cost file at {}", temp_file.display())
+        })?;
+        let mut writer = std::io::BufWriter::new(output);
+
+        for (line_number, line) in reader.lines().enumerate() {
+            let raw_line = line.with_context(|| {
+                format!(
+                    "Failed to read line {} from cost records {}",
+                    line_number + 1,
+                    cost_path.display()
+                )
+            })?;
+
+            let trimmed = raw_line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+
+            match serde_json::from_str::<serde_json::Value>(trimmed) {
+                Ok(record) => {
+                    if let Some(timestamp) = record.get("usage").and_then(|u| u.get("timestamp")) {
+                        if let Some(ts_str) = timestamp.as_str() {
+                            if ts_str >= cutoff.as_str() {
+                                writeln!(writer, "{}", record.to_string())
+                                    .with_context(|| {
+                                        format!(
+                                            "Failed to write cost record to {}",
+                                            temp_file.display()
+                                        )
+                                    })?;
+                            } else {
+                                pruned += 1;
+                            }
+                        }
+                    }
+                }
+                Err(error) => {
+                    tracing::warn!(
+                        "Skipping malformed cost record at {}:{}: {error}",
+                        cost_path.display(),
+                        line_number + 1
+                    );
+                }
+            }
+        }
+    }
+
+    if pruned > 0 {
+        fs::rename(&temp_file, &cost_path).with_context(|| {
+            format!(
+                "Failed to replace cost records file at {}",
+                cost_path.display()
+            )
+        })?;
+        tracing::info!("pruned {} cost records", pruned);
+    } else {
+        fs::remove_file(&temp_file).ok();
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -673,6 +759,74 @@ mod tests {
         assert!(
             mem2.get("core_keep").await.unwrap().is_some(),
             "core memory should remain"
+        );
+    }
+
+    #[test]
+    fn prunes_old_cost_records() {
+        let tmp = TempDir::new().unwrap();
+        let workspace = tmp.path();
+        let state_dir = workspace.join("state");
+        fs::create_dir_all(&state_dir).unwrap();
+
+        let old_timestamp = (Local::now() - Duration::days(70)).to_rfc3339_opts(
+            chrono::SecondsFormat::Millis,
+            true,
+        );
+        let recent_timestamp = (Local::now() - Duration::days(5)).to_rfc3339_opts(
+            chrono::SecondsFormat::Millis,
+            true,
+        );
+
+        let old_record = serde_json::json!({
+            "id": "old-record",
+            "session_id": "session-1",
+            "usage": {
+                "model": "test/old",
+                "input_tokens": 100,
+                "output_tokens": 50,
+                "total_tokens": 150,
+                "cached_input_tokens": 0,
+                "cost_usd": 0.001,
+                "timestamp": old_timestamp,
+                "channel": null
+            }
+        });
+
+        let recent_record = serde_json::json!({
+            "id": "recent-record",
+            "session_id": "session-2",
+            "usage": {
+                "model": "test/recent",
+                "input_tokens": 200,
+                "output_tokens": 100,
+                "total_tokens": 300,
+                "cached_input_tokens": 0,
+                "cost_usd": 0.002,
+                "timestamp": recent_timestamp,
+                "channel": null
+            }
+        });
+
+        let cost_path = state_dir.join("costs.jsonl");
+        let mut file = fs::File::create(&cost_path).unwrap();
+        writeln!(file, "{}", old_record.to_string()).unwrap();
+        writeln!(file, "{}", recent_record.to_string()).unwrap();
+        file.sync_all().unwrap();
+
+        prune_cost_records(workspace, 60).unwrap();
+
+        let result = fs::read_to_string(&cost_path).unwrap();
+        let lines: Vec<&str> = result.lines().collect();
+
+        assert_eq!(lines.len(), 1, "should have exactly 1 record after pruning");
+        assert!(
+            result.contains("recent-record"),
+            "recent record should be kept"
+        );
+        assert!(
+            !result.contains("old-record"),
+            "old record should be pruned"
         );
     }
 }

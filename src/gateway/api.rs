@@ -12,6 +12,44 @@ use serde::Deserialize;
 
 const MASKED_SECRET: &str = "***MASKED***";
 
+// Sensitive files that should never be accessible via the API
+const BLOCKED_FILENAMES: &[&str] = &[
+    // Credentials and tokens
+    "token.json",
+    "tokens.json",
+    "credentials.json",
+    "secrets.json",
+    "secret.json",
+    ".env",
+    ".env.local",
+    ".env.*.local",
+    // Config files that may contain sensitive data
+    "config.json",
+    ".config.json",
+    "settings.json",
+    // API keys and authentication
+    "api_keys.json",
+    ".api_keys",
+    "apikeys.json",
+    ".apikeys",
+    // Database and connection strings
+    ".db",
+    ".database",
+    "database.json",
+    ".npmrc",
+    ".yarnrc",
+    ".git",
+    ".gitignore",
+    // SSH and security
+    "id_rsa",
+    "id_ed25519",
+    ".ssh",
+    // Environment and build
+    ".env.production",
+    ".env.staging",
+    ".env.development",
+];
+
 // ── Bearer token auth extractor ─────────────────────────────────
 
 /// Extract and validate bearer token from Authorization header.
@@ -1174,6 +1212,10 @@ fn build_tree(dir: &std::path::Path, base: &std::path::Path, depth: u32) -> Vec<
             if name.starts_with('.') {
                 return None;
             }
+            // Also block sensitive files in tree view
+            if is_blocked_file(&name) {
+                return None;
+            }
             let full_path = entry.path();
             let rel = full_path.strip_prefix(base).ok()?;
             let path_str = rel.to_string_lossy().into_owned();
@@ -1212,7 +1254,57 @@ pub async fn handle_api_workspace_files(
         .into_response()
 }
 
-const VIEWABLE_EXTENSIONS: &[&str] = &["md", "json", "jsonl"];
+const VIEWABLE_EXTENSIONS: &[&str] = &["md", "json", "jsonl", "js", "py", "ps1", "txt"];
+const VIEWABLE_FILENAMES: &[&str] = &["license", "readme"];
+
+/// Check if a file is viewable based on extension or filename
+fn is_viewable_file(path: &str) -> bool {
+    let path_obj = std::path::Path::new(path);
+    let filename_lower = path_obj
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+
+    // Check by filename (for LICENSE, README, etc.)
+    if VIEWABLE_FILENAMES.contains(&filename_lower.as_str()) {
+        return true;
+    }
+
+    // Check by extension
+    let ext = path_obj
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+
+    VIEWABLE_EXTENSIONS.contains(&ext.as_str())
+}
+
+/// Check if a file path is blocked for security reasons
+fn is_blocked_file(path: &str) -> bool {
+    let filename = std::path::Path::new(path)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+
+    // Check exact filename matches
+    for blocked in BLOCKED_FILENAMES {
+        if filename == blocked.to_lowercase() {
+            return true;
+        }
+        // Check wildcard patterns like .env.*
+        if blocked.contains('*') {
+            let pattern = blocked.replace('*', "");
+            if filename.contains(&pattern) {
+                return true;
+            }
+        }
+    }
+
+    false
+}
 
 /// GET /api/workspace/file?path=<rel_path> — read a file from the workspace
 pub async fn handle_api_workspace_file(
@@ -1244,19 +1336,29 @@ pub async fn handle_api_workspace_file(
             .into_response();
     }
 
+    if !is_viewable_file(&rel) {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({"error": "Only text-based files (.md, .json, .jsonl, .js, .py, .ps1, LICENSE, README, .txt) can be viewed"})),
+        )
+            .into_response();
+    }
+
+    // Check for blocked sensitive files
+    if is_blocked_file(&rel) {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({"error": "Access to this file is blocked for security reasons"})),
+        )
+            .into_response();
+    }
+
+    // Get file extension for response
     let ext = std::path::Path::new(&rel)
         .extension()
         .and_then(|e| e.to_str())
         .unwrap_or("")
         .to_lowercase();
-
-    if !VIEWABLE_EXTENSIONS.contains(&ext.as_str()) {
-        return (
-            StatusCode::FORBIDDEN,
-            Json(serde_json::json!({"error": "Only .md, .json, and .jsonl files can be viewed"})),
-        )
-            .into_response();
-    }
 
     let workspace_dir = state.config.lock().workspace_dir.clone();
     let full_path = workspace_dir.join(&rel);

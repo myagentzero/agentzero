@@ -8,18 +8,18 @@ import {
   Database,
   DollarSign,
   Globe2,
-  Radio,
+  Hash,
   ShieldCheck,
   Sparkles,
 } from 'lucide-react';
 import type { CostSummary, StatusResponse } from '@/types/api';
 import { getCost, getStatus } from '@/lib/api';
 
-type DashboardSectionKey = 'cost' | 'channels' | 'health';
+type DashboardSectionKey = 'cost' | 'tokens' | 'health';
 
 interface DashboardSectionState {
   cost: boolean;
-  channels: boolean;
+  tokens: boolean;
   health: boolean;
 }
 
@@ -127,7 +127,7 @@ export default function Dashboard() {
   const [error, setError] = useState<string | null>(null);
   const [sectionsOpen, setSectionsOpen] = useState<DashboardSectionState>({
     cost: true,
-    channels: true,
+    tokens: true,
     health: true,
   });
 
@@ -278,38 +278,35 @@ export default function Dashboard() {
         </CollapsibleSection>
 
         <CollapsibleSection
-          title="Channel Activity"
-          subtitle="Live integrations and route connectivity"
-          icon={Radio}
-          sectionKey="channels"
+          title="Token Statistics"
+          subtitle="Total tokens, average per request, and cost per 1K tokens"
+          icon={Hash}
+          sectionKey="tokens"
           openState={sectionsOpen}
           onToggle={toggleSection}
         >
-          {Object.entries(status.channels).length === 0 ? (
-            <p className="text-sm text-[#8aa8df]">No channels configured.</p>
-          ) : (
-            <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
-              {Object.entries(status.channels).map(([name, active]) => (
-                <div
-                  key={name}
-                  className="rounded-xl border border-[#1d3770] bg-[#05112c]/90 px-3 py-2.5"
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm capitalize text-white">{name}</span>
-                    <span className="flex items-center gap-2 text-xs text-[#8baee7]">
-                      <span
-                        className={[
-                          'inline-block h-2.5 w-2.5 rounded-full',
-                          active ? 'bg-emerald-400 shadow-[0_0_12px_0_rgba(52,211,153,0.8)]' : 'bg-slate-500',
-                        ].join(' ')}
-                      />
-                      {active ? 'Active' : 'Inactive'}
-                    </span>
-                  </div>
-                </div>
-              ))}
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+            <div className="rounded-xl border border-[#1d3770] bg-[#05112c]/90 px-4 py-3">
+              <p className="text-xs uppercase tracking-[0.12em] text-[#7ea5eb]">Total Tokens</p>
+              <p className="mt-2 text-lg font-semibold text-white">{cost.total_tokens.toLocaleString()}</p>
             </div>
-          )}
+            <div className="rounded-xl border border-[#1d3770] bg-[#05112c]/90 px-4 py-3">
+              <p className="text-xs uppercase tracking-[0.12em] text-[#7ea5eb]">Avg Tokens / Request</p>
+              <p className="mt-2 text-lg font-semibold text-white">
+                {cost.request_count > 0
+                  ? Math.round(cost.total_tokens / cost.request_count).toLocaleString()
+                  : '0'}
+              </p>
+            </div>
+            <div className="rounded-xl border border-[#1d3770] bg-[#05112c]/90 px-4 py-3">
+              <p className="text-xs uppercase tracking-[0.12em] text-[#7ea5eb]">Cost per 1K Tokens</p>
+              <p className="mt-2 text-lg font-semibold text-white">
+                {cost.total_tokens > 0
+                  ? formatUSD((cost.monthly_cost_usd / cost.total_tokens) * 1000)
+                  : '$0.0000'}
+              </p>
+            </div>
+          </div>
         </CollapsibleSection>
 
         <CollapsibleSection

@@ -642,6 +642,7 @@ export const CONFIG_SECTIONS: SectionDef[] = [
       { key: 'conversation_retention_days', label: 'Conversation Retention (days)', type: 'number', min: 1, defaultValue: 30, description: 'Default: 30' },
       { key: 'daily_retention_days', label: 'Daily Retention (days)', type: 'number', min: 1, defaultValue: 30, description: 'Default: 30' },
       { key: 'system_retention_days', label: 'System Retention (days)', type: 'number', min: 1, defaultValue: 7, description: 'Default: 7' },
+      { key: 'cost_retention_days', label: 'Cost Retention (days)', type: 'number', min: 1, defaultValue: 60, description: 'Default: 60 — prune cost records older than this many days' },
       { key: 'embedding_provider', label: 'Embedding Provider', type: 'text', defaultValue: 'none', description: 'e.g. none, openai, local' },
       { key: 'embedding_model', label: 'Embedding Model', type: 'text', defaultValue: 'text-embedding-3-small', description: 'e.g. text-embedding-3-small' },
       { key: 'embedding_dimensions', label: 'Embedding Dimensions', type: 'number', min: 1, defaultValue: 1536, description: 'Default: 1536' },
