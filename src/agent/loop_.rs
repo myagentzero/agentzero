@@ -44,6 +44,8 @@ use execution::{
     ToolExecutionOutcome, execute_tools_parallel, execute_tools_sequential,
     should_execute_tools_in_parallel,
 };
+use super::context_compressor::ContextCompressor;
+use super::history_pruner::{prune_history, remove_orphaned_tool_messages};
 use history::{TurnBuffer, auto_compact_history, extract_facts_from_turns, trim_history};
 #[cfg(test)]
 use history::{apply_compaction_summary, build_compaction_transcript};
@@ -1453,6 +1455,19 @@ pub async fn run_tool_call_loop(
             hooks.fire_llm_input(history, active_model.as_str()).await;
         }
 
+        // Safety net: strip any orphaned tool messages (a tool result whose
+        // assistant(tool_calls) parent was trimmed/compacted/compressed away)
+        // before dispatch. Anthropic and others reject these with a hard 400.
+        // Runs unconditionally, independent of `history_pruner.enabled`.
+        let orphans = remove_orphaned_tool_messages(&mut request_messages);
+        if !orphans.is_empty() {
+            tracing::warn!(
+                removed = orphans.removed,
+                orphan_tool_call_ids = ?orphans.orphan_tool_call_ids,
+                "stripped orphaned tool messages before model call"
+            );
+        }
+
         let chat_future = provider.chat(
             ChatRequest {
                 messages: &request_messages,
@@ -1540,6 +1555,16 @@ pub async fn run_tool_call_loop(
                     continuation_messages.push(ChatMessage::user(
                         MAX_TOKENS_CONTINUATION_PROMPT.to_string(),
                     ));
+
+                    // Same orphan safety net for the continuation request.
+                    let orphans = remove_orphaned_tool_messages(&mut continuation_messages);
+                    if !orphans.is_empty() {
+                        tracing::warn!(
+                            removed = orphans.removed,
+                            orphan_tool_call_ids = ?orphans.orphan_tool_call_ids,
+                            "stripped orphaned tool messages before continuation model call"
+                        );
+                    }
 
                     let continuation_future = provider.chat(
                         ChatRequest {
@@ -2759,6 +2784,16 @@ pub async fn run(
         let mut history = vec![ChatMessage::system(&system_prompt)];
         let mut interactive_turn: usize = 0;
         let mut turn_buffer = TurnBuffer::new();
+        // Token-budget context compressor. When enabled it replaces the
+        // message-count `auto_compact_history` strategy below; `trim_history`
+        // still runs as a hard-cap safety net regardless.
+        let context_compressor = config.agent.context_compression.enabled.then(|| {
+            ContextCompressor::new(
+                config.agent.context_compression.clone(),
+                config.agent.context_compression.context_window,
+            )
+            .with_memory(mem.clone())
+        });
         // Reusable readline editor for UTF-8 input support
         let mut rl = Editor::with_config(
             RlConfig::builder()
@@ -3025,40 +3060,65 @@ pub async fn run(
                 }
             }
 
-            // Auto-compaction before hard trimming to preserve long-context signal.
-            // post_turn_active is only true when auto_save is on AND the
-            // turn buffer confirms recent extraction succeeded; otherwise
-            // compaction must fall back to its own flush_durable_facts.
-            let post_turn_active =
-                config.memory.auto_save && !turn_buffer.needs_compaction_fallback();
-            if let Ok((compacted, flush_ok)) = auto_compact_history(
-                &mut history,
-                provider.as_ref(),
-                &model_name,
-                config.agent.max_history_messages,
-                effective_hooks,
-                Some(mem.as_ref()),
-                None,
-                post_turn_active,
-            )
-            .await
-            {
-                if compacted {
-                    if !post_turn_active {
-                        // Compaction ran its own flush_durable_facts as
-                        // fallback. Drain any buffered turns to prevent
-                        // duplicate extraction.
-                        if !turn_buffer.is_empty() {
-                            let _ = turn_buffer.drain_for_extraction();
-                        }
-                        // Only reset the failure flag when the fallback
-                        // flush actually succeeded; otherwise keep the
-                        // flag so subsequent compactions retry.
-                        if flush_ok {
-                            turn_buffer.mark_extract_success();
-                        }
+            // Deterministic prune (collapse tool exchanges, backstop budget,
+            // orphan removal) before the LLM-based compressor runs.
+            if config.agent.history_pruner.enabled {
+                let _ = prune_history(&mut history, &config.agent.history_pruner);
+            }
+
+            // Compaction before hard trimming to preserve long-context signal.
+            if let Some(compressor) = context_compressor.as_ref() {
+                // Token-budget strategy: summarizes the conversation middle once
+                // the estimated token count crosses the configured threshold,
+                // persisting the summary to memory via `with_memory`. Replaces
+                // the message-count `auto_compact_history` path. Post-turn fact
+                // extraction above is unaffected.
+                match compressor
+                    .compress_if_needed(&mut history, provider.as_ref(), &model_name, temperature)
+                    .await
+                {
+                    Ok(result) if result.compressed => {
+                        println!("🧹 Context compression complete");
                     }
-                    println!("🧹 Auto-compaction complete");
+                    Ok(_) => {}
+                    Err(e) => tracing::warn!("Context compression failed: {e}"),
+                }
+            } else {
+                // Message-count strategy.
+                // post_turn_active is only true when auto_save is on AND the
+                // turn buffer confirms recent extraction succeeded; otherwise
+                // compaction must fall back to its own flush_durable_facts.
+                let post_turn_active =
+                    config.memory.auto_save && !turn_buffer.needs_compaction_fallback();
+                if let Ok((compacted, flush_ok)) = auto_compact_history(
+                    &mut history,
+                    provider.as_ref(),
+                    &model_name,
+                    config.agent.max_history_messages,
+                    effective_hooks,
+                    Some(mem.as_ref()),
+                    None,
+                    post_turn_active,
+                )
+                .await
+                {
+                    if compacted {
+                        if !post_turn_active {
+                            // Compaction ran its own flush_durable_facts as
+                            // fallback. Drain any buffered turns to prevent
+                            // duplicate extraction.
+                            if !turn_buffer.is_empty() {
+                                let _ = turn_buffer.drain_for_extraction();
+                            }
+                            // Only reset the failure flag when the fallback
+                            // flush actually succeeded; otherwise keep the
+                            // flag so subsequent compactions retry.
+                            if flush_ok {
+                                turn_buffer.mark_extract_success();
+                            }
+                        }
+                        println!("🧹 Auto-compaction complete");
+                    }
                 }
             }
 
@@ -7167,6 +7227,11 @@ Let me check the result."#;
     fn map_tool_name_alias_direct_coverage() {
         assert_eq!(map_tool_name_alias("bash"), "shell");
         assert_eq!(map_tool_name_alias("filelist"), "file_list");
+        assert_eq!(map_tool_name_alias("list_dir"), "file_list");
+        assert_eq!(map_tool_name_alias("ls"), "file_list");
+        assert_eq!(map_tool_name_alias("ripgrep"), "content_search");
+        assert_eq!(map_tool_name_alias("rg"), "content_search");
+        assert_eq!(map_tool_name_alias("grep"), "content_search");
         assert_eq!(map_tool_name_alias("memorystore"), "memory_store");
         assert_eq!(map_tool_name_alias("memoryforget"), "memory_forget");
         assert_eq!(map_tool_name_alias("http"), "http_request");
@@ -7181,6 +7246,8 @@ Let me check the result."#;
         assert_eq!(default_param_for_tool("shell"), "command");
         assert_eq!(default_param_for_tool("bash"), "command");
         assert_eq!(default_param_for_tool("file_read"), "path");
+        assert_eq!(default_param_for_tool("ripgrep"), "pattern");
+        assert_eq!(default_param_for_tool("grep"), "pattern");
         assert_eq!(default_param_for_tool("memory_recall"), "query");
         assert_eq!(default_param_for_tool("memory_store"), "content");
         assert_eq!(default_param_for_tool("http_request"), "url");

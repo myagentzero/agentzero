@@ -30,6 +30,7 @@ pub mod delegate;
 pub mod delegate_coordination_status;
 pub mod ess_query;
 pub mod file_edit;
+pub mod file_list;
 pub mod file_read;
 pub mod file_remove;
 pub mod file_write;
@@ -85,6 +86,7 @@ pub use delegate::DelegateTool;
 pub use delegate_coordination_status::DelegateCoordinationStatusTool;
 pub use ess_query::EssQueryTool;
 pub use file_edit::FileEditTool;
+pub use file_list::FileListTool;
 pub use file_read::FileReadTool;
 pub use file_remove::FileRemoveTool;
 pub use file_write::FileWriteTool;
@@ -288,6 +290,7 @@ pub fn default_tools_with_runtime(
         tools.push(Box::new(FileWriteTool::new(security.clone())));
         tools.push(Box::new(FileEditTool::new(security.clone())));
         tools.push(Box::new(FileRemoveTool::new(security.clone())));
+        tools.push(Box::new(FileListTool::new(security.clone())));
         tools.push(Box::new(GlobSearchTool::new(security.clone())));
         tools.push(Box::new(ContentSearchTool::new(security.clone())));
     }
@@ -391,6 +394,7 @@ pub fn all_tools_with_runtime(
         tool_arcs.push(Arc::new(FileWriteTool::new(security.clone())));
         tool_arcs.push(Arc::new(FileEditTool::new(security.clone())));
         tool_arcs.push(Arc::new(FileRemoveTool::new(security.clone())));
+        tool_arcs.push(Arc::new(FileListTool::new(security.clone())));
         tool_arcs.push(Arc::new(GlobSearchTool::new(security.clone())));
         tool_arcs.push(Arc::new(ContentSearchTool::new(security.clone())));
     }
@@ -862,7 +866,7 @@ mod tests {
     fn default_tools_has_expected_count() {
         let security = Arc::new(SecurityPolicy::default());
         let tools = default_tools(security);
-        assert_eq!(tools.len(), 7);
+        assert_eq!(tools.len(), 8);
     }
 
     #[test]

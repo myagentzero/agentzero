@@ -1033,9 +1033,9 @@ impl Default for SubAgentsConfig {
 /// Agent orchestration configuration (`[agent]` section).
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct AgentConfig {
-    /// Optimize context size for smaller models. When true: limits initial context to 6000 chars and reduces RAG results to 2. Default: false.
-    #[serde(default)]
-    pub compact_context: bool,
+    /// Use a lighter context budget for smaller models. When true: limits initial context to 6000 chars and reduces RAG results to 2. Default: false.
+    #[serde(default, alias = "compact_context")]
+    pub light_context: bool,
     #[serde(default)]
     pub session: AgentSessionConfig,
     /// Maximum tool-call loop turns per user message. Default: `20`.
@@ -1094,6 +1094,15 @@ pub struct AgentConfig {
     /// set to `0` for explicit disable.
     #[serde(default = "default_safety_heartbeat_turn_interval")]
     pub safety_heartbeat_turn_interval: usize,
+    /// Token-budget context compression (`[agent.context_compression]`).
+    #[serde(default)]
+    pub context_compression: ContextCompressionConfig,
+    /// Deterministic history pruning (`[agent.history_pruner]`). Runs before the
+    /// context compressor: collapses tool exchanges, enforces a backstop token
+    /// budget, and removes orphaned tool messages. An always-on orphan sweep
+    /// also runs just before every model call regardless of `enabled`.
+    #[serde(default)]
+    pub history_pruner: HistoryPrunerConfig,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -1188,7 +1197,7 @@ fn default_safety_heartbeat_turn_interval() -> usize {
 impl Default for AgentConfig {
     fn default() -> Self {
         Self {
-            compact_context: false,
+            light_context: false,
             session: AgentSessionConfig::default(),
             max_tool_iterations: default_agent_max_tool_iterations(),
             max_history_messages: default_agent_max_history_messages(),
@@ -1203,6 +1212,8 @@ impl Default for AgentConfig {
             loop_detection_failure_streak: default_loop_detection_failure_streak(),
             safety_heartbeat_interval: default_safety_heartbeat_interval(),
             safety_heartbeat_turn_interval: default_safety_heartbeat_turn_interval(),
+            context_compression: ContextCompressionConfig::default(),
+            history_pruner: HistoryPrunerConfig::default(),
         }
     }
 }
@@ -1389,6 +1400,185 @@ impl Default for MultimodalConfig {
             max_images: default_multimodal_max_images(),
             max_image_size_mb: default_multimodal_max_image_size_mb(),
             allow_remote_fetch: false,
+        }
+    }
+}
+
+// ── Context compression (`[agent.context_compression]`) ─────────
+
+/// Token-budget context-compression configuration.
+///
+/// Drives the [`ContextCompressor`](crate::agent::context_compressor::ContextCompressor),
+/// which summarizes the middle of a conversation once the estimated token
+/// count crosses `context_window * threshold_ratio`, while protecting the
+/// first and last few messages from being summarized away.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct ContextCompressionConfig {
+    /// Master switch. When `false`, the compressor is a no-op.
+    #[serde(default = "default_context_compression_enabled")]
+    pub enabled: bool,
+    /// Assumed model context window (tokens) used to compute the compression
+    /// threshold (`context_window * threshold_ratio`). Refined at runtime by
+    /// error-reactive probing in the channel overflow path.
+    #[serde(default = "default_context_compression_context_window")]
+    pub context_window: usize,
+    /// Fraction of the context window at which compression triggers.
+    #[serde(default = "default_context_compression_threshold_ratio")]
+    pub threshold_ratio: f64,
+    /// Number of leading messages protected from summarization.
+    #[serde(default = "default_context_compression_protect_first_n")]
+    pub protect_first_n: usize,
+    /// Number of trailing messages protected from summarization.
+    #[serde(default = "default_context_compression_protect_last_n")]
+    pub protect_last_n: usize,
+    /// Maximum summarization passes per `compress_if_needed` call.
+    #[serde(default = "default_context_compression_max_passes")]
+    pub max_passes: u32,
+    /// Maximum characters retained in a generated summary.
+    #[serde(default = "default_context_compression_summary_max_chars")]
+    pub summary_max_chars: usize,
+    /// Maximum characters of source transcript fed to the summarizer.
+    #[serde(default = "default_context_compression_source_max_chars")]
+    pub source_max_chars: usize,
+    /// Safety timeout (seconds) for the summarizer LLM call.
+    #[serde(default = "default_context_compression_timeout_secs")]
+    pub timeout_secs: u64,
+    /// Optional dedicated summarization model. When `None`, the main model
+    /// is reused (and media markers are preserved for vision-capable models).
+    #[serde(default)]
+    pub summary_model: Option<String>,
+    /// Identifier preservation policy. `"strict"` instructs the summarizer to
+    /// preserve all identifiers verbatim.
+    #[serde(default = "default_context_compression_identifier_policy")]
+    pub identifier_policy: String,
+    /// Fast-trim threshold: tool results longer than this many characters are
+    /// truncated before any LLM summarization. `0` disables fast-trim.
+    #[serde(default = "default_context_compression_tool_result_retrim_chars")]
+    pub tool_result_retrim_chars: usize,
+    /// Substrings marking tool results exempt from fast-trim.
+    #[serde(default)]
+    pub tool_result_trim_exempt: Vec<String>,
+}
+
+fn default_context_compression_enabled() -> bool {
+    true
+}
+
+fn default_context_compression_context_window() -> usize {
+    200_000
+}
+
+fn default_context_compression_threshold_ratio() -> f64 {
+    0.65
+}
+
+fn default_context_compression_protect_first_n() -> usize {
+    3
+}
+
+fn default_context_compression_protect_last_n() -> usize {
+    4
+}
+
+fn default_context_compression_max_passes() -> u32 {
+    3
+}
+
+fn default_context_compression_summary_max_chars() -> usize {
+    4_000
+}
+
+fn default_context_compression_source_max_chars() -> usize {
+    50_000
+}
+
+fn default_context_compression_timeout_secs() -> u64 {
+    60
+}
+
+fn default_context_compression_identifier_policy() -> String {
+    "strict".to_string()
+}
+
+fn default_context_compression_tool_result_retrim_chars() -> usize {
+    2_000
+}
+
+impl Default for ContextCompressionConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_context_compression_enabled(),
+            context_window: default_context_compression_context_window(),
+            threshold_ratio: default_context_compression_threshold_ratio(),
+            protect_first_n: default_context_compression_protect_first_n(),
+            protect_last_n: default_context_compression_protect_last_n(),
+            max_passes: default_context_compression_max_passes(),
+            summary_max_chars: default_context_compression_summary_max_chars(),
+            source_max_chars: default_context_compression_source_max_chars(),
+            timeout_secs: default_context_compression_timeout_secs(),
+            summary_model: None,
+            identifier_policy: default_context_compression_identifier_policy(),
+            tool_result_retrim_chars: default_context_compression_tool_result_retrim_chars(),
+            tool_result_trim_exempt: Vec::new(),
+        }
+    }
+}
+
+// ── History pruning (`[agent.history_pruner]`) ──────────────────
+
+/// Deterministic, no-LLM history pruning configuration.
+///
+/// Drives [`prune_history`](crate::agent::prune_history), which runs before the
+/// [`ContextCompressor`](crate::agent::context_compressor::ContextCompressor):
+/// it collapses assistant+tool exchanges into summaries, enforces a backstop
+/// token budget by dropping the oldest tool groups atomically, and removes
+/// orphaned tool messages whose `assistant(tool_calls)` parent was trimmed away.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct HistoryPrunerConfig {
+    /// Master switch for `prune_history`. When `false`, collapse/budget pruning
+    /// is skipped. Note: the orphaned-tool-message safety sweep before each
+    /// model call runs regardless of this flag.
+    #[serde(default = "default_history_pruner_enabled")]
+    pub enabled: bool,
+    /// Backstop token budget. Tool groups are dropped oldest-first until the
+    /// estimated token count fits. Kept high by default so the context
+    /// compressor owns threshold-based summarization and this is only a
+    /// safety net.
+    #[serde(default = "default_history_pruner_max_tokens")]
+    pub max_tokens: usize,
+    /// Number of trailing (and all system) messages protected from collapse
+    /// and budget dropping.
+    #[serde(default = "default_history_pruner_keep_recent")]
+    pub keep_recent: usize,
+    /// Collapse `assistant + consecutive tool` groups into a compact
+    /// `[Tool exchange: N tool call(s) — results collapsed]` summary.
+    #[serde(default = "default_history_pruner_collapse_tool_results")]
+    pub collapse_tool_results: bool,
+}
+
+fn default_history_pruner_enabled() -> bool {
+    true
+}
+
+fn default_history_pruner_max_tokens() -> usize {
+    175_000
+}
+
+fn default_history_pruner_keep_recent() -> usize {
+    8
+}
+
+fn default_history_pruner_collapse_tool_results() -> bool {
+    true
+}
+
+impl Default for HistoryPrunerConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_history_pruner_enabled(),
+            max_tokens: default_history_pruner_max_tokens(),
+            keep_recent: default_history_pruner_keep_recent(),
+            collapse_tool_results: default_history_pruner_collapse_tool_results(),
         }
     }
 }
@@ -9316,7 +9506,7 @@ reasoning_level = "high"
     #[test]
     async fn agent_config_defaults() {
         let cfg = AgentConfig::default();
-        assert!(!cfg.compact_context);
+        assert!(!cfg.light_context);
         assert_eq!(cfg.max_tool_iterations, 20);
         assert_eq!(cfg.max_history_messages, 50);
         assert!(!cfg.parallel_tools);
@@ -9330,7 +9520,7 @@ reasoning_level = "high"
         let raw = r#"
 default_temperature = 0.7
 [agent]
-compact_context = true
+light_context = true
 max_tool_iterations = 20
 max_history_messages = 80
 parallel_tools = true
@@ -9339,7 +9529,7 @@ allowed_tools = ["delegate", "memory_recall"]
 denied_tools = ["shell"]
 "#;
         let parsed: Config = toml::from_str(raw).unwrap();
-        assert!(parsed.agent.compact_context);
+        assert!(parsed.agent.light_context);
         assert_eq!(parsed.agent.max_tool_iterations, 20);
         assert_eq!(parsed.agent.max_history_messages, 80);
         assert!(parsed.agent.parallel_tools);
@@ -9349,6 +9539,18 @@ denied_tools = ["shell"]
             vec!["delegate".to_string(), "memory_recall".to_string()]
         );
         assert_eq!(parsed.agent.denied_tools, vec!["shell".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn agent_config_deserializes_compact_context_alias() {
+        let raw = r#"
+default_temperature = 0.7
+
+[agent]
+compact_context = true
+"#;
+        let parsed: Config = toml::from_str(raw).unwrap();
+        assert!(parsed.agent.light_context);
     }
 
     #[tokio::test]

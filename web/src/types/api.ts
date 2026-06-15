@@ -114,7 +114,6 @@ export interface PairedDevice {
   id: string;
   token_fingerprint: string;
   created_at: string | null;
-  last_seen_at: string | null;
   paired_by: string | null;
 }
 
@@ -180,6 +179,7 @@ export interface WorkspaceFileContent {
   path: string;
   content: string;
   ext: string;
+  encoding?: 'utf-8' | 'base64';
 }
 
 export interface SSEEvent {

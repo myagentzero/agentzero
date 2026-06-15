@@ -53,7 +53,7 @@ impl CostTracker {
             ));
         }
 
-        let mut storage = self.lock_storage();
+        let storage = self.lock_storage();
         let (daily_cost, monthly_cost) = storage.get_aggregated_costs()?;
 
         // Check daily limit
@@ -114,7 +114,7 @@ impl CostTracker {
 
         let record = CostRecord::new(&self.session_id, usage);
 
-        let mut storage = self.lock_storage();
+        let storage = self.lock_storage();
         storage.add_record(record)?;
 
         Ok(())
@@ -122,7 +122,7 @@ impl CostTracker {
 
     /// Get the current cost summary.
     pub fn get_summary(&self) -> Result<CostSummary> {
-        let mut storage = self.lock_storage();
+        let storage = self.lock_storage();
         let (daily_cost, monthly_cost) = storage.get_aggregated_costs()?;
         let (by_model, total_tokens, request_count) = storage.build_daily_model_stats()?;
         let hourly_cost = storage.get_hourly_cost()?;
@@ -182,11 +182,6 @@ fn resolve_storage_path(workspace_dir: &Path) -> Result<PathBuf> {
 /// Persistent storage for cost records.
 struct CostStorage {
     path: PathBuf,
-    daily_cost_usd: f64,
-    monthly_cost_usd: f64,
-    cached_day: NaiveDate,
-    cached_year: i32,
-    cached_month: u32,
 }
 
 impl CostStorage {
@@ -197,23 +192,9 @@ impl CostStorage {
                 .with_context(|| format!("Failed to create directory {}", parent.display()))?;
         }
 
-        let now = Utc::now();
-        let mut storage = Self {
+        Ok(Self {
             path: path.to_path_buf(),
-            daily_cost_usd: 0.0,
-            monthly_cost_usd: 0.0,
-            cached_day: now.date_naive(),
-            cached_year: now.year(),
-            cached_month: now.month(),
-        };
-
-        storage.rebuild_aggregates(
-            storage.cached_day,
-            storage.cached_year,
-            storage.cached_month,
-        )?;
-
-        Ok(storage)
+        })
     }
 
     fn for_each_record<F>(&self, mut on_record: F) -> Result<()>
@@ -257,46 +238,8 @@ impl CostStorage {
         Ok(())
     }
 
-    fn rebuild_aggregates(&mut self, day: NaiveDate, year: i32, month: u32) -> Result<()> {
-        let mut daily_cost = 0.0;
-        let mut monthly_cost = 0.0;
-
-        self.for_each_record(|record| {
-            let timestamp = record.usage.timestamp.naive_utc();
-
-            if timestamp.date() == day {
-                daily_cost += record.usage.cost_usd;
-            }
-
-            if timestamp.year() == year && timestamp.month() == month {
-                monthly_cost += record.usage.cost_usd;
-            }
-        })?;
-
-        self.daily_cost_usd = daily_cost;
-        self.monthly_cost_usd = monthly_cost;
-        self.cached_day = day;
-        self.cached_year = year;
-        self.cached_month = month;
-
-        Ok(())
-    }
-
-    fn ensure_period_cache_current(&mut self) -> Result<()> {
-        let now = Utc::now();
-        let day = now.date_naive();
-        let year = now.year();
-        let month = now.month();
-
-        if day != self.cached_day || year != self.cached_year || month != self.cached_month {
-            self.rebuild_aggregates(day, year, month)?;
-        }
-
-        Ok(())
-    }
-
     /// Add a new record.
-    fn add_record(&mut self, record: CostRecord) -> Result<()> {
+    fn add_record(&self, record: CostRecord) -> Result<()> {
         let mut file = OpenOptions::new()
             .create(true)
             .append(true)
@@ -308,28 +251,33 @@ impl CostStorage {
         file.sync_all()
             .with_context(|| format!("Failed to sync cost storage at {}", self.path.display()))?;
 
-        self.ensure_period_cache_current()?;
-
-        let timestamp = record.usage.timestamp.naive_utc();
-        if timestamp.date() == self.cached_day {
-            self.daily_cost_usd += record.usage.cost_usd;
-        }
-        if timestamp.year() == self.cached_year && timestamp.month() == self.cached_month {
-            self.monthly_cost_usd += record.usage.cost_usd;
-        }
-
         Ok(())
     }
 
-    /// Get aggregated costs for current day and month.
+    /// Get aggregated costs for last 24 hours rolling and current month.
     ///
     /// Always re-reads the backing file because other `CostTracker`
     /// instances (channels, agent loops) may have appended records
     /// since our last call.
-    fn get_aggregated_costs(&mut self) -> Result<(f64, f64)> {
+    fn get_aggregated_costs(&self) -> Result<(f64, f64)> {
         let now = Utc::now();
-        self.rebuild_aggregates(now.date_naive(), now.year(), now.month())?;
-        Ok((self.daily_cost_usd, self.monthly_cost_usd))
+        let cutoff_24h = now - chrono::Duration::hours(24);
+
+        let mut daily_cost = 0.0;
+        let mut monthly_cost = 0.0;
+
+        self.for_each_record(|record| {
+            if record.usage.timestamp >= cutoff_24h {
+                daily_cost += record.usage.cost_usd;
+            }
+
+            let timestamp = record.usage.timestamp.naive_utc();
+            if timestamp.year() == now.year() && timestamp.month() == now.month() {
+                monthly_cost += record.usage.cost_usd;
+            }
+        })?;
+
+        Ok((daily_cost, monthly_cost))
     }
 
     /// Build per-model stats from the last 24 hours (rolling window).

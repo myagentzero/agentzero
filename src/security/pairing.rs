@@ -35,10 +35,9 @@ struct FailedAttemptState {
     last_attempt: Instant,
 }
 
-#[derive(Debug, Clone)]
-struct PairedDeviceMeta {
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct PairedDeviceMeta {
     created_at: Option<String>,
-    last_seen_at: Option<String>,
     paired_by: Option<String>,
 }
 
@@ -46,16 +45,13 @@ impl PairedDeviceMeta {
     fn legacy() -> Self {
         Self {
             created_at: None,
-            last_seen_at: None,
             paired_by: None,
         }
     }
 
     fn fresh(paired_by: Option<String>) -> Self {
-        let now = now_rfc3339();
         Self {
-            created_at: Some(now.clone()),
-            last_seen_at: Some(now),
+            created_at: Some(now_rfc3339()),
             paired_by,
         }
     }
@@ -66,7 +62,6 @@ pub struct PairedDevice {
     pub id: String,
     pub token_fingerprint: String,
     pub created_at: Option<String>,
-    pub last_seen_at: Option<String>,
     pub paired_by: Option<String>,
 }
 
@@ -264,21 +259,8 @@ impl PairingGuard {
             return true;
         }
         let hashed = hash_token(token);
-        let is_valid = {
-            let tokens = self.paired_tokens.lock();
-            tokens.contains(&hashed)
-        };
-
-        if is_valid {
-            let mut metadata = self.paired_device_meta.lock();
-            let now = now_rfc3339();
-            let entry = metadata
-                .entry(hashed)
-                .or_insert_with(PairedDeviceMeta::legacy);
-            entry.last_seen_at = Some(now);
-        }
-
-        is_valid
+        let tokens = self.paired_tokens.lock();
+        tokens.contains(&hashed)
     }
 
     /// Returns true if the gateway is already paired (has at least one token).
@@ -313,16 +295,14 @@ impl PairingGuard {
                     id: id.clone(),
                     token_fingerprint: id,
                     created_at: meta.created_at,
-                    last_seen_at: meta.last_seen_at,
                     paired_by: meta.paired_by,
                 }
             })
             .collect();
 
         devices.sort_by(|a, b| {
-            b.last_seen_at
-                .cmp(&a.last_seen_at)
-                .then_with(|| b.created_at.cmp(&a.created_at))
+            b.created_at
+                .cmp(&a.created_at)
                 .then_with(|| a.id.cmp(&b.id))
         });
         devices
@@ -383,6 +363,25 @@ impl PairingGuard {
         }
 
         removed
+    }
+
+    /// Load metadata from file and merge into current state (only for tokens that exist).
+    pub fn load_meta_from_file(&self, meta_map: std::collections::HashMap<String, PairedDeviceMeta>) {
+        // Acquire locks in the canonical order (tokens before meta) to avoid
+        // deadlocking against the other paths that hold both.
+        let tokens = self.paired_tokens.lock();
+        let mut md = self.paired_device_meta.lock();
+        for (hash, meta) in meta_map {
+            // Only restore metadata for tokens that currently exist.
+            if tokens.contains(&hash) {
+                md.insert(hash, meta);
+            }
+        }
+    }
+
+    /// Get a snapshot of all current device metadata for persistence.
+    pub fn device_meta_snapshot(&self) -> std::collections::HashMap<String, PairedDeviceMeta> {
+        self.paired_device_meta.lock().clone()
     }
 }
 
@@ -602,7 +601,6 @@ mod tests {
         assert_eq!(devices.len(), 1);
         assert_eq!(devices[0].paired_by.as_deref(), Some("test_client"));
         assert!(devices[0].created_at.is_some());
-        assert!(devices[0].last_seen_at.is_some());
 
         let revoked = guard.revoke_device(&devices[0].id);
         assert!(revoked, "revoke should remove the paired token");
@@ -612,21 +610,6 @@ mod tests {
             guard.pairing_code().is_some(),
             "revoke of final device should regenerate one-time pairing code"
         );
-    }
-
-    #[test]
-    async fn authenticate_updates_legacy_device_last_seen() {
-        let token = "zc_valid";
-        let token_hash = hash_token(token);
-        let guard = PairingGuard::new(true, &[token_hash], None);
-        let before = guard.paired_devices();
-        assert_eq!(before.len(), 1);
-        assert!(before[0].last_seen_at.is_none());
-
-        assert!(guard.is_authenticated(token));
-
-        let after = guard.paired_devices();
-        assert!(after[0].last_seen_at.is_some());
     }
 
     // ── Token hashing ────────────────────────────────────────

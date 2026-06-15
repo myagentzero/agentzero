@@ -51,23 +51,57 @@ impl Tool for FileWriteTool {
                 },
                 "content": {
                     "type": "string",
-                    "description": "Content to write to the file"
+                    "description": "Content to write to the file. If omitted, creates an empty file (like 'touch')."
                 }
             },
-            "required": ["path", "content"]
+            "required": ["path"]
         })
     }
 
     async fn execute(&self, args: serde_json::Value) -> anyhow::Result<ToolResult> {
+        let args_str = serde_json::to_string(&args).unwrap_or_else(|_| "(unprintable)".to_string());
+
         let path = args
             .get("path")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| anyhow::anyhow!("Missing 'path' parameter"))?;
+            .ok_or_else(|| {
+                tracing::warn!(
+                    args = %args_str,
+                    "file_write: 'path' parameter is missing or not a string"
+                );
+                anyhow::anyhow!("Missing 'path' parameter")
+            })?;
 
-        let content = args
-            .get("content")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| anyhow::anyhow!("Missing 'content' parameter"))?;
+        let content = match args.get("content") {
+            None => {
+                tracing::debug!(path = %path, "file_write: no content provided, creating empty file");
+                String::new()
+            }
+            Some(serde_json::Value::String(s)) => {
+                tracing::debug!(path = %path, bytes = s.len(), "file_write: content is string");
+                s.clone()
+            }
+            Some(serde_json::Value::Null) => {
+                tracing::debug!(path = %path, "file_write: content is null, creating empty file");
+                String::new()
+            }
+            Some(other) => {
+                let type_name = match other {
+                    serde_json::Value::Bool(_) => "boolean",
+                    serde_json::Value::Number(_) => "number",
+                    serde_json::Value::Array(_) => "array",
+                    serde_json::Value::Object(_) => "object",
+                    _ => "unknown",
+                };
+                tracing::warn!(
+                    path = %path,
+                    content_type = type_name,
+                    content = %serde_json::to_string(other).unwrap_or_default(),
+                    "file_write: 'content' parameter is not a string, converting to JSON"
+                );
+                serde_json::to_string(other)?
+            }
+        };
 
         if !self.security.can_act() {
             return Ok(ToolResult {
@@ -188,7 +222,7 @@ impl Tool for FileWriteTool {
             });
         }
 
-        match tokio::fs::write(&resolved_target, content).await {
+        match tokio::fs::write(&resolved_target, &content).await {
             Ok(()) => Ok(ToolResult {
                 success: true,
                 output: format!("Written {} bytes to {path}", content.len()),
@@ -267,7 +301,7 @@ mod tests {
         assert!(schema["properties"]["content"].is_object());
         let required = schema["required"].as_array().unwrap();
         assert!(required.contains(&json!("path")));
-        assert!(required.contains(&json!("content")));
+        assert!(!required.contains(&json!("content")), "content should be optional");
     }
 
     #[tokio::test]
@@ -405,9 +439,15 @@ mod tests {
 
     #[tokio::test]
     async fn file_write_missing_content_param() {
-        let tool = FileWriteTool::new(test_security(std::env::temp_dir()));
-        let result = tool.execute(json!({"path": "file.txt"})).await;
-        assert!(result.is_err());
+        let dir = std::env::temp_dir().join("zeroclaw_test_file_write_no_content");
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+        tokio::fs::create_dir_all(&dir).await.unwrap();
+
+        let tool = FileWriteTool::new(test_security(dir.clone()));
+        let result = tool.execute(json!({"path": "file.txt"})).await.unwrap();
+        assert!(result.success, "missing content should create empty file: {:?}", result.error);
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
     }
 
     #[tokio::test]
@@ -422,6 +462,46 @@ mod tests {
             .await
             .unwrap();
         assert!(result.success);
+        assert!(result.output.contains("0 bytes"));
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn file_write_touch_no_content_param() {
+        let dir = std::env::temp_dir().join("zeroclaw_test_file_write_touch");
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+        tokio::fs::create_dir_all(&dir).await.unwrap();
+
+        let tool = FileWriteTool::new(test_security(dir.clone()));
+        let result = tool
+            .execute(json!({"path": "touched.txt"}))
+            .await
+            .unwrap();
+        assert!(result.success, "touch should succeed: {:?}", result.error);
+        assert!(result.output.contains("0 bytes"));
+        assert!(dir.join("touched.txt").exists(), "file should exist");
+
+        let content = tokio::fs::read_to_string(dir.join("touched.txt"))
+            .await
+            .unwrap();
+        assert_eq!(content, "");
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn file_write_touch_null_content() {
+        let dir = std::env::temp_dir().join("zeroclaw_test_file_write_touch_null");
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+        tokio::fs::create_dir_all(&dir).await.unwrap();
+
+        let tool = FileWriteTool::new(test_security(dir.clone()));
+        let result = tool
+            .execute(json!({"path": "touched.txt", "content": null}))
+            .await
+            .unwrap();
+        assert!(result.success, "touch with null content should succeed: {:?}", result.error);
         assert!(result.output.contains("0 bytes"));
 
         let _ = tokio::fs::remove_dir_all(&dir).await;

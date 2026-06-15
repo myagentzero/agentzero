@@ -883,7 +883,9 @@ pub(super) fn map_tool_name_alias(tool_name: &str) -> &str {
         // File tool variations
         "fileread" | "file_read" | "readfile" | "read_file" | "file" => "file_read",
         "filewrite" | "file_write" | "writefile" | "write_file" => "file_write",
-        "filelist" | "file_list" | "listfiles" | "list_files" => "file_list",
+        "filelist" | "file_list" | "listfiles" | "list_files" | "list_dir" | "listdir" | "ls" => "file_list",
+        // Content search variations (ripgrep/grep)
+        "contentsearch" | "content_search" | "ripgrep" | "rg" | "grep" => "content_search",
         // Memory variations
         "memoryrecall" | "memory_recall" | "recall" | "memrecall" => "memory_recall",
         "memorystore" | "memory_store" | "store" | "memstore" => "memory_store",
@@ -1022,7 +1024,10 @@ pub(super) fn default_param_for_tool(tool: &str) -> &'static str {
         // All file tools default to "path"
         "file_read" | "fileread" | "readfile" | "read_file" | "file" | "file_write"
         | "filewrite" | "writefile" | "write_file" | "file_edit" | "fileedit" | "editfile"
-        | "edit_file" | "file_list" | "filelist" | "listfiles" | "list_files" => "path",
+        | "edit_file" | "file_list" | "filelist" | "listfiles" | "list_files" | "list_dir"
+        | "listdir" | "ls" => "path",
+        // Content search tools default to "pattern"
+        "content_search" | "contentsearch" | "ripgrep" | "rg" | "grep" => "pattern",
         // Memory recall/forget and web search tools all default to "query"
         "memory_recall" | "memoryrecall" | "recall" | "memrecall" | "memory_forget"
         | "memoryforget" | "forget" | "memforget" | "web_search_tool" | "web_search"

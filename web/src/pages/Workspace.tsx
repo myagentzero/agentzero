@@ -6,11 +6,13 @@ import {
   ChevronRight,
   ChevronDown,
   X,
+  Download,
 } from 'lucide-react';
 import type { WorkspaceFileNode, WorkspaceTree, WorkspaceFileContent } from '@/types/api';
 import { getWorkspaceFiles, getWorkspaceFile } from '@/lib/api';
 
-const VIEWABLE = new Set(['md', 'json', 'jsonl', 'js', 'py', 'ps1', 'license', 'txt']);
+const VIEWABLE = new Set(['md', 'json', 'jsonl', 'js', 'py', 'ps1', 'license', 'txt', 'svg']);
+const DOWNLOADABLE = new Set(['pdf', 'docx', 'xlsx', 'pptx', 'png', 'jpg', 'jpeg', 'gif', 'zip', 'tar', 'gz']);
 
 function ext(name: string): string {
   return name.split('.').pop()?.toLowerCase() ?? '';
@@ -24,16 +26,22 @@ function isViewable(name: string): boolean {
   return VIEWABLE.has(ext(name));
 }
 
+function isDownloadable(name: string): boolean {
+  return DOWNLOADABLE.has(ext(name));
+}
+
 interface TreeNodeProps {
   node: WorkspaceFileNode;
   onOpen: (node: WorkspaceFileNode) => void;
+  onDownload: (node: WorkspaceFileNode) => void;
   depth: number;
 }
 
-function TreeNode({ node, onOpen, depth }: TreeNodeProps) {
+function TreeNode({ node, onOpen, onDownload, depth }: TreeNodeProps) {
   const [open, setOpen] = useState(depth === 0);
   const isDir = node.kind === 'dir';
   const canView = !isDir && isViewable(node.name);
+  const canDownload = !isDir && isDownloadable(node.name);
 
   if (isDir) {
     return (
@@ -59,7 +67,7 @@ function TreeNode({ node, onOpen, depth }: TreeNodeProps) {
         {open && node.children && node.children.length > 0 && (
           <div>
             {node.children.map((child) => (
-              <TreeNode key={child.path} node={child} onOpen={onOpen} depth={depth + 1} />
+              <TreeNode key={child.path} node={child} onOpen={onOpen} onDownload={onDownload} depth={depth + 1} />
             ))}
           </div>
         )}
@@ -68,30 +76,44 @@ function TreeNode({ node, onOpen, depth }: TreeNodeProps) {
   }
 
   return (
-    <button
-      type="button"
-      onClick={() => canView && onOpen(node)}
-      disabled={!canView}
-      className={[
-        'flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-sm',
-        canView
-          ? 'cursor-pointer text-[#9bb7eb] hover:bg-[#0b1f4a] hover:text-white'
-          : 'cursor-default text-[#4a5c7a]',
-      ].join(' ')}
+    <div
+      className="group flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-sm"
       style={{ paddingLeft: `${8 + depth * 16}px` }}
-      title={canView ? `View ${node.name}` : `${node.name} (not viewable)`}
     >
       <span className="h-3.5 w-3.5 shrink-0" />
       <FileText
-        className={['h-4 w-4 shrink-0', canView ? 'text-blue-400' : 'text-[#4a5c7a]'].join(' ')}
+        className={['h-4 w-4 shrink-0', canView ? 'text-blue-400' : canDownload ? 'text-green-400' : 'text-[#4a5c7a]'].join(' ')}
       />
-      <span className="truncate">{node.name}</span>
-      {canView && ext(node.name) && (
+      <button
+        type="button"
+        onClick={() => canView && onOpen(node)}
+        disabled={!canView}
+        className={[
+          'flex-1 truncate text-left',
+          canView
+            ? 'cursor-pointer text-[#9bb7eb] hover:text-white'
+            : 'cursor-default text-[#4a5c7a]',
+        ].join(' ')}
+        title={canView ? `View ${node.name}` : canDownload ? `Download ${node.name}` : `${node.name} (not supported)`}
+      >
+        {node.name}
+      </button>
+      {(canView || canDownload) && ext(node.name) && (
         <span className="ml-auto shrink-0 rounded bg-[#0f2151] px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-[#5f84cc]">
           {ext(node.name)}
         </span>
       )}
-    </button>
+      {canDownload && (
+        <button
+          type="button"
+          onClick={() => onDownload(node)}
+          className="ml-1 rounded p-1 text-[#5f84cc] opacity-0 transition-opacity hover:bg-[#0b1f4a] hover:text-white group-hover:opacity-100"
+          aria-label={`Download ${node.name}`}
+        >
+          <Download className="h-4 w-4" />
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -180,6 +202,35 @@ export default function Workspace() {
       .finally(() => setFileLoading(false));
   }
 
+  function downloadFile(node: WorkspaceFileNode) {
+    setFileLoading(true);
+    setFileError(null);
+    getWorkspaceFile(node.path)
+      .then((file) => {
+        let blob: Blob;
+        if (file.encoding === 'base64') {
+          const binary = atob(file.content);
+          const bytes = new Uint8Array(binary.length);
+          for (let i = 0; i < binary.length; i++) {
+            bytes[i] = binary.charCodeAt(i);
+          }
+          blob = new Blob([bytes], { type: 'application/octet-stream' });
+        } else {
+          blob = new Blob([file.content], { type: 'application/octet-stream' });
+        }
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = node.name;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+      })
+      .catch((e) => setFileError(e.message))
+      .finally(() => setFileLoading(false));
+  }
+
   return (
     <div className="flex h-[calc(100vh-4rem)] flex-col p-6">
       {treeData && (
@@ -212,7 +263,7 @@ export default function Workspace() {
                 <p className="px-3 py-4 text-sm text-[#4a5c7a]">Workspace is empty</p>
               ) : (
                 treeData.tree.map((node) => (
-                  <TreeNode key={node.path} node={node} onOpen={openFile} depth={0} />
+                  <TreeNode key={node.path} node={node} onOpen={openFile} onDownload={downloadFile} depth={0} />
                 ))
               )}
             </div>
@@ -221,8 +272,15 @@ export default function Workspace() {
           {/* Viewer panel */}
           <div className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-[#1e2f5d] bg-[#050b1a]/95">
             {!activeFile && !fileLoading && !fileError && (
-              <div className="flex flex-1 items-center justify-center text-sm text-[#4a5c7a]">
-                Select a file to view it (.md, .json, .jsonl, .js, .py, .ps1, LICENSE, .txt)
+              <div className="flex flex-1 items-center justify-center text-center text-sm text-[#4a5c7a]">
+                <div>
+                  <p>Select a file to view or download</p>
+                  <p className="mt-2 text-xs">
+                    View: .md, .json, .jsonl, .js, .py, .ps1, .svg, LICENSE, .txt
+                    <br />
+                    Download: .pdf, .docx, .xlsx, .pptx, images, and more
+                  </p>
+                </div>
               </div>
             )}
 

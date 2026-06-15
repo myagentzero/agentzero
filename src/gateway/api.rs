@@ -1174,6 +1174,12 @@ pub async fn handle_api_pairing_device_revoke(
             .into_response();
     }
 
+    // Also persist device metadata (best-effort, don't fail response if it errors)
+    let workspace_dir = state.config.lock().workspace_dir.clone();
+    if let Err(err) = super::persist_pairing_meta(&workspace_dir, &state.pairing).await {
+        tracing::warn!("Failed to persist pairing metadata on revoke: {err}");
+    }
+
     Json(serde_json::json!({"status": "ok", "revoked": true, "id": id})).into_response()
 }
 
@@ -1254,10 +1260,14 @@ pub async fn handle_api_workspace_files(
         .into_response()
 }
 
-const VIEWABLE_EXTENSIONS: &[&str] = &["md", "json", "jsonl", "js", "py", "ps1", "txt"];
+const VIEWABLE_EXTENSIONS: &[&str] = &["md", "json", "jsonl", "js", "py", "ps1", "txt", "svg"];
 const VIEWABLE_FILENAMES: &[&str] = &["license", "readme"];
+const DOWNLOADABLE_EXTENSIONS: &[&str] = &["pdf", "docx", "xlsx", "pptx", "png", "jpg", "jpeg", "gif", "zip", "tar", "gz"];
 
-/// Check if a file is viewable based on extension or filename
+/// Maximum size of a workspace file served over the API (text or base64-encoded binary).
+const MAX_WORKSPACE_FILE_SIZE: u64 = 25 * 1024 * 1024;
+
+/// Check if a file is viewable (text-based) based on extension or filename
 fn is_viewable_file(path: &str) -> bool {
     let path_obj = std::path::Path::new(path);
     let filename_lower = path_obj
@@ -1279,6 +1289,22 @@ fn is_viewable_file(path: &str) -> bool {
         .to_lowercase();
 
     VIEWABLE_EXTENSIONS.contains(&ext.as_str())
+}
+
+/// Check if a file is downloadable (binary/image files) based on extension
+fn is_downloadable_file(path: &str) -> bool {
+    let ext = std::path::Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+
+    DOWNLOADABLE_EXTENSIONS.contains(&ext.as_str())
+}
+
+/// Check if a file is accessible (either viewable or downloadable)
+fn is_accessible_file(path: &str) -> bool {
+    is_viewable_file(path) || is_downloadable_file(path)
 }
 
 /// Check if a file path is blocked for security reasons
@@ -1336,10 +1362,10 @@ pub async fn handle_api_workspace_file(
             .into_response();
     }
 
-    if !is_viewable_file(&rel) {
+    if !is_accessible_file(&rel) {
         return (
             StatusCode::FORBIDDEN,
-            Json(serde_json::json!({"error": "Only text-based files (.md, .json, .jsonl, .js, .py, .ps1, LICENSE, README, .txt) can be viewed"})),
+            Json(serde_json::json!({"error": "File type not supported. Viewable: .md, .json, .jsonl, .js, .py, .ps1, .svg, LICENSE, README, .txt. Downloadable: .pdf, .docx, .xlsx, .pptx, .png, .jpg, .gif, .zip, .tar, .gz"})),
         )
             .into_response();
     }
@@ -1392,14 +1418,58 @@ pub async fn handle_api_workspace_file(
             .into_response();
     }
 
-    match std::fs::read_to_string(&canonical) {
-        Ok(content) => Json(serde_json::json!({ "path": rel, "content": content, "ext": ext }))
-            .into_response(),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": format!("Failed to read file: {e}")})),
-        )
-            .into_response(),
+    // Reject files that are too large to serve in a single JSON response.
+    if let Ok(meta) = std::fs::metadata(&canonical) {
+        if meta.len() > MAX_WORKSPACE_FILE_SIZE {
+            return (
+                StatusCode::PAYLOAD_TOO_LARGE,
+                Json(serde_json::json!({
+                    "error": format!(
+                        "File is too large to open ({} MiB max)",
+                        MAX_WORKSPACE_FILE_SIZE / (1024 * 1024)
+                    )
+                })),
+            )
+                .into_response();
+        }
+    }
+
+    // For viewable files, read as text. For downloadable files, read as binary and base64-encode.
+    if is_viewable_file(&rel) {
+        match std::fs::read_to_string(&canonical) {
+            Ok(content) => Json(serde_json::json!({
+                "path": rel,
+                "content": content,
+                "ext": ext,
+                "encoding": "utf-8"
+            }))
+                .into_response(),
+            Err(e) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": format!("Failed to read file: {e}")})),
+            )
+                .into_response(),
+        }
+    } else {
+        // Binary file - read as bytes and base64 encode
+        match std::fs::read(&canonical) {
+            Ok(bytes) => {
+                use base64::Engine;
+                let encoded = base64::engine::general_purpose::STANDARD.encode(&bytes);
+                Json(serde_json::json!({
+                    "path": rel,
+                    "content": encoded,
+                    "ext": ext,
+                    "encoding": "base64"
+                }))
+                    .into_response()
+            }
+            Err(e) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": format!("Failed to read file: {e}")})),
+            )
+                .into_response(),
+        }
     }
 }
 

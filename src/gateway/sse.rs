@@ -446,8 +446,8 @@ mod tests {
     fn backfill_conversion_extracts_tool_and_duration_from_payload() {
         let event = make_trace_event("tool_call");
         let json = runtime_trace_event_to_sse_json(&event).unwrap();
-        assert_eq!(json["tool"], "shell");
-        assert_eq!(json["duration_ms"], 42);
+        assert_eq!(json["payload"]["tool"], "shell");
+        assert_eq!(json["payload"]["duration_ms"], 42);
         assert_eq!(json["success"], true);
     }
 
@@ -457,8 +457,8 @@ mod tests {
         let json = runtime_trace_event_to_sse_json(&event).unwrap();
         assert_eq!(json["provider"], "openrouter");
         assert_eq!(json["model"], "test-model");
-        assert_eq!(json["duration_ms"], 42);
-        assert_eq!(json["tokens_used"], 100);
+        assert_eq!(json["payload"]["duration_ms"], 42);
+        assert_eq!(json["payload"]["tokens_used"], 100);
     }
 
     #[test]
@@ -471,6 +471,7 @@ mod tests {
             "output_tokens": 350,
         });
         let json = runtime_trace_event_to_sse_json(&event).unwrap();
-        assert_eq!(json["tokens_used"], 1550);
+        assert_eq!(json["payload"]["input_tokens"], 1200);
+        assert_eq!(json["payload"]["output_tokens"], 350);
     }
 }

@@ -134,7 +134,7 @@ port = 42617
 allow_public_bind = false
 
 [agent]
-compact_context = true
+light_context = true
 ```
 
 ---
@@ -212,6 +212,6 @@ Now when you message your Telegram bot *"Turn on the LED"* or *"Set pin 13 high"
 
 - **"command not found: zeroclaw"** — Use full path: `/usr/local/bin/zeroclaw` or ensure `~/.cargo/bin` is in PATH.
 - **Telegram not responding** — Check bot_token, allowed_users, and that the Uno Q has internet (WiFi).
-- **Out of memory** — Keep features minimal (`--features hardware` for Uno Q); consider `compact_context = true`.
+- **Out of memory** — Keep features minimal (`--features hardware` for Uno Q); consider `light_context = true`.
 - **GPIO commands ignored** — Ensure Bridge app is running (`zeroclaw peripheral setup-uno-q` deploys and starts it). Config must have `board = "arduino-uno-q"` and `transport = "bridge"`.
 - **LLM provider (GLM/Zhipu)** — Use `default_provider = "glm"` or `"zhipu"` with `GLM_API_KEY` in env or config. ZeroClaw uses the correct v4 endpoint.

@@ -72,11 +72,11 @@ fn agent_config_default_tool_dispatcher() {
 }
 
 #[test]
-fn agent_config_default_compact_context_on() {
+fn agent_config_default_light_context_off() {
     let agent = AgentConfig::default();
     assert!(
-        !agent.compact_context,
-        "compact_context should default to false"
+        !agent.light_context,
+        "light_context should default to false"
     );
 }
 
@@ -139,14 +139,14 @@ fn config_toml_roundtrip_preserves_agent_config() {
     let mut config = Config::default();
     config.agent.max_tool_iterations = 5;
     config.agent.max_history_messages = 25;
-    config.agent.compact_context = true;
+    config.agent.light_context = true;
 
     let toml_str = toml::to_string(&config).expect("config should serialize to TOML");
     let parsed: Config = toml::from_str(&toml_str).expect("TOML should deserialize back");
 
     assert_eq!(parsed.agent.max_tool_iterations, 5);
     assert_eq!(parsed.agent.max_history_messages, 25);
-    assert!(parsed.agent.compact_context);
+    assert!(parsed.agent.light_context);
 }
 
 #[test]
@@ -205,8 +205,8 @@ default_temperature = 0.7
     assert_eq!(parsed.agent.max_tool_iterations, 20);
     assert_eq!(parsed.agent.max_history_messages, 50);
     assert!(
-        !parsed.agent.compact_context,
-        "AgentConfig::default() disables compact_context"
+        !parsed.agent.light_context,
+        "AgentConfig::default() disables light_context"
     );
 }
 
@@ -217,13 +217,13 @@ default_temperature = 0.7
 
 [agent]
 max_tool_iterations = 3
-compact_context = true
+light_context = true
 "#;
     let parsed: Config =
         toml::from_str(toml_with_agent).expect("TOML with agent section should parse");
 
     assert_eq!(parsed.agent.max_tool_iterations, 3);
-    assert!(parsed.agent.compact_context);
+    assert!(parsed.agent.light_context);
     // max_history_messages should still use default
     assert_eq!(parsed.agent.max_history_messages, 50);
 }

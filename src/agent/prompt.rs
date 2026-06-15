@@ -284,7 +284,20 @@ pub(crate) fn build_tool_instructions(
     );
 
     let mut instructions = String::new();
-    if !native_tools {
+     instructions.push_str(
+            "### CRITICAL: Tool Honesty\n\n\
+             - NEVER fabricate, invent, or guess tool results. If a tool returns empty results, say \"No results found.\"\n\
+             - If a tool call fails, report the error — never make up data to fill the gap.\n\
+             - When unsure whether a tool call succeeded, ask the user rather than guessing.\n\n",
+     );
+    if native_tools {
+        instructions.push_str(
+            "Available tools:\n\n",
+        );
+        for tool in tool_specs {
+            let _ = writeln!(instructions, "- **{}**: {}", tool.name, tool.description);
+        }
+    } else {
         instructions.push_str("### Tool Calling (XML Protocol)\n\n");
         instructions.push_str("Format:\n");
         instructions.push_str(
@@ -294,13 +307,16 @@ pub(crate) fn build_tool_instructions(
             "Emit <tool_call> tags directly. Don't summarize, describe capabilities, or list steps.\n",
         );
         instructions.push_str("Tool results appear in <tool_result> tags.\n\n");
-    }
-    for tool in tool_specs {
-        let _ = writeln!(
-            instructions,
-            "**{}**: {}\n  Parameters: `{}`\n\n",
-            tool.name, tool.description, tool.parameters
-        );
+
+        for tool in tool_specs {
+            let parameters = serde_json::to_string_pretty(&tool.parameters)
+                .unwrap_or_else(|_| tool.parameters.to_string());
+            let _ = write!(
+                instructions,
+                "### {}\n{}\n\nParameters:\n```json\n{}\n```\n\n",
+                tool.name, tool.description, parameters
+            );
+        }
     }
 
     instructions
@@ -314,7 +330,7 @@ pub fn build_system_prompt_with_mode(
 ) -> String {
     let mut prompt = String::with_capacity(8192);
 
-    let bootstrap_max_chars = if config.agent.compact_context {
+    let bootstrap_max_chars = if config.agent.light_context {
         COMPACT_BOOTSTRAP_MAX_CHARS
     } else {
         BOOTSTRAP_MAX_CHARS
@@ -352,7 +368,7 @@ pub fn build_system_prompt_with_mode(
 
     // ── 3. Tooling ──────────────────────────────────────────────
     if !tool_specs.is_empty() {
-        prompt.push_str("## Tools\n\nYou have access to the following tools:\n");
+        prompt.push_str("## Tools\n\n");
         prompt.push_str(&build_tool_instructions(tool_specs, native_tools));
         prompt.push('\n');
     }
@@ -457,7 +473,7 @@ pub fn build_system_prompt_with_mode(
         caller = %caller,
         words = word_count,
         chars = prompt.len(),
-        compact_context = config.agent.compact_context,
+        light_context = config.agent.light_context,
         bootstrap_limit = bootstrap_max_chars,
         tools = tool_specs.len(),
         native_tools,
@@ -608,14 +624,49 @@ mod tests {
     }
 
     #[test]
-    fn build_shell_policy_instructions_read_only_disables_shell() {
-        let mut autonomy = crate::config::AutonomyConfig::default();
-        autonomy.level = crate::security::AutonomyLevel::ReadOnly;
+    fn build_tool_instructions_native_tools_omits_parameter_schemas() {
+        let specs = vec![crate::tools::ToolSpec {
+            name: "read_skill".into(),
+            description: "Read a skill by name.".into(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "name": { "type": "string" }
+                },
+                "required": ["name"]
+            }),
+        }];
 
-        let instructions = build_shell_policy_instructions(&autonomy);
+        let instructions = build_tool_instructions(&specs, true);
 
-        assert!(instructions.contains("Level: `read_only`"));
-        assert!(instructions.contains("Shell disabled in read-only mode"));
+        assert!(instructions.contains("Available tools:"));
+        assert!(instructions.contains("- **read_skill**"));
+        assert!(instructions.contains("Read a skill by name."));
+        assert!(!instructions.contains("Parameters:"));
+        assert!(!instructions.contains("\"required\""));
+        assert!(!instructions.contains("Tool Calling (XML Protocol)"));
+    }
+
+    #[test]
+    fn build_tool_instructions_xml_mode_includes_pretty_parameter_schemas() {
+        let specs = vec![crate::tools::ToolSpec {
+            name: "read_skill".into(),
+            description: "Read a skill by name.".into(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "name": { "type": "string" }
+                },
+                "required": ["name"]
+            }),
+        }];
+
+        let instructions = build_tool_instructions(&specs, false);
+
+        assert!(instructions.contains("Tool Calling (XML Protocol)"));
+        assert!(instructions.contains("### read_skill"));
+        assert!(instructions.contains("Parameters:\n```json"));
+        assert!(instructions.contains("\"required\": [\n    \"name\"\n  ]"));
     }
 
 }

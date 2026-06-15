@@ -158,7 +158,7 @@ fn build_agent_run_config(config: &Config, job: &CronJob) -> Config {
     let mut run_config = config.clone();
     run_config.skip_input_autosave = true;
     if job.light_context {
-        run_config.agent.compact_context = true;
+        run_config.agent.light_context = true;
     }
     run_config
 }
@@ -602,7 +602,7 @@ mod tests {
         let run_config = build_agent_run_config(&config, &job);
 
         assert!(run_config.skip_input_autosave);
-        assert!(run_config.agent.compact_context);
+        assert!(run_config.agent.light_context);
     }
 
     #[tokio::test]
@@ -614,7 +614,7 @@ mod tests {
 
         let run_config = build_agent_run_config(&config, &job);
 
-        assert!(!run_config.agent.compact_context);
+        assert!(!run_config.agent.light_context);
     }
 
     #[tokio::test]

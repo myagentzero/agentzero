@@ -832,7 +832,7 @@ Screenshot captured successfully."#;
         let prompt = build_ws_system_prompt(&config, &tools, false);
 
         assert!(prompt.contains("### Tool Calling (XML Protocol)"));
-        assert!(prompt.contains("**browser**"));
+        assert!(prompt.contains("### browser"));
         assert!(prompt.contains("## Shell Policy"));
     }
 
@@ -844,7 +844,7 @@ Screenshot captured successfully."#;
         let prompt = build_ws_system_prompt(&config, &tools, true);
 
         assert!(!prompt.contains("### Tool Calling (XML Protocol)"));
-        assert!(prompt.contains("**browser**"));
+        assert!(prompt.contains("### browser"));
         assert!(prompt.contains("## Shell Policy"));
     }
 

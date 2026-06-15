@@ -146,9 +146,6 @@ export default function Devices() {
                 <th className="px-4 py-3 text-left font-medium text-gray-400">
                   Created
                 </th>
-                <th className="px-4 py-3 text-left font-medium text-gray-400">
-                  Last Seen
-                </th>
                 <th className="px-4 py-3 text-right font-medium text-gray-400">
                   Actions
                 </th>
@@ -168,9 +165,6 @@ export default function Devices() {
                   </td>
                   <td className="px-4 py-3 whitespace-nowrap text-xs text-gray-400">
                     {formatDate(device.created_at)}
-                  </td>
-                  <td className="px-4 py-3 whitespace-nowrap text-xs text-gray-400">
-                    {formatDate(device.last_seen_at)}
                   </td>
                   <td className="px-4 py-3 text-right">
                     {pendingRevoke === device.id ? (

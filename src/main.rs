@@ -254,7 +254,7 @@ Examples:
   zeroclaw agent -m \"Summarize today's logs\"  # single message
   zeroclaw agent -p anthropic --model claude-sonnet-4-20250514
   zeroclaw agent --autonomy-level full --max-actions-per-hour 100
-  zeroclaw agent -m \"quick task\" --memory-backend none --compact-context")]
+  zeroclaw agent -m \"quick task\" --memory-backend none --light-context")]
     Agent {
         /// Single message mode (don't enter interactive mode)
         #[arg(short, long)]
@@ -288,9 +288,9 @@ Examples:
         #[arg(long)]
         max_history_messages: Option<usize>,
 
-        /// Enable compact context mode (smaller prompts for limited models)
-        #[arg(long)]
-        compact_context: bool,
+        /// Enable light context mode (smaller prompts for limited models)
+        #[arg(long, alias = "compact-context")]
+        light_context: bool,
 
         /// Memory backend (sqlite, markdown, none)
         #[arg(long)]
@@ -1003,7 +1003,7 @@ async fn main() -> Result<()> {
             max_actions_per_hour,
             max_tool_iterations,
             max_history_messages,
-            compact_context,
+            light_context,
             memory_backend,
         } => {
             if let Some(level) = autonomy_level {
@@ -1018,8 +1018,8 @@ async fn main() -> Result<()> {
             if let Some(n) = max_history_messages {
                 config.agent.max_history_messages = n;
             }
-            if compact_context {
-                config.agent.compact_context = true;
+            if light_context {
+                config.agent.light_context = true;
             }
             if let Some(ref backend) = memory_backend {
                 config.memory.backend = backend.clone();

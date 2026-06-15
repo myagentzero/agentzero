@@ -417,9 +417,9 @@ export const CONFIG_SECTIONS: SectionDef[] = [
     description: 'Agent orchestration settings',
     icon: Bot,
     fields: [
-      { key: 'compact_context', label: 'Compact Context', type: 'toggle', defaultValue: true, description: 'Optimize for smaller models: limits initial context to 6000 chars, reduces RAG results to 2' },
+      { key: 'light_context', label: 'Light Context', type: 'toggle', defaultValue: true, description: 'Optimize for smaller models: limits initial context to 6000 chars, reduces RAG results to 2' },
       { key: 'max_tool_iterations', label: 'Max Tool Iterations Per Message', type: 'number', min: 1, defaultValue: 20, description: 'Max tool calls allowed in a single user message. Default: 20' },
-      { key: 'max_history_messages', label: 'Max History Messages', type: 'number', min: 10, defaultValue: 50, description: 'Triggers automatic compaction when exceeded. Default: 50 (recommended: 25-35)' },
+      { key: 'max_history_messages', label: 'Max History Messages', type: 'number', min: 10, defaultValue: 50, description: 'Max turns kept per channel conversation; oldest are dropped when exceeded. Interactive REPL also summarizes before trimming. Default: 50' },
       { key: 'parallel_tools', label: 'Parallel Tools', type: 'toggle', defaultValue: false, description: 'Execute multiple tools concurrently within a single iteration' },
       {
         key: 'tool_dispatcher', label: 'Tool Dispatcher', type: 'select', defaultValue: 'auto', options: [
@@ -433,6 +433,47 @@ export const CONFIG_SECTIONS: SectionDef[] = [
       { key: 'loop_detection_failure_streak', label: 'Failure Streak Threshold', type: 'number', min: 0, defaultValue: 3, description: 'Detect consecutive tool failures. Set to 0 to disable. Default: 3' },
       { key: 'safety_heartbeat_interval', label: 'Safety Heartbeat (iterations)', type: 'number', min: 0, defaultValue: 5, description: 'Inject a security-constraint reminder every N tool calls within a single message (guards runaway tool loops). Set to 0 to disable. Default: 5' },
       { key: 'safety_heartbeat_turn_interval', label: 'Safety Heartbeat (turns)', type: 'number', min: 0, defaultValue: 10, description: 'Inject a security-constraint reminder every N conversation turns (guards long sessions drifting from constraints). Set to 0 to disable. Default: 10' },
+    ],
+  },
+
+  // ── Context Compression ────────────────────────────────────────
+  {
+    path: 'agent.context_compression',
+    category: 'general',
+    title: 'Context Compression',
+    description: 'Automatic conversation history compression to manage context window size',
+    icon: Sparkles,
+    defaultCollapsed: true,
+    fields: [
+      { key: 'enabled', label: 'Enabled', type: 'toggle', defaultValue: true, description: 'Enable automatic context compression when approaching context window limit' },
+      { key: 'context_window', label: 'Context Window (tokens)', type: 'number', min: 1000, defaultValue: 200000, description: 'Assumed model context window in tokens (refined at runtime). Default: 200000' },
+      { key: 'threshold_ratio', label: 'Compression Threshold Ratio', type: 'number', min: 0.1, max: 1, step: 0.05, defaultValue: 0.65, description: 'Compress when history exceeds context_window * this ratio. Default: 0.65' },
+      { key: 'protect_first_n', label: 'Protect First N Messages', type: 'number', min: 0, defaultValue: 3, description: 'Number of leading messages to never summarize. Default: 3' },
+      { key: 'protect_last_n', label: 'Protect Last N Messages', type: 'number', min: 0, defaultValue: 4, description: 'Number of trailing messages to never summarize. Default: 4' },
+      { key: 'max_passes', label: 'Max Compression Passes', type: 'number', min: 1, defaultValue: 3, description: 'Maximum number of summarization passes per compress_if_needed call. Default: 3' },
+      { key: 'summary_max_chars', label: 'Summary Max Characters', type: 'number', min: 1000, defaultValue: 4000, description: 'Maximum characters retained in a generated summary. Default: 4000' },
+      { key: 'source_max_chars', label: 'Source Max Characters', type: 'number', min: 1000, defaultValue: 50000, description: 'Maximum characters of source transcript fed to the summarizer. Default: 50000' },
+      { key: 'timeout_secs', label: 'Summarizer Timeout (s)', type: 'number', min: 1, defaultValue: 60, description: 'Safety timeout for the summarizer LLM call in seconds. Default: 60' },
+      { key: 'summary_model', label: 'Summary Model (optional)', type: 'text', description: 'Optional dedicated summarization model. When empty, the main model is reused.' },
+      { key: 'identifier_policy', label: 'Identifier Policy', type: 'text', defaultValue: 'strict', description: 'Identifier preservation policy - "strict" instructs the summarizer to preserve all identifiers verbatim. Default: strict' },
+      { key: 'tool_result_retrim_chars', label: 'Tool Result Retrim Chars', type: 'number', min: 0, defaultValue: 2000, description: 'Fast-trim threshold: tool results longer than this are truncated before LLM summarization. 0 disables. Default: 2000' },
+      { key: 'tool_result_trim_exempt', label: 'Tool Result Trim Exempt', type: 'tag-list', tagPlaceholder: 'e.g. CONTEXT, IMPORTANT', description: 'Substrings marking tool results exempt from fast-trim' },
+    ],
+  },
+
+  // ── History Pruner ────────────────────────────────────────────
+  {
+    path: 'agent.history_pruner',
+    category: 'general',
+    title: 'History Pruner',
+    description: 'Token-budget enforcement and message pruning for agent history',
+    icon: Sparkles,
+    defaultCollapsed: true,
+    fields: [
+      { key: 'enabled', label: 'Enabled', type: 'toggle', defaultValue: true, description: 'Enable history pruning to enforce token budget and collapse tool results' },
+      { key: 'max_tokens', label: 'Max Tokens', type: 'number', min: 100, defaultValue: 175000, description: 'Backstop token budget for history. Tool groups are dropped oldest-first to stay under this limit. Default: 175000' },
+      { key: 'keep_recent', label: 'Keep Recent (messages)', type: 'number', min: 0, defaultValue: 8, description: 'Number of recent messages to always keep protected from pruning. Default: 8' },
+      { key: 'collapse_tool_results', label: 'Collapse Tool Results', type: 'toggle', defaultValue: true, description: 'Collapse assistant+tool-result pairs into synthetic summaries to reduce token usage' },
     ],
   },
 

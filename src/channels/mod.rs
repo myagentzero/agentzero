@@ -63,8 +63,6 @@ use tokio_util::sync::CancellationToken;
 /// Per-sender conversation history for channel messages.
 type ConversationHistoryMap = Arc<Mutex<HashMap<String, Vec<ChatMessage>>>>;
 type ConversationLockMap = Arc<tokio::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>>;
-/// Maximum history messages to keep per sender.
-const MAX_CHANNEL_HISTORY: usize = 50;
 /// Minimum user-message length (in chars) for auto-save to memory.
 /// Messages shorter than this (e.g. "ok", "thanks") are not stored,
 /// reducing noise in memory recall.
@@ -191,12 +189,15 @@ struct ChannelRuntimeDefaults {
     cost: crate::config::CostConfig,
     auto_save_memory: bool,
     max_tool_iterations: usize,
+    max_history_messages: usize,
     min_relevance_score: f64,
     message_timeout_secs: u64,
     interrupt_on_new_message: bool,
     multimodal: crate::config::MultimodalConfig,
     query_classification: crate::config::QueryClassificationConfig,
     model_routes: Vec<crate::config::ModelRouteConfig>,
+    context_compression: crate::config::ContextCompressionConfig,
+    history_pruner: crate::config::HistoryPrunerConfig,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -273,6 +274,7 @@ struct ChannelRuntimeContext {
     temperature: f64,
     auto_save_memory: bool,
     max_tool_iterations: usize,
+    max_history_messages: usize,
     min_relevance_score: f64,
     conversation_histories: ConversationHistoryMap,
     conversation_locks: ConversationLockMap,
@@ -918,12 +920,15 @@ fn runtime_defaults_from_config(config: &Config) -> ChannelRuntimeDefaults {
         cost: config.cost.clone(),
         auto_save_memory: config.memory.auto_save,
         max_tool_iterations: config.agent.max_tool_iterations,
+        max_history_messages: config.agent.max_history_messages,
         min_relevance_score: config.memory.min_relevance_score,
         message_timeout_secs,
         interrupt_on_new_message,
         multimodal: config.multimodal.clone(),
         query_classification: config.query_classification.clone(),
         model_routes: config.model_routes.clone(),
+        context_compression: config.agent.context_compression.clone(),
+        history_pruner: config.agent.history_pruner.clone(),
     }
 }
 
@@ -984,12 +989,15 @@ fn runtime_defaults_snapshot(ctx: &ChannelRuntimeContext) -> ChannelRuntimeDefau
         cost: crate::config::CostConfig::default(),
         auto_save_memory: ctx.auto_save_memory,
         max_tool_iterations: ctx.max_tool_iterations,
+        max_history_messages: ctx.max_history_messages,
         min_relevance_score: ctx.min_relevance_score,
         message_timeout_secs: ctx.message_timeout_secs,
         interrupt_on_new_message: ctx.interrupt_on_new_message,
         multimodal: ctx.multimodal.clone(),
         query_classification: ctx.query_classification.clone(),
         model_routes: ctx.model_routes.clone(),
+        context_compression: crate::config::ContextCompressionConfig::default(),
+        history_pruner: crate::config::HistoryPrunerConfig::default(),
     }
 }
 
@@ -1116,43 +1124,6 @@ fn filtered_tool_specs_for_runtime(
         .map(|tool| tool.spec())
         .filter(|spec| !excluded_tools.iter().any(|excluded| excluded == &spec.name))
         .collect()
-}
-
-fn build_runtime_tool_visibility_prompt(
-    specs: &[crate::tools::ToolSpec],
-    excluded_tools: &[String],
-) -> String {
-    tracing::info!(
-        allowed_count = specs.len(),
-        excluded_count = excluded_tools.len(),
-        excluded = ?excluded_tools,
-        "Building runtime tool visibility prompt"
-    );
-
-    let mut prompt = String::new();
-    let mut specs_sorted = specs.to_vec();
-    specs_sorted.sort_by(|a, b| a.name.cmp(&b.name));
-
-    prompt.push_str("\n## Available Tools\n\n");
-
-    if specs_sorted.is_empty() {
-        prompt.push_str("- Allowed: (none)\n");
-    } else {
-        let _ = writeln!(prompt, "- Allowed ({}):", specs_sorted.len());
-        for spec in &specs_sorted {
-            let _ = writeln!(prompt, "  - `{}`", spec.name);
-        }
-    }
-
-    if excluded_tools.is_empty() {
-        prompt.push_str("- Excluded: (none)\n\n");
-    } else {
-        let mut excluded_sorted = excluded_tools.to_vec();
-        excluded_sorted.sort();
-        let _ = writeln!(prompt, "- Excluded: {}\n", excluded_sorted.join(", "));
-    }
-
-    prompt
 }
 
 async fn config_file_stamp(path: &Path) -> Option<ConfigFileStamp> {
@@ -1738,14 +1709,84 @@ fn compact_sender_history(ctx: &ChannelRuntimeContext, sender_key: &str) -> bool
     true
 }
 
+/// Reactive token-budget compression of a sender's cached history after a
+/// context-window-overflow error. Parses the actual limit from the error,
+/// summarizes the conversation middle, and persists the summary to memory.
+///
+/// The `conversation_histories` mutex guard is never held across the `await`:
+/// the history is cloned out, compressed, then written back under a fresh lock.
+async fn compress_sender_history_on_error(
+    ctx: &ChannelRuntimeContext,
+    sender_key: &str,
+    config: &crate::config::ContextCompressionConfig,
+    model: &str,
+    temperature: f64,
+    error_msg: &str,
+) -> bool {
+    let mut hist = {
+        let histories = ctx
+            .conversation_histories
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        match histories.get(sender_key) {
+            Some(h) if !h.is_empty() => h.clone(),
+            _ => return false,
+        }
+    };
+
+    // Deterministic prune (collapse tool exchanges, backstop budget, orphan
+    // removal) before the LLM-based on-error compression runs.
+    let pruner_cfg = runtime_defaults_snapshot(ctx).history_pruner;
+    let pruned = if pruner_cfg.enabled {
+        let stats = crate::agent::prune_history(&mut hist, &pruner_cfg);
+        stats.dropped_messages > 0 || stats.collapsed_pairs > 0
+    } else {
+        false
+    };
+
+    let mut compressor = crate::agent::context_compressor::ContextCompressor::new(
+        config.clone(),
+        config.context_window,
+    )
+    .with_memory(ctx.memory.clone());
+
+    let compressed = match compressor
+        .compress_on_error(&mut hist, ctx.provider.as_ref(), model, temperature, error_msg)
+        .await
+    {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::warn!("Channel context compression on error failed: {e}");
+            return false;
+        }
+    };
+
+    // Persist when either the deterministic prune or the LLM compression
+    // changed the history, so the prune's work is not discarded when it alone
+    // brought the conversation back under budget.
+    if compressed || pruned {
+        let mut histories = ctx
+            .conversation_histories
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        histories.insert(sender_key.to_string(), hist);
+    }
+    compressed || pruned
+}
+
+fn channel_max_history_messages(ctx: &ChannelRuntimeContext) -> usize {
+    runtime_defaults_snapshot(ctx).max_history_messages
+}
+
 fn append_sender_turn(ctx: &ChannelRuntimeContext, sender_key: &str, turn: ChatMessage) {
+    let max_history = channel_max_history_messages(ctx);
     let mut histories = ctx
         .conversation_histories
         .lock()
         .unwrap_or_else(|e| e.into_inner());
     let turns = histories.entry(sender_key.to_string()).or_default();
     turns.push(turn);
-    while turns.len() > MAX_CHANNEL_HISTORY {
+    while turns.len() > max_history {
         turns.remove(0);
     }
 }
@@ -2706,6 +2747,9 @@ async fn handle_runtime_command_if_needed(
                                     again.gateway.pairing_code = None;
                                     let _ = again.save().await;
                                 }
+                                // Delete device metadata file
+                                let meta_path = ctx.workspace_dir.join("state").join("paired_devices_meta.json");
+                                let _ = tokio::fs::remove_file(&meta_path).await;
                                 format!(
                                     "Pairing reset. New code: `{code}`. All previous tokens revoked."
                                 )
@@ -3672,21 +3716,13 @@ If this input is legitimate, rephrase the request and avoid instruction-override
     } else {
         snapshot_non_cli_excluded_tools(ctx.as_ref())
     };
-    let mut system_prompt = build_channel_system_prompt(
+    let system_prompt = build_channel_system_prompt(
         ctx.system_prompt.as_str(),
         &msg.channel,
         &msg.reply_target,
         expose_internal_tool_details,
         ctx.timezone_override.as_deref(),
     );
-    if !excluded_tools_snapshot.is_empty() {
-        let runtime_specs =
-            filtered_tool_specs_for_runtime(ctx.tools_registry.as_ref(), &excluded_tools_snapshot);
-        system_prompt.push_str(&build_runtime_tool_visibility_prompt(
-            &runtime_specs,
-            &excluded_tools_snapshot,
-        ));
-    }
     let mut history = vec![ChatMessage::system(system_prompt)];
     history.extend(prior_turns);
     let _ = trim_channel_prompt_history(&mut history);
@@ -4174,7 +4210,20 @@ If this input is legitimate, rephrase the request and avoid instruction-override
                     }
                 }
             } else if is_context_window_overflow_error(&e) {
-                let compacted = compact_sender_history(ctx.as_ref(), &history_key);
+                let cc = &runtime_defaults.context_compression;
+                let compacted = if cc.enabled {
+                    compress_sender_history_on_error(
+                        ctx.as_ref(),
+                        &history_key,
+                        cc,
+                        &route.model,
+                        runtime_defaults.temperature,
+                        &e.to_string(),
+                    )
+                    .await
+                } else {
+                    compact_sender_history(ctx.as_ref(), &history_key)
+                };
                 let error_text = if compacted {
                     "  ⚠️ Context window exceeded for this conversation. I compacted recent history and kept the latest context. Please resend your last message."
                 } else {
@@ -4995,6 +5044,7 @@ pub async fn start_channels(
         temperature,
         auto_save_memory: config.memory.auto_save,
         max_tool_iterations: config.agent.max_tool_iterations,
+        max_history_messages: config.agent.max_history_messages,
         min_relevance_score: config.memory.min_relevance_score,
         conversation_histories: Arc::new(Mutex::new(HashMap::new())),
         conversation_locks: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
@@ -5411,6 +5461,7 @@ mod tests {
             temperature: 0.0,
             auto_save_memory: false,
             max_tool_iterations: 5,
+            max_history_messages: 50,
             min_relevance_score: 0.0,
             conversation_histories: Arc::new(Mutex::new(histories)),
             conversation_locks: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
@@ -5457,6 +5508,191 @@ mod tests {
         }));
     }
 
+    #[tokio::test]
+    async fn compress_sender_history_on_error_summarizes_over_budget() {
+        let sender = "notion_overflow".to_string();
+        let mut histories = HashMap::new();
+        // System prompt + several sizeable turns that exceed the parsed budget.
+        let mut turns = vec![ChatMessage::system("system")];
+        for idx in 0..10 {
+            let content = format!("turn-{idx}-{}", "x".repeat(400));
+            if idx % 2 == 0 {
+                turns.push(ChatMessage::user(content));
+            } else {
+                turns.push(ChatMessage::assistant(content));
+            }
+        }
+        let before_len = turns.len();
+        histories.insert(sender.clone(), turns);
+
+        let ctx = ChannelRuntimeContext {
+            channels_by_name: Arc::new(HashMap::new()),
+            provider: Arc::new(DummyProvider),
+            default_provider: Arc::new("test-provider".to_string()),
+            memory: Arc::new(NoopMemory),
+            tools_registry: Arc::new(vec![]),
+            observer: Arc::new(NoopObserver),
+            system_prompt: Arc::new("system".to_string()),
+            model: Arc::new("test-model".to_string()),
+            temperature: 0.0,
+            auto_save_memory: false,
+            max_tool_iterations: 5,
+            max_history_messages: 50,
+            min_relevance_score: 0.0,
+            conversation_histories: Arc::new(Mutex::new(histories)),
+            conversation_locks: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+            session_config: crate::config::AgentSessionConfig::default(),
+            session_manager: None,
+            provider_cache: Arc::new(Mutex::new(HashMap::new())),
+            route_overrides: Arc::new(Mutex::new(HashMap::new())),
+            api_key: None,
+            api_url: None,
+            reliability: Arc::new(crate::config::ReliabilityConfig::default()),
+            interrupt_on_new_message: false,
+            multimodal: crate::config::MultimodalConfig::default(),
+            hooks: None,
+            provider_runtime_options: providers::ProviderRuntimeOptions::default(),
+            workspace_dir: Arc::new(std::env::temp_dir()),
+            message_timeout_secs: CHANNEL_MESSAGE_TIMEOUT_SECS,
+            non_cli_excluded_tools: Arc::new(Mutex::new(Vec::new())),
+            query_classification: crate::config::QueryClassificationConfig::default(),
+            model_routes: Vec::new(),
+            approval_manager: mock_price_approved_manager(),
+            safety_heartbeat: None,
+            startup_perplexity_filter: crate::config::PerplexityFilterConfig::default(),
+            gateway_pairing: None,
+            #[cfg(feature = "skill-creation")]
+            skill_creation: crate::config::SkillCreationConfig::default(),
+            timezone_override: None,
+        };
+
+        let cfg = crate::config::ContextCompressionConfig {
+            protect_first_n: 1,
+            protect_last_n: 1,
+            ..Default::default()
+        };
+        // Error carries a parseable limit (1024 tokens); with the default 0.50
+        // threshold the budget is ~512 tokens, which the history exceeds.
+        let compressed = compress_sender_history_on_error(
+            &ctx,
+            &sender,
+            &cfg,
+            "test-model",
+            0.0,
+            "request exceeds the available context size (1024 tokens)",
+        )
+        .await;
+
+        assert!(compressed, "history over budget should be compressed");
+        let histories = ctx
+            .conversation_histories
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let kept = histories.get(&sender).expect("sender history should remain");
+        assert!(
+            kept.len() < before_len,
+            "compressed history ({}) should be shorter than original ({before_len})",
+            kept.len()
+        );
+        assert!(
+            kept.iter().any(|m| m.content.contains("[CONTEXT SUMMARY")),
+            "a context summary message should be present"
+        );
+    }
+
+    #[tokio::test]
+    async fn compress_sender_history_on_error_prunes_orphaned_tool_messages() {
+        // Seed a history whose first non-system message is an orphaned tool
+        // result (its assistant(tool_calls) parent was trimmed away). The
+        // deterministic prune pre-pass must strip it before the LLM
+        // compression runs, and the result must be persisted even if the
+        // prune alone fixed the conversation.
+        let sender = "slack_orphan".to_string();
+        let mut histories = HashMap::new();
+        let mut turns = vec![ChatMessage::system("system")];
+        turns.push(ChatMessage::tool(
+            r#"{"tool_call_id":"toolu_orphan","content":"stale result"}"#.to_string(),
+        ));
+        for idx in 0..10 {
+            let content = format!("turn-{idx}-{}", "x".repeat(400));
+            if idx % 2 == 0 {
+                turns.push(ChatMessage::user(content));
+            } else {
+                turns.push(ChatMessage::assistant(content));
+            }
+        }
+        histories.insert(sender.clone(), turns);
+
+        let ctx = ChannelRuntimeContext {
+            channels_by_name: Arc::new(HashMap::new()),
+            provider: Arc::new(DummyProvider),
+            default_provider: Arc::new("test-provider".to_string()),
+            memory: Arc::new(NoopMemory),
+            tools_registry: Arc::new(vec![]),
+            observer: Arc::new(NoopObserver),
+            system_prompt: Arc::new("system".to_string()),
+            model: Arc::new("test-model".to_string()),
+            temperature: 0.0,
+            auto_save_memory: false,
+            max_tool_iterations: 5,
+            max_history_messages: 50,
+            min_relevance_score: 0.0,
+            conversation_histories: Arc::new(Mutex::new(histories)),
+            conversation_locks: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+            session_config: crate::config::AgentSessionConfig::default(),
+            session_manager: None,
+            provider_cache: Arc::new(Mutex::new(HashMap::new())),
+            route_overrides: Arc::new(Mutex::new(HashMap::new())),
+            api_key: None,
+            api_url: None,
+            reliability: Arc::new(crate::config::ReliabilityConfig::default()),
+            interrupt_on_new_message: false,
+            multimodal: crate::config::MultimodalConfig::default(),
+            hooks: None,
+            provider_runtime_options: providers::ProviderRuntimeOptions::default(),
+            workspace_dir: Arc::new(std::env::temp_dir()),
+            message_timeout_secs: CHANNEL_MESSAGE_TIMEOUT_SECS,
+            non_cli_excluded_tools: Arc::new(Mutex::new(Vec::new())),
+            query_classification: crate::config::QueryClassificationConfig::default(),
+            model_routes: Vec::new(),
+            approval_manager: mock_price_approved_manager(),
+            safety_heartbeat: None,
+            startup_perplexity_filter: crate::config::PerplexityFilterConfig::default(),
+            gateway_pairing: None,
+            #[cfg(feature = "skill-creation")]
+            skill_creation: crate::config::SkillCreationConfig::default(),
+            timezone_override: None,
+        };
+
+        let cfg = crate::config::ContextCompressionConfig {
+            protect_first_n: 1,
+            protect_last_n: 1,
+            ..Default::default()
+        };
+        let changed = compress_sender_history_on_error(
+            &ctx,
+            &sender,
+            &cfg,
+            "test-model",
+            0.0,
+            "request exceeds the available context size (1024 tokens)",
+        )
+        .await;
+
+        assert!(changed, "history with an orphan over budget should change");
+        let histories = ctx
+            .conversation_histories
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let kept = histories.get(&sender).expect("sender history should remain");
+        assert!(
+            !kept
+                .iter()
+                .any(|m| m.content.contains("toolu_orphan")),
+            "orphaned tool message must be pruned before compression"
+        );
+    }
+
     #[test]
     fn append_sender_turn_stores_single_turn_per_call() {
         let sender = "notion_u2".to_string();
@@ -5472,6 +5708,7 @@ mod tests {
             temperature: 0.0,
             auto_save_memory: false,
             max_tool_iterations: 5,
+            max_history_messages: 50,
             min_relevance_score: 0.0,
             conversation_histories: Arc::new(Mutex::new(HashMap::new())),
             conversation_locks: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
@@ -5536,6 +5773,7 @@ mod tests {
             temperature: 0.0,
             auto_save_memory: false,
             max_tool_iterations: 5,
+            max_history_messages: 50,
             min_relevance_score: 0.0,
             conversation_histories: Arc::new(Mutex::new(histories)),
             conversation_locks: Default::default(),
@@ -6063,109 +6301,6 @@ BTC is currently around $65,000 based on latest tool output."#
         }
     }
 
-    #[test]
-    fn build_runtime_tool_visibility_prompt_respects_excluded_snapshot() {
-        let tools: Vec<Box<dyn Tool>> = vec![Box::new(MockPriceTool), Box::new(MockEchoTool)];
-        let excluded = vec!["mock_price".to_string()];
-        let specs = filtered_tool_specs_for_runtime(&tools, &excluded);
-
-        let prompt = build_runtime_tool_visibility_prompt(&specs, &excluded);
-        assert!(prompt.contains("## Available Tools"));
-        assert!(prompt.contains("Excluded: mock_price"));
-        assert!(prompt.contains("`mock_echo`"));
-        assert!(!prompt.contains("**mock_price**:"));
-        assert!(!prompt.contains("## Tool Use Protocol"));
-    }
-
-    #[tokio::test]
-    async fn process_channel_message_injects_runtime_tool_visibility_prompt() {
-        let channel_impl = Arc::new(RecordingChannel::default());
-        let channel: Arc<dyn Channel> = channel_impl.clone();
-
-        let mut channels_by_name = HashMap::new();
-        channels_by_name.insert(channel.name().to_string(), channel);
-
-        let provider_impl = Arc::new(HistoryCaptureProvider::default());
-        let provider: Arc<dyn Provider> = provider_impl.clone();
-        let mut provider_cache_seed: HashMap<String, Arc<dyn Provider>> = HashMap::new();
-        provider_cache_seed.insert("test-provider".to_string(), Arc::clone(&provider));
-
-        let runtime_ctx = Arc::new(ChannelRuntimeContext {
-            channels_by_name: Arc::new(channels_by_name),
-            provider: Arc::clone(&provider),
-            default_provider: Arc::new("test-provider".to_string()),
-            memory: Arc::new(NoopMemory),
-            tools_registry: Arc::new(vec![Box::new(MockPriceTool), Box::new(MockEchoTool)]),
-            observer: Arc::new(NoopObserver),
-            system_prompt: Arc::new("test-system-prompt".to_string()),
-            model: Arc::new("default-model".to_string()),
-            temperature: 0.0,
-            auto_save_memory: false,
-            max_tool_iterations: 5,
-            min_relevance_score: 0.0,
-            conversation_histories: Arc::new(Mutex::new(HashMap::new())),
-            conversation_locks: Default::default(),
-            session_config: crate::config::AgentSessionConfig::default(),
-            session_manager: None,
-            provider_cache: Arc::new(Mutex::new(provider_cache_seed)),
-            route_overrides: Arc::new(Mutex::new(HashMap::new())),
-            api_key: None,
-            api_url: None,
-            reliability: Arc::new(crate::config::ReliabilityConfig::default()),
-            provider_runtime_options: providers::ProviderRuntimeOptions::default(),
-            workspace_dir: Arc::new(std::env::temp_dir()),
-            message_timeout_secs: CHANNEL_MESSAGE_TIMEOUT_SECS,
-            interrupt_on_new_message: false,
-            multimodal: crate::config::MultimodalConfig::default(),
-            hooks: None,
-            non_cli_excluded_tools: Arc::new(Mutex::new(vec!["mock_price".to_string()])),
-            query_classification: crate::config::QueryClassificationConfig::default(),
-            model_routes: Vec::new(),
-            approval_manager: mock_price_approved_manager(),
-            safety_heartbeat: None,
-            startup_perplexity_filter: crate::config::PerplexityFilterConfig::default(),
-            gateway_pairing: None,
-            #[cfg(feature = "skill-creation")]
-            skill_creation: crate::config::SkillCreationConfig::default(),
-            timezone_override: None,
-        });
-
-        process_channel_message(
-            runtime_ctx,
-            traits::ChannelMessage {
-                id: "msg-runtime-visibility-1".to_string(),
-                sender: "alice".to_string(),
-                reply_target: "chat-runtime-visibility".to_string(),
-                content: "hello tool visibility".to_string(),
-                channel: "slack".to_string(),
-                timestamp: 1,
-                thread_ts: None,
-            },
-            CancellationToken::new(),
-        )
-        .await;
-
-        {
-            let calls = provider_impl
-                .calls
-                .lock()
-                .unwrap_or_else(|e| e.into_inner());
-            assert_eq!(calls.len(), 1);
-            let first_call = &calls[0];
-            assert!(!first_call.is_empty());
-            assert_eq!(first_call[0].0, "system");
-            let system_prompt = &first_call[0].1;
-            assert!(system_prompt.contains("## Available Tools"));
-            assert!(system_prompt.contains("Excluded: mock_price"));
-            assert!(system_prompt.contains("`mock_echo`"));
-            assert!(!system_prompt.contains("**mock_price**:"));
-        }
-
-        let sent = channel_impl.sent_messages.lock().await;
-        assert_eq!(sent.len(), 1);
-        assert!(sent[0].contains("response-1"));
-    }
-
     #[tokio::test]
     async fn process_channel_message_executes_tool_calls_instead_of_sending_raw_json() {
         let channel_impl = Arc::new(RecordingChannel::default());
@@ -6193,6 +6328,7 @@ BTC is currently around $65,000 based on latest tool output."#
             temperature: 0.0,
             auto_save_memory: false,
             max_tool_iterations: 10,
+            max_history_messages: 50,
             min_relevance_score: 0.0,
             conversation_histories: Arc::new(Mutex::new(HashMap::new())),
             conversation_locks: Default::default(),
@@ -6271,6 +6407,7 @@ BTC is currently around $65,000 based on latest tool output."#
             temperature: 0.0,
             auto_save_memory: false,
             max_tool_iterations: 10,
+            max_history_messages: 50,
             min_relevance_score: 0.0,
             conversation_histories: Arc::new(Mutex::new(HashMap::new())),
             conversation_locks: Default::default(),
@@ -6363,6 +6500,7 @@ BTC is currently around $65,000 based on latest tool output."#
             temperature: 0.0,
             auto_save_memory: false,
             max_tool_iterations: 10,
+            max_history_messages: 50,
             min_relevance_score: 0.0,
             conversation_histories: Arc::new(Mutex::new(HashMap::new())),
             conversation_locks: Default::default(),
@@ -6454,6 +6592,7 @@ BTC is currently around $65,000 based on latest tool output."#
             temperature: 0.0,
             auto_save_memory: false,
             max_tool_iterations: 10,
+            max_history_messages: 50,
             min_relevance_score: 0.0,
             conversation_histories: Arc::new(Mutex::new(HashMap::new())),
             conversation_locks: Default::default(),
@@ -6530,6 +6669,7 @@ BTC is currently around $65,000 based on latest tool output."#
             temperature: 0.0,
             auto_save_memory: false,
             max_tool_iterations: 10,
+            max_history_messages: 50,
             min_relevance_score: 0.0,
             conversation_histories: Arc::new(Mutex::new(HashMap::new())),
             conversation_locks: Default::default(),
@@ -6608,6 +6748,7 @@ BTC is currently around $65,000 based on latest tool output."#
             temperature: 0.0,
             auto_save_memory: false,
             max_tool_iterations: 10,
+            max_history_messages: 50,
             min_relevance_score: 0.0,
             conversation_histories: Arc::new(Mutex::new(HashMap::new())),
             conversation_locks: Default::default(),
@@ -6688,6 +6829,7 @@ BTC is currently around $65,000 based on latest tool output."#
             temperature: 0.0,
             auto_save_memory: false,
             max_tool_iterations: 5,
+            max_history_messages: 50,
             min_relevance_score: 0.0,
             conversation_histories: Arc::new(Mutex::new(HashMap::new())),
             conversation_locks: Default::default(),
@@ -6796,6 +6938,7 @@ BTC is currently around $65,000 based on latest tool output."#
             temperature: 0.0,
             auto_save_memory: false,
             max_tool_iterations: 5,
+            max_history_messages: 50,
             min_relevance_score: 0.0,
             conversation_histories: Arc::new(Mutex::new(HashMap::new())),
             conversation_locks: Default::default(),
@@ -6945,6 +7088,7 @@ BTC is currently around $65,000 based on latest tool output."#
             temperature: 0.0,
             auto_save_memory: false,
             max_tool_iterations: 5,
+            max_history_messages: 50,
             min_relevance_score: 0.0,
             conversation_histories: Arc::new(Mutex::new(HashMap::new())),
             conversation_locks: Default::default(),
@@ -7038,6 +7182,7 @@ BTC is currently around $65,000 based on latest tool output."#
             temperature: 0.0,
             auto_save_memory: false,
             max_tool_iterations: 5,
+            max_history_messages: 50,
             min_relevance_score: 0.0,
             conversation_histories: Arc::new(Mutex::new(HashMap::new())),
             conversation_locks: Default::default(),
@@ -7120,6 +7265,7 @@ BTC is currently around $65,000 based on latest tool output."#
             temperature: 0.0,
             auto_save_memory: false,
             max_tool_iterations: 10,
+            max_history_messages: 50,
             min_relevance_score: 0.0,
             conversation_histories: Arc::new(Mutex::new(HashMap::new())),
             conversation_locks: Default::default(),
@@ -7285,6 +7431,7 @@ BTC is currently around $65,000 based on latest tool output."#
             temperature: 0.0,
             auto_save_memory: false,
             max_tool_iterations: 5,
+            max_history_messages: 50,
             min_relevance_score: 0.0,
             conversation_histories: Arc::new(Mutex::new(HashMap::new())),
             conversation_locks: Default::default(),
@@ -7406,6 +7553,7 @@ BTC is currently around $65,000 based on latest tool output."#
             temperature: 0.0,
             auto_save_memory: false,
             max_tool_iterations: 5,
+            max_history_messages: 50,
             min_relevance_score: 0.0,
             conversation_histories: Arc::new(Mutex::new(HashMap::new())),
             conversation_locks: Default::default(),
@@ -7522,6 +7670,7 @@ BTC is currently around $65,000 based on latest tool output."#
             temperature: 0.0,
             auto_save_memory: false,
             max_tool_iterations: 5,
+            max_history_messages: 50,
             min_relevance_score: 0.0,
             conversation_histories: Arc::new(Mutex::new(HashMap::new())),
             conversation_locks: Default::default(),
@@ -7621,6 +7770,7 @@ BTC is currently around $65,000 based on latest tool output."#
             temperature: 0.0,
             auto_save_memory: false,
             max_tool_iterations: 5,
+            max_history_messages: 50,
             min_relevance_score: 0.0,
             conversation_histories: Arc::new(Mutex::new(HashMap::new())),
             conversation_locks: Default::default(),
@@ -7729,6 +7879,7 @@ BTC is currently around $65,000 based on latest tool output."#
             temperature: 0.0,
             auto_save_memory: false,
             max_tool_iterations: 5,
+            max_history_messages: 50,
             min_relevance_score: 0.0,
             conversation_histories: Arc::new(Mutex::new(HashMap::new())),
             conversation_locks: Default::default(),
@@ -7835,6 +7986,7 @@ BTC is currently around $65,000 based on latest tool output."#
             temperature: 0.0,
             auto_save_memory: false,
             max_tool_iterations: 5,
+            max_history_messages: 50,
             min_relevance_score: 0.0,
             conversation_histories: Arc::new(Mutex::new(HashMap::new())),
             conversation_locks: Default::default(),
@@ -8000,6 +8152,7 @@ BTC is currently around $65,000 based on latest tool output."#
             temperature: 0.0,
             auto_save_memory: false,
             max_tool_iterations: 5,
+            max_history_messages: 50,
             min_relevance_score: 0.0,
             conversation_histories: Arc::new(Mutex::new(HashMap::new())),
             conversation_locks: Default::default(),
@@ -8101,6 +8254,7 @@ BTC is currently around $65,000 based on latest tool output."#
             temperature: 0.0,
             auto_save_memory: false,
             max_tool_iterations: 5,
+            max_history_messages: 50,
             min_relevance_score: 0.0,
             conversation_histories: Arc::new(Mutex::new(HashMap::new())),
             conversation_locks: Default::default(),
@@ -8255,6 +8409,7 @@ BTC is currently around $65,000 based on latest tool output."#
             temperature: 0.0,
             auto_save_memory: false,
             max_tool_iterations: 5,
+            max_history_messages: 50,
             min_relevance_score: 0.0,
             conversation_histories: Arc::new(Mutex::new(HashMap::new())),
             conversation_locks: Default::default(),
@@ -8385,6 +8540,7 @@ BTC is currently around $65,000 based on latest tool output."#
             temperature: 0.0,
             auto_save_memory: false,
             max_tool_iterations: 5,
+            max_history_messages: 50,
             min_relevance_score: 0.0,
             conversation_histories: Arc::new(Mutex::new(HashMap::new())),
             conversation_locks: Default::default(),
@@ -8491,6 +8647,7 @@ BTC is currently around $65,000 based on latest tool output."#
             temperature: 0.0,
             auto_save_memory: false,
             max_tool_iterations: 5,
+            max_history_messages: 50,
             min_relevance_score: 0.0,
             conversation_histories: Arc::new(Mutex::new(HashMap::new())),
             conversation_locks: Default::default(),
@@ -8623,6 +8780,7 @@ BTC is currently around $65,000 based on latest tool output."#
             temperature: 0.0,
             auto_save_memory: false,
             max_tool_iterations: 5,
+            max_history_messages: 50,
             min_relevance_score: 0.0,
             conversation_histories: Arc::new(Mutex::new(HashMap::new())),
             conversation_locks: Default::default(),
@@ -8747,6 +8905,7 @@ BTC is currently around $65,000 based on latest tool output."#
             temperature: 0.0,
             auto_save_memory: false,
             max_tool_iterations: 5,
+            max_history_messages: 50,
             min_relevance_score: 0.0,
             conversation_histories: Arc::new(Mutex::new(HashMap::new())),
             conversation_locks: Default::default(),
@@ -8830,6 +8989,7 @@ BTC is currently around $65,000 based on latest tool output."#
             temperature: 0.0,
             auto_save_memory: false,
             max_tool_iterations: 5,
+            max_history_messages: 50,
             min_relevance_score: 0.0,
             conversation_histories: Arc::new(Mutex::new(HashMap::new())),
             conversation_locks: Default::default(),
@@ -8910,12 +9070,16 @@ BTC is currently around $65,000 based on latest tool output."#
                         cost: crate::config::CostConfig::default(),
                         auto_save_memory: false,
                         max_tool_iterations: 5,
+                        max_history_messages: 50,
                         min_relevance_score: 0.0,
                         message_timeout_secs: CHANNEL_MESSAGE_TIMEOUT_SECS,
                         interrupt_on_new_message: false,
                         multimodal: crate::config::MultimodalConfig::default(),
                         query_classification: crate::config::QueryClassificationConfig::default(),
                         model_routes: Vec::new(),
+                        context_compression:
+                            crate::config::ContextCompressionConfig::default(),
+                        history_pruner: crate::config::HistoryPrunerConfig::default(),
                     },
                     perplexity_filter: crate::config::PerplexityFilterConfig::default(),
                     outbound_leak_guard: crate::config::OutboundLeakGuardConfig::default(),
@@ -8939,6 +9103,7 @@ BTC is currently around $65,000 based on latest tool output."#
             temperature: 0.0,
             auto_save_memory: false,
             max_tool_iterations: 5,
+            max_history_messages: 50,
             min_relevance_score: 0.0,
             conversation_histories: Arc::new(Mutex::new(HashMap::new())),
             conversation_locks: Default::default(),
@@ -9138,6 +9303,7 @@ BTC is currently around $65,000 based on latest tool output."#
             temperature: 0.0,
             auto_save_memory: false,
             max_tool_iterations: 5,
+            max_history_messages: 50,
             min_relevance_score: 0.0,
             conversation_histories: Arc::new(Mutex::new(HashMap::new())),
             conversation_locks: Default::default(),
@@ -9353,6 +9519,7 @@ BTC is currently around $65,000 based on latest tool output."#
             temperature: 0.0,
             auto_save_memory: false,
             max_tool_iterations: 12,
+            max_history_messages: 50,
             min_relevance_score: 0.0,
             conversation_histories: Arc::new(Mutex::new(HashMap::new())),
             conversation_locks: Default::default(),
@@ -9425,6 +9592,7 @@ BTC is currently around $65,000 based on latest tool output."#
             temperature: 0.0,
             auto_save_memory: false,
             max_tool_iterations: 3,
+            max_history_messages: 50,
             min_relevance_score: 0.0,
             conversation_histories: Arc::new(Mutex::new(HashMap::new())),
             conversation_locks: Default::default(),
@@ -9609,6 +9777,7 @@ BTC is currently around $65,000 based on latest tool output."#
             temperature: 0.0,
             auto_save_memory: false,
             max_tool_iterations: 10,
+            max_history_messages: 50,
             min_relevance_score: 0.0,
             conversation_histories: Arc::new(Mutex::new(HashMap::new())),
             conversation_locks: Default::default(),
@@ -9703,6 +9872,7 @@ BTC is currently around $65,000 based on latest tool output."#
             temperature: 0.0,
             auto_save_memory: false,
             max_tool_iterations: 10,
+            max_history_messages: 50,
             min_relevance_score: 0.0,
             conversation_histories: Arc::new(Mutex::new(HashMap::new())),
             conversation_locks: Default::default(),
@@ -9813,6 +9983,7 @@ BTC is currently around $65,000 based on latest tool output."#
             temperature: 0.0,
             auto_save_memory: false,
             max_tool_iterations: 10,
+            max_history_messages: 50,
             min_relevance_score: 0.0,
             conversation_histories: Arc::new(Mutex::new(HashMap::new())),
             conversation_locks: Default::default(),
@@ -9901,6 +10072,7 @@ BTC is currently around $65,000 based on latest tool output."#
             temperature: 0.0,
             auto_save_memory: false,
             max_tool_iterations: 10,
+            max_history_messages: 50,
             min_relevance_score: 0.0,
             conversation_histories: Arc::new(Mutex::new(HashMap::new())),
             conversation_locks: Default::default(),
@@ -9974,6 +10146,7 @@ BTC is currently around $65,000 based on latest tool output."#
             temperature: 0.0,
             auto_save_memory: false,
             max_tool_iterations: 10,
+            max_history_messages: 50,
             min_relevance_score: 0.0,
             conversation_histories: Arc::new(Mutex::new(HashMap::new())),
             conversation_locks: Default::default(),

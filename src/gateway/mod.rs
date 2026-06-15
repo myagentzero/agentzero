@@ -470,6 +470,14 @@ pub async fn run_gateway(
         ))
     });
 
+    // Load persisted device metadata from workspace state directory
+    let meta_path = paired_devices_meta_path(&config.workspace_dir);
+    if let Ok(json) = tokio::fs::read_to_string(&meta_path).await {
+        if let Ok(meta_map) = serde_json::from_str::<std::collections::HashMap<String, crate::security::pairing::PairedDeviceMeta>>(&json) {
+            pairing.load_meta_from_file(meta_map);
+        }
+    }
+
     // Clear the one-shot pairing code from persisted config so it is not reused.
     if config.gateway.pairing_code.is_some() {
         if let Ok(mut persisted) = Config::load_or_init().await {
@@ -827,6 +835,13 @@ async fn handle_pair(
                 return (StatusCode::OK, Json(body));
             }
 
+            // Also persist device metadata
+            let workspace_dir = state.config.lock().workspace_dir.clone();
+            if let Err(err) = persist_pairing_meta(&workspace_dir, &state.pairing).await {
+                tracing::warn!("🔐 Failed to persist pairing metadata: {err}");
+                // Don't fail the response — metadata persistence is secondary
+            }
+
             let body = serde_json::json!({
                 "paired": true,
                 "persisted": true,
@@ -888,6 +903,23 @@ async fn persist_pairing_tokens(config: Arc<Mutex<Config>>, pairing: &PairingGua
 
     // Keep shared runtime config in sync with persisted tokens.
     *config.lock() = updated_cfg;
+    Ok(())
+}
+
+fn paired_devices_meta_path(workspace_dir: &std::path::Path) -> std::path::PathBuf {
+    workspace_dir.join("state").join("paired_devices_meta.json")
+}
+
+pub async fn persist_pairing_meta(workspace_dir: &std::path::Path, pairing: &PairingGuard) -> Result<()> {
+    let meta = pairing.device_meta_snapshot();
+    let path = paired_devices_meta_path(workspace_dir);
+    // Use a unique temp name so concurrent writers (e.g. an overlapping /pair
+    // and revoke) don't clobber each other's temp file before the rename.
+    let tmp = path.with_extension(format!("json.{}.tmp", uuid::Uuid::new_v4()));
+    let json = serde_json::to_vec_pretty(&meta)?;
+    tokio::fs::create_dir_all(path.parent().unwrap()).await?;
+    tokio::fs::write(&tmp, &json).await?;
+    tokio::fs::rename(&tmp, &path).await?;
     Ok(())
 }
 

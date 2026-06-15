@@ -93,7 +93,7 @@ pub(super) async fn build_injected_context(
         session_id,
     )
     .await;
-    let rag_limit = if config.agent.compact_context { 2 } else { 5 };
+    let rag_limit = if config.agent.light_context { 2 } else { 5 };
     let hw_context = hardware_rag
         .map(|r| build_hardware_context(r, message, board_names, rag_limit))
         .unwrap_or_default();
