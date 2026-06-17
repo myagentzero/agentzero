@@ -2,6 +2,19 @@
 //!
 //! This module contains reusable helper functions used across the codebase.
 
+/// Install the default Rustls TLS backend at process startup.
+#[cfg(not(test))]
+pub(crate) fn install_default_tls_provider() {
+    // Prevents rustls from failing to select a process-level provider when
+    // both aws-lc-rs and ring features are available (or neither is selected).
+    if let Err(e) = rustls::crypto::ring::default_provider().install_default() {
+        eprintln!("Warning: Failed to install default TLS provider: {e:?}");
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn install_default_tls_provider() {}
+
 /// Truncate a string to at most `max_chars` characters, appending "..." if truncated.
 ///
 /// This function safely handles multi-byte UTF-8 characters (emoji, CJK, accented characters)

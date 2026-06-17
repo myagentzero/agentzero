@@ -284,12 +284,10 @@ pub(crate) fn build_tool_instructions(
     );
 
     let mut instructions = String::new();
-     instructions.push_str(
-            "### CRITICAL: Tool Honesty\n\n\
-             - NEVER fabricate, invent, or guess tool results. If a tool returns empty results, say \"No results found.\"\n\
-             - If a tool call fails, report the error — never make up data to fill the gap.\n\
-             - When unsure whether a tool call succeeded, ask the user rather than guessing.\n\n",
-     );
+    instructions.push_str(
+        "### CRITICAL: Tool Honesty\n\n\
+         Never fabricate or guess tool results. Empty → \"No results found.\"; failed → report the error; uncertain → ask the user.\n\n",
+    );
     if native_tools {
         instructions.push_str(
             "Available tools:\n\n",
@@ -383,11 +381,9 @@ pub fn build_system_prompt_with_mode(
 
     // ── 5. Skills ───────────────────────────────────────────────
     if !skills.is_empty() {
-        let skill_names: Vec<&str> = skills.iter().map(|s| s.name.as_str()).collect();
         tracing::info!(
             caller = %caller,
             count = skills.len(),
-            skills = %skill_names.join(", "),
             "📚 Skills loaded"
         );
 

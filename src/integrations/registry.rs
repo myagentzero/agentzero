@@ -206,6 +206,18 @@ pub fn all_integrations() -> Vec<IntegrationEntry> {
                 }
             },
         },
+        IntegrationEntry {
+            name: "ServiceNow",
+            description: "ITSM: incidents, changes & service requests",
+            category: IntegrationCategory::Productivity,
+            status_fn: |c| {
+                if c.servicenow.enabled && !c.servicenow.base_url.is_empty() {
+                    IntegrationStatus::Active
+                } else {
+                    IntegrationStatus::Available
+                }
+            },
+        },
         // ── Tools & Automation ──────────────────────────────────
         IntegrationEntry {
             name: "Browser",
@@ -248,18 +260,6 @@ pub fn all_integrations() -> Vec<IntegrationEntry> {
             description: "Forecasts & conditions",
             category: IntegrationCategory::ToolsAutomation,
             status_fn: |_| IntegrationStatus::Active,
-        },
-        IntegrationEntry {
-            name: "ServiceNow",
-            description: "Table API for incidents, changes & requests",
-            category: IntegrationCategory::ToolsAutomation,
-            status_fn: |c| {
-                if c.servicenow.enabled && !c.servicenow.base_url.is_empty() {
-                    IntegrationStatus::Active
-                } else {
-                    IntegrationStatus::Available
-                }
-            },
         },
         // ── Platforms ───────────────────────────────────────────
         IntegrationEntry {

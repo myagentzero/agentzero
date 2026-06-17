@@ -1,19 +1,43 @@
 use std::path::Path;
 
 const SENSITIVE_EXACT_FILENAMES: &[&str] = &[
+    // Environment and secrets
     ".env",
     ".envrc",
     ".secret_key",
+    // Package manager credentials
     ".npmrc",
     ".pypirc",
+    ".yarnrc",
+    // Git
+    ".git",
     ".git-credentials",
+    ".gitignore",
+    // Credential and token files
+    ".api_keys",
+    ".apikeys",
+    "api_keys.json",
+    "apikeys.json",
+    "auth-profiles.json",
     "credentials",
     "credentials.json",
-    "auth-profiles.json",
-    "id_rsa",
+    "secret.json",
+    "secrets.json",
+    "token.json",
+    "tokens.json",
+    // Config files that may contain sensitive data
+    ".config.json",
+    "config.json",
+    "settings.json",
+    // Database files
+    ".database",
+    ".db",
+    "database.json",
+    // SSH keys
     "id_dsa",
     "id_ecdsa",
     "id_ed25519",
+    "id_rsa",
 ];
 
 const SENSITIVE_SUFFIXES: &[&str] = &[
@@ -75,6 +99,16 @@ mod tests {
         assert!(is_sensitive_file_path(Path::new(".env")));
         assert!(is_sensitive_file_path(Path::new("ID_RSA")));
         assert!(is_sensitive_file_path(Path::new("credentials.json")));
+        assert!(is_sensitive_file_path(Path::new("token.json")));
+        assert!(is_sensitive_file_path(Path::new(".git")));
+        assert!(is_sensitive_file_path(Path::new("config.json")));
+    }
+
+    #[test]
+    fn detects_env_variants() {
+        assert!(is_sensitive_file_path(Path::new(".env.local")));
+        assert!(is_sensitive_file_path(Path::new(".env.production")));
+        assert!(is_sensitive_file_path(Path::new(".env.staging.local")));
     }
 
     #[test]

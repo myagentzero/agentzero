@@ -3,52 +3,16 @@
 //! All `/api/*` routes require bearer token authentication (PairingGuard).
 
 use super::AppState;
+use crate::security::sensitive_paths::is_sensitive_file_path;
 use axum::{
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Json},
 };
 use serde::Deserialize;
+use std::path::Path as StdPath;
 
 const MASKED_SECRET: &str = "***MASKED***";
-
-// Sensitive files that should never be accessible via the API
-const BLOCKED_FILENAMES: &[&str] = &[
-    // Credentials and tokens
-    "token.json",
-    "tokens.json",
-    "credentials.json",
-    "secrets.json",
-    "secret.json",
-    ".env",
-    ".env.local",
-    ".env.*.local",
-    // Config files that may contain sensitive data
-    "config.json",
-    ".config.json",
-    "settings.json",
-    // API keys and authentication
-    "api_keys.json",
-    ".api_keys",
-    "apikeys.json",
-    ".apikeys",
-    // Database and connection strings
-    ".db",
-    ".database",
-    "database.json",
-    ".npmrc",
-    ".yarnrc",
-    ".git",
-    ".gitignore",
-    // SSH and security
-    "id_rsa",
-    "id_ed25519",
-    ".ssh",
-    // Environment and build
-    ".env.production",
-    ".env.staging",
-    ".env.development",
-];
 
 // ── Bearer token auth extractor ─────────────────────────────────
 
@@ -1219,7 +1183,7 @@ fn build_tree(dir: &std::path::Path, base: &std::path::Path, depth: u32) -> Vec<
                 return None;
             }
             // Also block sensitive files in tree view
-            if is_blocked_file(&name) {
+            if is_sensitive_file_path(StdPath::new(&name)) {
                 return None;
             }
             let full_path = entry.path();
@@ -1307,31 +1271,6 @@ fn is_accessible_file(path: &str) -> bool {
     is_viewable_file(path) || is_downloadable_file(path)
 }
 
-/// Check if a file path is blocked for security reasons
-fn is_blocked_file(path: &str) -> bool {
-    let filename = std::path::Path::new(path)
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("")
-        .to_lowercase();
-
-    // Check exact filename matches
-    for blocked in BLOCKED_FILENAMES {
-        if filename == blocked.to_lowercase() {
-            return true;
-        }
-        // Check wildcard patterns like .env.*
-        if blocked.contains('*') {
-            let pattern = blocked.replace('*', "");
-            if filename.contains(&pattern) {
-                return true;
-            }
-        }
-    }
-
-    false
-}
-
 /// GET /api/workspace/file?path=<rel_path> — read a file from the workspace
 pub async fn handle_api_workspace_file(
     State(state): State<AppState>,
@@ -1371,7 +1310,7 @@ pub async fn handle_api_workspace_file(
     }
 
     // Check for blocked sensitive files
-    if is_blocked_file(&rel) {
+    if is_sensitive_file_path(StdPath::new(&rel)) {
         return (
             StatusCode::FORBIDDEN,
             Json(serde_json::json!({"error": "Access to this file is blocked for security reasons"})),

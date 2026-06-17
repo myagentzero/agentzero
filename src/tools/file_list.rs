@@ -123,10 +123,6 @@ fn list_directory(path: &Path, max_depth: i32, current_depth: i32) -> anyhow::Re
             continue;
         }
 
-        if name == ".git" {
-            continue;
-        }
-
         let metadata = match entry.metadata() {
             Ok(m) => m,
             Err(_) => continue,

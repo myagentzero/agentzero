@@ -143,6 +143,10 @@ fn unicode_emoji_to_slack_name(emoji: &str) -> &str {
         "\u{1F4B3}" => "credit_card", // 💳
         // Goals/metrics
         "\u{1F4CA}" => "bar_chart", // 📊
+        // ITSM
+        "\u{1F3AB}" => "ticket",    // 🎫
+        "\u{1F4CB}" => "clipboard",  // 📋
+        "\u{1F527}" => "wrench",     // 🔧
         // Security
         "\u{1F512}" => "lock", // 🔒
         _ => {
@@ -174,7 +178,6 @@ fn slack_default_ack_config() -> &'static crate::config::AckReactionConfig {
                     "document".into(),
                     "github".into(),
                     "gitlab".into(),
-                    "jira".into(),
                     "kanban".into(),
                     "pull request".into(),
                     "repo".into(),
@@ -182,14 +185,33 @@ fn slack_default_ack_config() -> &'static crate::config::AckReactionConfig {
                     "repository".into(),
                     "scrum".into(),
                     "spreadsheet".into(),
-                    "sprint".into(),
-                    "standup".into(),
-                    "ticket".into(),
                     "workspace".into(),
                     "excel".into(),
                     "powerpoint".into(),
                 ],
                 emojis: vec!["💻".into(), "🖥️".into(), "⌨️".into()],
+                ..AckReactionRuleConfig::default()
+            },
+            AckReactionRuleConfig {
+                contains_any: vec![
+                    "change management".into(),
+                    "change order".into(),
+                    "change orders".into(),
+                    "change request".into(),
+                    "change requests".into(),
+                    "cmdb".into(),
+                    "incident".into(),
+                    "itsm".into(),
+                    "jira".into(),
+                    "problem".into(),
+                    "problems".into(),
+                    "service request".into(),
+                    "servicenow".into(),
+                    "ticket".into(),
+                    "tickets".into(),
+                    "workday".into(),
+                ],
+                emojis: vec!["🎫".into(), "📋".into(), "🔧".into()],
                 ..AckReactionRuleConfig::default()
             },
             AckReactionRuleConfig {
@@ -220,6 +242,7 @@ fn slack_default_ack_config() -> &'static crate::config::AckReactionConfig {
                 contains_any: vec![
                     "announcement".into(),
                     "article".into(),
+                    "current events".into(),
                     "headline".into(),
                     "headlines".into(),
                     "news".into(),
@@ -230,16 +253,22 @@ fn slack_default_ack_config() -> &'static crate::config::AckReactionConfig {
             AckReactionRuleConfig {
                 contains_any: vec![
                     "agenda".into(),
+                    "alarm".into(),
+                    "alarms".into(),
                     "appointment".into(),
                     "booking".into(),
                     "calendar".into(),
                     "deadline".into(),
+                    "don't forget".into(),
                     "event".into(),
                     "events".into(),
                     "meeting".into(),
                     "meetings".into(),
+                    "remind me".into(),
                     "reminder".into(),
                     "schedule".into(),
+                    "sprint".into(),
+                    "standup".into(),
                 ],
                 emojis: vec!["📅".into(), "🗓️".into(), "📆".into(), "⏰".into()],
                 ..AckReactionRuleConfig::default()
@@ -378,7 +407,7 @@ impl SlackChannel {
     /// Configure ACK reaction policy for incoming messages.
     ///
     /// User-supplied rules are evaluated first, then the built-in contextual
-    /// rules (weather, news, work, calendar) are appended so user config
+    /// rules (ITSM, weather, news, work, calendar) are appended so user config
     /// extends the defaults instead of replacing them.
     pub fn with_ack_reaction(
         mut self,
@@ -3902,6 +3931,29 @@ mod tests {
             select_ack_reaction(Some(slack_default_ack_config()), SLACK_ACK_REACTIONS, &ctx);
 
         assert_eq!(picked.as_deref(), Some("📊"));
+    }
+
+    #[test]
+    fn default_ack_config_uses_itsm_icons_for_servicenow_terms() {
+        use crate::channels::ack_reaction::{
+            AckReactionContext, AckReactionContextChatType, select_ack_reaction,
+        };
+
+        let ctx = AckReactionContext {
+            text: "Can you update this change order in ServiceNow?",
+            sender_id: Some("U123"),
+            chat_id: Some("C123"),
+            chat_type: AckReactionContextChatType::Group,
+            locale_hint: Some("en_us"),
+        };
+
+        let picked =
+            select_ack_reaction(Some(slack_default_ack_config()), SLACK_ACK_REACTIONS, &ctx);
+
+        assert!(
+            matches!(picked.as_deref(), Some("🎫") | Some("📋") | Some("🔧")),
+            "expected ITSM ack reaction, got {picked:?}"
+        );
     }
 
     #[test]
