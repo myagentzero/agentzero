@@ -1221,6 +1221,27 @@ async fn persist_non_cli_approval_to_config(
     Ok(Some(config_path))
 }
 
+async fn persist_pairing_reset(ctx: &ChannelRuntimeContext) -> Result<Option<PathBuf>> {
+    let Some(config_path) = runtime_config_path(ctx) else {
+        return Ok(None);
+    };
+
+    let contents = tokio::fs::read_to_string(&config_path)
+        .await
+        .with_context(|| format!("Failed to read {}", config_path.display()))?;
+    let mut parsed: Config = toml::from_str(&contents)
+        .with_context(|| format!("Failed to parse {}", config_path.display()))?;
+    parsed.config_path = config_path.clone();
+
+    parsed.gateway.paired_tokens.clear();
+    // Live reset keeps the new code in PairingGuard only. `gateway.pairing_code` is
+    // reserved for `--new-pairing` and is consumed on process startup.
+    parsed.gateway.pairing_code = None;
+    parsed.save().await?;
+
+    Ok(Some(config_path))
+}
+
 async fn remove_non_cli_approval_from_config(
     ctx: &ChannelRuntimeContext,
     tool_name: &str,
@@ -1519,13 +1540,18 @@ async fn maybe_apply_runtime_config_update(ctx: &ChannelRuntimeContext) -> Resul
 
     let (next_defaults, next_autonomy_policy) =
         load_runtime_defaults_from_config_file(&config_path).await?;
-    let next_default_provider = providers::create_resilient_provider_with_options(
+    // Match startup: use routed provider when [[model_routes]] are configured so
+    // hint-prefixed default models keep resolving after config saves (e.g. /reset-pairing).
+    let next_default_provider = create_routed_provider_nonblocking(
         &next_defaults.default_provider,
-        next_defaults.api_key.as_deref(),
-        next_defaults.api_url.as_deref(),
-        &next_defaults.reliability,
-        &ctx.provider_runtime_options,
-    )?;
+        next_defaults.api_key.clone(),
+        next_defaults.api_url.clone(),
+        next_defaults.reliability.clone(),
+        next_defaults.model_routes.clone(),
+        next_defaults.model.clone(),
+        ctx.provider_runtime_options.clone(),
+    )
+    .await?;
     let next_default_provider: Arc<dyn Provider> = Arc::from(next_default_provider);
 
     if let Err(err) = next_default_provider.warmup().await {
@@ -2730,38 +2756,27 @@ async fn handle_runtime_command_if_needed(
                 "Invalid code. Usage: `/reset-pairing 123456` (exactly 6 digits).".to_string()
             } else if let Some(ref guard) = ctx.gateway_pairing {
                 guard.reset_pairing(code.clone());
-                // Persist cleared tokens to config
-                match Config::load_or_init().await {
-                    Ok(mut persisted) => {
-                        persisted.gateway.paired_tokens.clear();
-                        persisted.gateway.pairing_code = Some(code.clone());
-                        match persisted.save().await {
-                            Ok(()) => {
-                                // Delete the cli-token file from home directory
-                                if let Some(config_dir) = persisted.config_path.parent() {
-                                    let token_path = config_dir.join("cli-token");
-                                    let _ = std::fs::remove_file(&token_path);
-                                }
-                                // Clear the one-shot code from persisted config after guard consumed it
-                                if let Ok(mut again) = Config::load_or_init().await {
-                                    again.gateway.pairing_code = None;
-                                    let _ = again.save().await;
-                                }
-                                // Delete device metadata file
-                                let meta_path = ctx.workspace_dir.join("state").join("paired_devices_meta.json");
-                                let _ = tokio::fs::remove_file(&meta_path).await;
-                                format!(
-                                    "Pairing reset. New code: `{code}`. All previous tokens revoked."
-                                )
-                            }
-                            Err(err) => {
-                                format!("Pairing reset in memory, but failed to persist: {err}")
-                            }
+                match persist_pairing_reset(ctx).await {
+                    Ok(Some(config_path)) => {
+                        if let Some(config_dir) = config_path.parent() {
+                            let token_path = config_dir.join("cli-token");
+                            let _ = std::fs::remove_file(&token_path);
                         }
+                        let meta_path = ctx
+                            .workspace_dir
+                            .join("state")
+                            .join("paired_devices_meta.json");
+                        let _ = tokio::fs::remove_file(&meta_path).await;
+                        format!(
+                            "Pairing reset. New code: `{code}`. All previous tokens revoked."
+                        )
                     }
-                    Err(err) => format!(
-                        "Pairing reset in memory, but failed to load config for persistence: {err}"
+                    Ok(None) => format!(
+                        "Pairing reset in memory, but runtime config path was not available."
                     ),
+                    Err(err) => {
+                        format!("Pairing reset in memory, but failed to persist: {err}")
+                    }
                 }
             } else {
                 "Gateway pairing is not available in this mode (channels-only).".to_string()
@@ -9495,6 +9510,190 @@ BTC is currently around $65,000 based on latest tool output."#
             result.is_ok(),
             "start_channels should support routed providers without global credentials: {result:?}"
         );
+    }
+
+    #[tokio::test]
+    async fn persist_pairing_reset_clears_tokens_without_persisting_pairing_code() {
+        let temp = tempfile::TempDir::new().expect("temp dir");
+        let config_path = temp.path().join("config.toml");
+        let workspace_dir = temp.path().join("workspace");
+        std::fs::create_dir_all(&workspace_dir).expect("workspace dir");
+
+        let mut cfg = Config::default();
+        cfg.config_path = config_path.clone();
+        cfg.workspace_dir = workspace_dir.clone();
+        cfg.gateway.paired_tokens = vec!["zc_test_token".to_string()];
+        cfg.gateway.pairing_code = Some("999888".to_string());
+        cfg.save().await.expect("save initial config");
+
+        let guard = Arc::new(crate::security::PairingGuard::new(
+            true,
+            &cfg.gateway.paired_tokens,
+            None,
+        ));
+        guard.reset_pairing("123456".to_string());
+
+        let runtime_ctx = Arc::new(ChannelRuntimeContext {
+            channels_by_name: Arc::new(HashMap::new()),
+            provider: Arc::new(ModelCaptureProvider::default()),
+            default_provider: Arc::new("test-provider".to_string()),
+            memory: Arc::new(NoopMemory),
+            tools_registry: Arc::new(vec![]),
+            observer: Arc::new(NoopObserver),
+            system_prompt: Arc::new("test-system-prompt".to_string()),
+            model: Arc::new("test-model".to_string()),
+            temperature: 0.0,
+            auto_save_memory: false,
+            max_tool_iterations: 5,
+            max_history_messages: 50,
+            min_relevance_score: 0.0,
+            conversation_histories: Arc::new(Mutex::new(HashMap::new())),
+            conversation_locks: Default::default(),
+            session_config: crate::config::AgentSessionConfig::default(),
+            session_manager: None,
+            provider_cache: Arc::new(Mutex::new(HashMap::new())),
+            route_overrides: Arc::new(Mutex::new(HashMap::new())),
+            api_key: None,
+            api_url: None,
+            reliability: Arc::new(crate::config::ReliabilityConfig::default()),
+            provider_runtime_options: providers::ProviderRuntimeOptions {
+                zeroclaw_dir: Some(temp.path().to_path_buf()),
+                ..providers::ProviderRuntimeOptions::default()
+            },
+            workspace_dir: Arc::new(workspace_dir),
+            message_timeout_secs: CHANNEL_MESSAGE_TIMEOUT_SECS,
+            interrupt_on_new_message: false,
+            multimodal: crate::config::MultimodalConfig::default(),
+            hooks: None,
+            non_cli_excluded_tools: Arc::new(Mutex::new(Vec::new())),
+            query_classification: crate::config::QueryClassificationConfig::default(),
+            model_routes: Vec::new(),
+            approval_manager: Arc::new(ApprovalManager::from_config(
+                &crate::config::AutonomyConfig::default(),
+            )),
+            safety_heartbeat: None,
+            startup_perplexity_filter: crate::config::PerplexityFilterConfig::default(),
+            gateway_pairing: Some(guard.clone()),
+            #[cfg(feature = "skill-creation")]
+            skill_creation: crate::config::SkillCreationConfig::default(),
+            timezone_override: None,
+        });
+
+        let stamp_before = config_file_stamp(&config_path).await;
+        persist_pairing_reset(runtime_ctx.as_ref())
+            .await
+            .expect("persist pairing reset")
+            .expect("config path");
+        let stamp_after = config_file_stamp(&config_path)
+            .await
+            .expect("config stamp after save");
+
+        assert_ne!(
+            stamp_before, Some(stamp_after),
+            "pairing reset should perform exactly one config save"
+        );
+
+        let persisted = tokio::fs::read_to_string(&config_path)
+            .await
+            .expect("read config");
+        let parsed: Config = toml::from_str(&persisted).expect("parse config");
+        assert!(parsed.gateway.paired_tokens.is_empty());
+        assert!(parsed.gateway.pairing_code.is_none());
+        assert!(
+            !persisted.contains("123456"),
+            "live pairing code must stay in PairingGuard, not config.toml"
+        );
+        assert_eq!(guard.pairing_code(), Some("123456".to_string()));
+    }
+
+    #[tokio::test]
+    async fn maybe_apply_runtime_config_update_supports_routed_providers_without_global_credentials(
+    ) {
+        let temp = tempfile::TempDir::new().expect("temp dir");
+        let config_path = temp.path().join("config.toml");
+        let workspace_dir = temp.path().join("workspace");
+        std::fs::create_dir_all(&workspace_dir).expect("workspace dir");
+
+        let mut cfg = Config::default();
+        cfg.config_path = config_path.clone();
+        cfg.workspace_dir = workspace_dir.clone();
+        cfg.default_provider = None;
+        cfg.api_key = None;
+        cfg.default_model = Some("hint:fast".to_string());
+        cfg.model_routes = vec![crate::config::ModelRouteConfig {
+            hint: "fast".to_string(),
+            provider: "openai-codex".to_string(),
+            model: "gpt-5.3-codex".to_string(),
+            max_tokens: Some(512),
+            api_key: Some("route-specific-key".to_string()),
+            transport: Some("sse".to_string()),
+            provider_api: None,
+        }];
+        cfg.save().await.expect("save initial config");
+
+        let runtime_ctx = Arc::new(ChannelRuntimeContext {
+            channels_by_name: Arc::new(HashMap::new()),
+            provider: Arc::new(ModelCaptureProvider::default()),
+            default_provider: Arc::new("openrouter".to_string()),
+            memory: Arc::new(NoopMemory),
+            tools_registry: Arc::new(vec![]),
+            observer: Arc::new(NoopObserver),
+            system_prompt: Arc::new("test-system-prompt".to_string()),
+            model: Arc::new("hint:fast".to_string()),
+            temperature: 0.0,
+            auto_save_memory: false,
+            max_tool_iterations: 5,
+            max_history_messages: 50,
+            min_relevance_score: 0.0,
+            conversation_histories: Arc::new(Mutex::new(HashMap::new())),
+            conversation_locks: Default::default(),
+            session_config: crate::config::AgentSessionConfig::default(),
+            session_manager: None,
+            provider_cache: Arc::new(Mutex::new(HashMap::new())),
+            route_overrides: Arc::new(Mutex::new(HashMap::new())),
+            api_key: None,
+            api_url: None,
+            reliability: Arc::new(crate::config::ReliabilityConfig::default()),
+            provider_runtime_options: providers::ProviderRuntimeOptions {
+                zeroclaw_dir: Some(temp.path().to_path_buf()),
+                ..providers::ProviderRuntimeOptions::default()
+            },
+            workspace_dir: Arc::new(workspace_dir),
+            message_timeout_secs: CHANNEL_MESSAGE_TIMEOUT_SECS,
+            interrupt_on_new_message: false,
+            multimodal: crate::config::MultimodalConfig::default(),
+            hooks: None,
+            non_cli_excluded_tools: Arc::new(Mutex::new(Vec::new())),
+            query_classification: crate::config::QueryClassificationConfig::default(),
+            model_routes: cfg.model_routes.clone(),
+            approval_manager: Arc::new(ApprovalManager::from_config(
+                &crate::config::AutonomyConfig::default(),
+            )),
+            safety_heartbeat: None,
+            startup_perplexity_filter: crate::config::PerplexityFilterConfig::default(),
+            gateway_pairing: None,
+            #[cfg(feature = "skill-creation")]
+            skill_creation: crate::config::SkillCreationConfig::default(),
+            timezone_override: None,
+        });
+
+        maybe_apply_runtime_config_update(runtime_ctx.as_ref())
+            .await
+            .expect("runtime reload should preserve routed provider init");
+
+        assert!(
+            runtime_ctx
+                .provider_cache
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .contains_key("openrouter"),
+            "default provider should be cached after routed reload"
+        );
+
+        let mut store = runtime_config_store()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        store.remove(&config_path);
     }
 
     #[tokio::test]
