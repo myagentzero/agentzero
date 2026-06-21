@@ -17,7 +17,7 @@ import Workspace from './pages/Workspace';
 import { AuthProvider, useAuth } from './hooks/useAuth';
 import { coerceLocale, setLocale, type Locale } from './lib/i18n';
 
-const LOCALE_STORAGE_KEY = 'zeroclaw:locale';
+const LOCALE_STORAGE_KEY = 'agentzero:locale';
 
 // Locale context
 interface LocaleContextType {
@@ -115,8 +115,8 @@ function AppContent() {
     const handler = () => {
       logout();
     };
-    window.addEventListener('zeroclaw-unauthorized', handler);
-    return () => window.removeEventListener('zeroclaw-unauthorized', handler);
+    window.addEventListener('agentzero-unauthorized', handler);
+    return () => window.removeEventListener('agentzero-unauthorized', handler);
   }, [logout]);
 
   if (loading) {

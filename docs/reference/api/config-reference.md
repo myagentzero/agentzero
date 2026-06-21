@@ -1,4 +1,4 @@
-# ZeroClaw Config Reference (Operator-Oriented)
+# AgentZero Config Reference (Operator-Oriented)
 
 This is a high-signal reference for common config sections and defaults.
 
@@ -6,17 +6,17 @@ Last verified: **June 11, 2026**.
 
 Config path resolution at startup:
 
-1. `ZEROCLAW_WORKSPACE` override (if set)
-2. persisted `~/.zeroclaw/active_workspace.toml` marker (if present)
-3. default `~/.zeroclaw/config.toml`
+1. `AGENTZERO_WORKSPACE` override (if set)
+2. persisted `~/.agentzero/active_workspace.toml` marker (if present)
+3. default `~/.agentzero/config.toml`
 
-ZeroClaw logs the resolved config on startup at `INFO` level:
+AgentZero logs the resolved config on startup at `INFO` level:
 
 - `Config loaded` with fields: `path`, `workspace`, `source`, `initialized`
 
 Schema export command:
 
-- `zeroclaw config schema` (prints JSON Schema draft 2020-12 to stdout)
+- `agentzero config schema` (prints JSON Schema draft 2020-12 to stdout)
 
 ## Core Keys
 
@@ -32,7 +32,7 @@ Schema export command:
 |---|---|---|
 | `backend` | `none` | Observability backend: `none`, `noop`, `log`, `prometheus`, `otel`, `opentelemetry`, or `otlp` |
 | `otel_endpoint` | `http://localhost:4318` | OTLP HTTP endpoint used when backend is `otel` |
-| `otel_service_name` | `zeroclaw` | Service name emitted to OTLP collector |
+| `otel_service_name` | `agentzero` | Service name emitted to OTLP collector |
 | `runtime_trace_mode` | `none` | Runtime trace storage mode: `none`, `rolling`, or `full` |
 | `runtime_trace_path` | `state/runtime-trace.jsonl` | Runtime trace JSONL path (relative to workspace unless absolute) |
 | `runtime_trace_max_entries` | `200` | Maximum retained events when `runtime_trace_mode = "rolling"` |
@@ -43,9 +43,9 @@ Notes:
 - Alias values `opentelemetry` and `otlp` map to the same OTel backend.
 - Runtime traces are intended for debugging tool-call failures and malformed model tool payloads. They can contain model output text, so keep this disabled by default on shared hosts.
 - Query runtime traces with:
-  - `zeroclaw doctor traces --limit 20`
-  - `zeroclaw doctor traces --event tool_call_result --contains \"error\"`
-  - `zeroclaw doctor traces --id <trace-id>`
+  - `agentzero doctor traces --limit 20`
+  - `agentzero doctor traces --event tool_call_result --contains \"error\"`
+  - `agentzero doctor traces --id <trace-id>`
 
 Example:
 
@@ -53,7 +53,7 @@ Example:
 [observability]
 backend = "otel"
 otel_endpoint = "http://localhost:4318"
-otel_service_name = "zeroclaw"
+otel_service_name = "agentzero"
 runtime_trace_mode = "rolling"
 runtime_trace_path = "state/runtime-trace.jsonl"
 runtime_trace_max_entries = 200
@@ -63,14 +63,14 @@ runtime_trace_max_entries = 200
 
 Provider selection can also be controlled by environment variables. Precedence is:
 
-1. `ZEROCLAW_PROVIDER` (explicit override, always wins when non-empty)
+1. `AGENTZERO_PROVIDER` (explicit override, always wins when non-empty)
 2. `PROVIDER` (legacy fallback, only applied when config provider is unset or still `openrouter`)
 3. `default_provider` in `config.toml`
 
 Operational note for container users:
 
 - If your `config.toml` sets an explicit custom provider like `custom:https://.../v1`, a default `PROVIDER=openrouter` from Docker/container env will no longer replace it.
-- Use `ZEROCLAW_PROVIDER` when you intentionally want runtime env to override a non-default configured provider.
+- Use `AGENTZERO_PROVIDER` when you intentionally want runtime env to override a non-default configured provider.
 
 ## `[agent]`
 
@@ -167,7 +167,7 @@ Notes:
 - Domain patterns support wildcard `*`.
 - Category presets expand to curated domain sets during validation.
 - Invalid domain globs or unknown categories fail fast at startup.
-- When `enabled = true` and no OTP secret exists, ZeroClaw generates one and prints an enrollment URI once.
+- When `enabled = true` and no OTP secret exists, AgentZero generates one and prints an enrollment URI once.
 
 Example:
 
@@ -187,14 +187,14 @@ gated_domain_categories = ["banking"]
 | Key | Default | Purpose |
 |---|---|---|
 | `enabled` | `false` | Enable emergency-stop state machine and CLI |
-| `state_file` | `~/.zeroclaw/estop-state.json` | Persistent estop state path |
+| `state_file` | `~/.agentzero/estop-state.json` | Persistent estop state path |
 | `require_otp_to_resume` | `true` | Require OTP validation before resume operations |
 
 Notes:
 
 - Estop state is persisted atomically and reloaded on startup.
 - Corrupted/unreadable estop state falls back to fail-closed `kill_all`.
-- Use CLI command `zeroclaw estop` to engage and `zeroclaw estop resume` to clear levels.
+- Use CLI command `agentzero estop` to engage and `agentzero estop resume` to clear levels.
 
 ## `[agents.<name>]`
 
@@ -271,14 +271,14 @@ Notes:
 
 Notes:
 
-- Security-first default: ZeroClaw does **not** clone or sync `open-skills` unless `open_skills_enabled = true`.
+- Security-first default: AgentZero does **not** clone or sync `open-skills` unless `open_skills_enabled = true`.
 - Environment overrides:
-  - `ZEROCLAW_OPEN_SKILLS_ENABLED` accepts `1/0`, `true/false`, `yes/no`, `on/off`.
-  - `ZEROCLAW_OPEN_SKILLS_DIR` overrides the repository path when non-empty.
-  - `ZEROCLAW_SKILLS_PROMPT_MODE` accepts `full` or `compact`.
-- Precedence for enable flag: `ZEROCLAW_OPEN_SKILLS_ENABLED` → `skills.open_skills_enabled` in `config.toml` → default `false`.
+  - `AGENTZERO_OPEN_SKILLS_ENABLED` accepts `1/0`, `true/false`, `yes/no`, `on/off`.
+  - `AGENTZERO_OPEN_SKILLS_DIR` overrides the repository path when non-empty.
+  - `AGENTZERO_SKILLS_PROMPT_MODE` accepts `full` or `compact`.
+- Precedence for enable flag: `AGENTZERO_OPEN_SKILLS_ENABLED` → `skills.open_skills_enabled` in `config.toml` → default `false`.
 - `prompt_injection_mode = "compact"` is recommended on low-context local models to reduce startup prompt size while keeping skill files available on demand.
-- Skill loading and `zeroclaw skills install` both apply a static security audit. Skills that contain symlinks, script-like files, high-risk shell payload snippets, or unsafe markdown link traversal are rejected.
+- Skill loading and `agentzero skills install` both apply a static security audit. Skills that contain symlinks, script-like files, high-risk shell payload snippets, or unsafe markdown link traversal are rejected.
 
 ## `[composio]`
 
@@ -292,7 +292,7 @@ Notes:
 
 - Backward compatibility: legacy `enable = true` is accepted as an alias for `enabled = true`.
 - If `enabled = false` or `api_key` is missing, the `composio` tool is not registered.
-- ZeroClaw requests Composio v3 tools with `toolkit_versions=latest` and executes tools with `version="latest"` to avoid stale default tool revisions.
+- AgentZero requests Composio v3 tools with `toolkit_versions=latest` and executes tools with `version="latest"` to avoid stale default tool revisions.
 - Typical flow: call `connect`, complete browser OAuth, then run `execute` for the desired tool action.
 - If Composio returns a missing connected-account reference error, call `list_accounts` (optionally with `app`) and pass the returned `connected_account_id` to `execute`.
 
@@ -483,10 +483,10 @@ timeout_secs = 30
 | `port` | `42617` | gateway listen port |
 | `require_pairing` | `true` | require pairing before bearer auth |
 | `allow_public_bind` | `false` | block accidental public exposure |
-| `path_prefix` | _(none)_ | URL path prefix for reverse-proxy deployments (e.g. `"/zeroclaw"`) |
+| `path_prefix` | _(none)_ | URL path prefix for reverse-proxy deployments (e.g. `"/agentzero"`) |
 
-When deploying behind a reverse proxy that maps ZeroClaw to a sub-path,
-set `path_prefix` to that sub-path (e.g. `"/zeroclaw"`). All gateway
+When deploying behind a reverse proxy that maps AgentZero to a sub-path,
+set `path_prefix` to that sub-path (e.g. `"/agentzero"`). All gateway
 routes will be served under this prefix. The value must start with `/`
 and must not end with `/`.
 
@@ -581,7 +581,7 @@ Upgrade strategy:
 
 1. Keep hints stable (`hint:reasoning`, `hint:semantic`).
 2. Update only `model = "...new-version..."` in the route entries.
-3. Validate with `zeroclaw doctor` before restart/rollout.
+3. Validate with `agentzero doctor` before restart/rollout.
 
 Natural-language config path:
 
@@ -654,7 +654,7 @@ Notes:
 - If using cloud APIs (OpenAI, Anthropic, etc.), you can reduce this to `60` or lower.
 - Values below `30` are clamped to `30` to avoid immediate timeout churn.
 - When a timeout occurs, users receive: `⚠️ Request timed out while waiting for the model. Please try again.`
-- While `zeroclaw channel start` is running, updates to `default_provider`, `default_model`, `default_temperature`, `api_key`, `api_url`, and `reliability.*` are hot-applied from `config.toml` on the next inbound message.
+- While `agentzero channel start` is running, updates to `default_provider`, `default_model`, `default_temperature`, `api_key`, `api_url`, and `reliability.*` are hot-applied from `config.toml` on the next inbound message.
 
 ### `[channels_config.webhook]`
 
@@ -709,7 +709,7 @@ Example:
 [channels_config.irc]
 server = "irc.libera.chat"
 port = 6697
-nickname = "zeroclaw-bot"
+nickname = "agentzero-bot"
 channels = ["#support"]
 allowed_users = ["admin", "moderator"]
 sasl_password = "bot-password"
@@ -786,10 +786,10 @@ Notes:
 After editing config:
 
 ```bash
-zeroclaw status
-zeroclaw doctor
-zeroclaw channel doctor
-zeroclaw service restart
+agentzero status
+agentzero doctor
+agentzero channel doctor
+agentzero service restart
 ```
 
 ## Related Docs

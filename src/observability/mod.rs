@@ -266,7 +266,7 @@ mod tests {
             .expect("factory should hand out SharedPrometheusObserver for the prometheus backend");
         let output = shared.inner().encode();
         assert!(
-            output.contains("zeroclaw_heartbeat_ticks_total"),
+            output.contains("agentzero_heartbeat_ticks_total"),
             "encoded output missing heartbeat metric:\n{output}"
         );
         // Counter must reflect *both* events recorded through the other handle.
@@ -274,7 +274,7 @@ mod tests {
         // have already incremented it; assert ≥ 2 rather than == 2.)
         let line = output
             .lines()
-            .find(|line| line.starts_with("zeroclaw_heartbeat_ticks_total "))
+            .find(|line| line.starts_with("agentzero_heartbeat_ticks_total "))
             .expect("counter line must be present once any event has been recorded");
         let value: u64 = line
             .split_whitespace()

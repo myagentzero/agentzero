@@ -1,6 +1,6 @@
 //! OpenAI-compatible `/v1/chat/completions` and `/v1/models` endpoints.
 //!
-//! These endpoints allow ZeroClaw to act as a drop-in replacement for the
+//! These endpoints allow AgentZero to act as a drop-in replacement for the
 //! OpenAI API, enabling any OpenAI-compatible client (e.g., `openai` Python
 //! library, `curl`, Aura) to send chat requests through the gateway.
 

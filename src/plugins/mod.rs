@@ -1,10 +1,10 @@
-//! Plugin system for ZeroClaw.
+//! Plugin system for AgentZero.
 //!
 //! Modeled after OpenClaw's plugin architecture, adapted for Rust:
 //!
-//! - **Manifest**: each plugin has a `zeroclaw.plugin.toml` descriptor
-//! - **Discovery**: scans bundled, global (`~/.zeroclaw/extensions/`), and
-//!   workspace (`.zeroclaw/extensions/`) directories
+//! - **Manifest**: each plugin has a `agentzero.plugin.toml` descriptor
+//! - **Discovery**: scans bundled, global (`~/.agentzero/extensions/`), and
+//!   workspace (`.agentzero/extensions/`) directories
 //! - **Registry**: collects loaded plugins, their tools, hooks, and diagnostics
 //! - **PluginApi**: passed to `Plugin::register()` so plugins can register
 //!   tools, hooks, and services without knowing the host internals
@@ -72,6 +72,6 @@ mod tests {
             tools: vec![],
             providers: vec![],
         };
-        assert_eq!(PLUGIN_MANIFEST_FILENAME, "zeroclaw.plugin.toml");
+        assert_eq!(PLUGIN_MANIFEST_FILENAME, "agentzero.plugin.toml");
     }
 }

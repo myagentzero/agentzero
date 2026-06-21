@@ -89,7 +89,7 @@ impl PluginLogger {
     }
 }
 
-/// Trait that every ZeroClaw plugin must implement.
+/// Trait that every AgentZero plugin must implement.
 ///
 /// Analogous to OpenClaw's `OpenClawPluginDefinition`. The host calls
 /// `register()` once during startup, passing a `PluginApi` the plugin uses

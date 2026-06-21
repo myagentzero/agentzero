@@ -33,7 +33,7 @@ venv/
 *.pem
 credentials.json
 .worktrees/
-.zeroclaw/*
+.agentzero/*
 
 # Claude Code agent
 .claude/

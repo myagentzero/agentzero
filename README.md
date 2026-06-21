@@ -24,7 +24,7 @@ If you want a personal, single-user assistant that feels local, fast, and always
   <a href="docs/ops/troubleshooting.md">Troubleshoot</a> ·
 </p>
 
-The installer asks whether you want a prebuilt binary (fast, ~seconds) or a source build (slower, customisable). Both end the same way — `zeroclaw onboard` kicks off automatically.
+The installer asks whether you want a prebuilt binary (fast, ~seconds) or a source build (slower, customisable). Both end the same way — `agentzero onboard` kicks off automatically.
 
 Flags:
 
@@ -33,7 +33,7 @@ Flags:
 ./install.sh --source                # always build from source
 ./install.sh --minimal               # kernel only (~6.6 MB)
 ./install.sh --source --features agent-runtime,channel-discord  # custom feature set
-./install.sh --skip-onboard          # install only, run `zeroclaw onboard` later
+./install.sh --skip-onboard          # install only, run `agentzero onboard` later
 ./install.sh --list-features         # print available feature flags
 ```
 
@@ -42,10 +42,10 @@ Platform-specific notes: see [setup guides](docs/setup-guides/README.md).
 ## Quick start
 
 ```bash
-zeroclaw onboard                  # interactive onboard: provider, channels, agents, etc.
-zeroclaw agent -a <alias>         # interactive chat using the [agents.<alias>] entry
-zeroclaw service install          # register as systemd/launchctl/Windows Service
-zeroclaw service start            # run it always-on in the background
+agentzero onboard                  # interactive onboard: provider, channels, agents, etc.
+agentzero agent -a <alias>         # interactive chat using the [agents.<alias>] entry
+agentzero service install          # register as systemd/launchctl/Windows Service
+agentzero service start            # run it always-on in the background
 ```
 
 ## What AgentZero does
@@ -60,7 +60,7 @@ zeroclaw service start            # run it always-on in the background
 
 ## Configuration
 
-One TOML file at `~/.zeroclaw/config.toml`. Pointers:
+One TOML file at `~/.agentzero/config.toml`. Pointers:
 
 - [Provider reference](docs/reference/api/providers-reference.md) — provider IDs, aliases, and credential env vars
 - [Channels reference](docs/reference/api/channels-reference.md) — channel capabilities and setup details
@@ -75,7 +75,7 @@ Notes:
 
 - Normal OpenAI Codex subscription auth uses stored auth profiles, not an `api_key` on the provider entry.
 - Only set `api_key` / `uri` on `[providers.models.openai.<alias>]` when intentionally targeting a custom OpenAI-compatible gateway or endpoint.
-- If you see `provider streaming failed, falling back to non-streaming chat`, AgentZero retries the same request in non-streaming mode. Check `zeroclaw auth status` before changing provider config.
+- If you see `provider streaming failed, falling back to non-streaming chat`, AgentZero retries the same request in non-streaming mode. Check `agentzero auth status` before changing provider config.
 
 ## Architecture
 
@@ -103,7 +103,7 @@ Full detail with Mermaid diagrams: [Architecture overview](docs/architecture/REA
 
 ## Agent workspace + skills
 
-Workspace root: `~/.zeroclaw/workspace/` (configurable via config).
+Workspace root: `~/.agentzero/workspace/` (configurable via config).
 
 Injected prompt files:
 - `IDENTITY.md` - agent personality and role
@@ -117,7 +117,7 @@ Injected prompt files:
 - `BOOTSTRAP.md` - onboarding reference
 
 
-Skills: `~/.zeroclaw/workspace/skills/<skill>/SKILL.md` or `SKILL.toml`.
+Skills: `~/.agentzero/workspace/skills/<skill>/SKILL.md` or `SKILL.toml`.
 
 
 ## License

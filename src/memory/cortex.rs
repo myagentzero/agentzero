@@ -12,8 +12,8 @@ impl CortexMemMemory {
     const DEFAULT_CORTEX_CMD: &'static str = "cortex-mem";
 
     pub fn new(workspace_dir: &Path, local: SqliteMemory) -> Self {
-        let cortex_cmd = std::env::var("ZEROCLAW_CORTEX_CMD")
-            .or_else(|_| std::env::var("ZEROCLAW_LUCID_CMD"))
+        let cortex_cmd = std::env::var("AGENTZERO_CORTEX_CMD")
+            .or_else(|_| std::env::var("AGENTZERO_LUCID_CMD"))
             .unwrap_or_else(|_| Self::DEFAULT_CORTEX_CMD.to_string());
 
         let inner = LucidMemory::new_with_command(workspace_dir, local, cortex_cmd);

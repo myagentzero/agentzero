@@ -383,7 +383,7 @@ pub async fn run_gateway(
             auth_profile_override: None,
             provider_api_url: config.api_url.clone(),
             provider_transport: config.effective_provider_transport(),
-            zeroclaw_dir: config.config_path.parent().map(std::path::PathBuf::from),
+            agentzero_dir: config.config_path.parent().map(std::path::PathBuf::from),
             secrets_encrypt: config.secrets.encrypt,
             reasoning_enabled: config.runtime.reasoning_enabled,
             reasoning_level: config.effective_provider_reasoning_level(),
@@ -1908,7 +1908,7 @@ mod tests {
 
         let body = response.into_body().collect().await.unwrap().to_bytes();
         let text = String::from_utf8(body.to_vec()).unwrap();
-        assert!(text.contains("zeroclaw_heartbeat_ticks_total 1"));
+        assert!(text.contains("agentzero_heartbeat_ticks_total 1"));
     }
 
     #[tokio::test]
@@ -1962,7 +1962,7 @@ mod tests {
         let body = response.into_body().collect().await.unwrap().to_bytes();
         let text = String::from_utf8(body.to_vec()).unwrap();
         assert!(
-            text.contains("zeroclaw_heartbeat_ticks_total 1"),
+            text.contains("agentzero_heartbeat_ticks_total 1"),
             "expected Prometheus output through wrapped observer chain, got:\n{text}"
         );
         assert!(
@@ -2043,7 +2043,7 @@ mod tests {
         let text = String::from_utf8(body.to_vec()).unwrap();
         let line = text
             .lines()
-            .find(|l| l.starts_with("zeroclaw_heartbeat_ticks_total "))
+            .find(|l| l.starts_with("agentzero_heartbeat_ticks_total "))
             .unwrap_or_else(|| panic!("counter line missing in:\n{text}"));
         let value: u64 = line
             .split_whitespace()
@@ -2126,7 +2126,7 @@ mod tests {
         let body = response.into_body().collect().await.unwrap().to_bytes();
         let text = String::from_utf8(body.to_vec()).unwrap();
         assert!(
-            text.contains("zeroclaw_heartbeat_ticks_total"),
+            text.contains("agentzero_heartbeat_ticks_total"),
             "expected heartbeat metric inside MultiObserver chain, got:\n{text}"
         );
         assert!(
@@ -2193,7 +2193,7 @@ mod tests {
         let body = response.into_body().collect().await.unwrap().to_bytes();
         let text = String::from_utf8(body.to_vec()).unwrap();
         assert!(
-            text.contains("zeroclaw_heartbeat_ticks_total"),
+            text.contains("agentzero_heartbeat_ticks_total"),
             "expected the heartbeat metric line in factory-built chain output, got:\n{text}"
         );
         assert!(

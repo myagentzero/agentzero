@@ -1,7 +1,7 @@
-//! Plugin manifest — the `zeroclaw.plugin.toml` descriptor.
+//! Plugin manifest — the `agentzero.plugin.toml` descriptor.
 //!
 //! Mirrors OpenClaw's `openclaw.plugin.json` but uses TOML to match
-//! ZeroClaw's existing config format.
+//! AgentZero's existing config format.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -13,7 +13,7 @@ use super::traits::PluginCapability;
 
 const SUPPORTED_WIT_MAJOR: u64 = 1;
 const SUPPORTED_WIT_PACKAGES: [&str; 3] =
-    ["zeroclaw:hooks", "zeroclaw:tools", "zeroclaw:providers"];
+    ["agentzero:hooks", "agentzero:tools", "agentzero:providers"];
 
 /// Validation profile for plugin manifests.
 ///
@@ -27,7 +27,7 @@ pub enum ManifestValidationProfile {
 }
 
 /// Filename plugins must use for their manifest.
-pub const PLUGIN_MANIFEST_FILENAME: &str = "zeroclaw.plugin.toml";
+pub const PLUGIN_MANIFEST_FILENAME: &str = "agentzero.plugin.toml";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PluginToolManifest {
@@ -87,7 +87,7 @@ pub enum ManifestLoadResult {
     },
 }
 
-/// Load and parse `zeroclaw.plugin.toml` from `root_dir`.
+/// Load and parse `agentzero.plugin.toml` from `root_dir`.
 pub fn load_manifest(root_dir: &Path) -> ManifestLoadResult {
     let manifest_path = root_dir.join(PLUGIN_MANIFEST_FILENAME);
     if !manifest_path.exists() {
@@ -144,9 +144,9 @@ fn parse_wit_package_version(input: &str) -> anyhow::Result<(&str, u64)> {
 
 fn required_wit_package_for_capability(capability: &PluginCapability) -> &'static str {
     match capability {
-        PluginCapability::Hooks | PluginCapability::ModifyToolResults => "zeroclaw:hooks",
-        PluginCapability::Tools => "zeroclaw:tools",
-        PluginCapability::Providers => "zeroclaw:providers",
+        PluginCapability::Hooks | PluginCapability::ModifyToolResults => "agentzero:hooks",
+        PluginCapability::Tools => "agentzero:tools",
+        PluginCapability::Providers => "agentzero:providers",
     }
 }
 
@@ -197,12 +197,12 @@ pub fn validate_manifest_with_profile(
             );
         }
     }
-    if !manifest.tools.is_empty() && !declared_wit_packages.contains("zeroclaw:tools") {
-        anyhow::bail!("plugin tools require wit package 'zeroclaw:tools@{SUPPORTED_WIT_MAJOR}.x'");
+    if !manifest.tools.is_empty() && !declared_wit_packages.contains("agentzero:tools") {
+        anyhow::bail!("plugin tools require wit package 'agentzero:tools@{SUPPORTED_WIT_MAJOR}.x'");
     }
-    if !manifest.providers.is_empty() && !declared_wit_packages.contains("zeroclaw:providers") {
+    if !manifest.providers.is_empty() && !declared_wit_packages.contains("agentzero:providers") {
         anyhow::bail!(
-            "plugin providers require wit package 'zeroclaw:providers@{SUPPORTED_WIT_MAJOR}.x'"
+            "plugin providers require wit package 'agentzero:providers@{SUPPORTED_WIT_MAJOR}.x'"
         );
     }
     for tool in &manifest.tools {
@@ -323,7 +323,7 @@ id = "  "
             config_schema: None,
             capabilities: vec![],
             module_path: "plugins/demo.wasm".into(),
-            wit_packages: vec!["zeroclaw:hooks@1.0.0".into()],
+            wit_packages: vec!["agentzero:hooks@1.0.0".into()],
             tools: vec![],
             providers: vec![],
         };
@@ -340,7 +340,7 @@ id = "  "
             config_schema: None,
             capabilities: vec![],
             module_path: "plugins/demo.wasm".into(),
-            wit_packages: vec!["zeroclaw:unknown@1.0.0".into()],
+            wit_packages: vec!["agentzero:unknown@1.0.0".into()],
             tools: vec![],
             providers: vec![],
         };
@@ -357,7 +357,7 @@ id = "  "
             config_schema: None,
             capabilities: vec![],
             module_path: "   ".into(),
-            wit_packages: vec!["zeroclaw:hooks@1.0.0".into()],
+            wit_packages: vec!["agentzero:hooks@1.0.0".into()],
             tools: vec![],
             providers: vec![],
         };
@@ -394,7 +394,7 @@ id = "  "
             config_schema: None,
             capabilities: vec![PluginCapability::Tools],
             module_path: "plugins/demo.wasm".into(),
-            wit_packages: vec!["zeroclaw:hooks@1.0.0".into()],
+            wit_packages: vec!["agentzero:hooks@1.0.0".into()],
             tools: vec![],
             providers: vec![],
         };
@@ -411,7 +411,7 @@ id = "  "
             config_schema: None,
             capabilities: vec![PluginCapability::ModifyToolResults],
             module_path: "plugins/demo.wasm".into(),
-            wit_packages: vec!["zeroclaw:hooks@1.0.0".into()],
+            wit_packages: vec!["agentzero:hooks@1.0.0".into()],
             tools: vec![],
             providers: vec![],
         };
@@ -428,7 +428,7 @@ id = "  "
             config_schema: None,
             capabilities: vec![],
             module_path: "plugins/demo.wasm".into(),
-            wit_packages: vec!["zeroclaw:hooks@1.0.0".into()],
+            wit_packages: vec!["agentzero:hooks@1.0.0".into()],
             tools: vec![PluginToolManifest {
                 name: "demo_tool".into(),
                 description: "demo tool".into(),
@@ -452,7 +452,7 @@ id = "  "
             config_schema: None,
             capabilities: vec![],
             module_path: "plugins/demo.wasm".into(),
-            wit_packages: vec!["zeroclaw:hooks@1.0.0".into()],
+            wit_packages: vec!["agentzero:hooks@1.0.0".into()],
             tools: vec![],
             providers: vec!["demo_provider".into()],
         };

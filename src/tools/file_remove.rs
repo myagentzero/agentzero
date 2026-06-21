@@ -242,7 +242,7 @@ mod tests {
 
     #[tokio::test]
     async fn file_remove_deletes_file() {
-        let dir = std::env::temp_dir().join("zeroclaw_test_file_remove");
+        let dir = std::env::temp_dir().join("agentzero_test_file_remove");
         let _ = tokio::fs::remove_dir_all(&dir).await;
         tokio::fs::create_dir_all(&dir).await.unwrap();
         tokio::fs::write(dir.join("trash.txt"), "bye")
@@ -259,7 +259,7 @@ mod tests {
 
     #[tokio::test]
     async fn file_remove_blocks_nonexistent() {
-        let dir = std::env::temp_dir().join("zeroclaw_test_file_remove_noexist");
+        let dir = std::env::temp_dir().join("agentzero_test_file_remove_noexist");
         let _ = tokio::fs::remove_dir_all(&dir).await;
         tokio::fs::create_dir_all(&dir).await.unwrap();
 
@@ -273,7 +273,7 @@ mod tests {
 
     #[tokio::test]
     async fn file_remove_blocks_directory() {
-        let dir = std::env::temp_dir().join("zeroclaw_test_file_remove_dir");
+        let dir = std::env::temp_dir().join("agentzero_test_file_remove_dir");
         let _ = tokio::fs::remove_dir_all(&dir).await;
         tokio::fs::create_dir_all(dir.join("subdir")).await.unwrap();
 
@@ -287,7 +287,7 @@ mod tests {
 
     #[tokio::test]
     async fn file_remove_blocks_readonly_mode() {
-        let dir = std::env::temp_dir().join("zeroclaw_test_file_remove_readonly");
+        let dir = std::env::temp_dir().join("agentzero_test_file_remove_readonly");
         let _ = tokio::fs::remove_dir_all(&dir).await;
         tokio::fs::create_dir_all(&dir).await.unwrap();
         tokio::fs::write(dir.join("keep.txt"), "safe")
@@ -306,7 +306,7 @@ mod tests {
 
     #[tokio::test]
     async fn file_remove_blocks_rate_limited() {
-        let dir = std::env::temp_dir().join("zeroclaw_test_file_remove_rate");
+        let dir = std::env::temp_dir().join("agentzero_test_file_remove_rate");
         let _ = tokio::fs::remove_dir_all(&dir).await;
         tokio::fs::create_dir_all(&dir).await.unwrap();
         tokio::fs::write(dir.join("keep.txt"), "safe")
@@ -328,7 +328,7 @@ mod tests {
 
     #[tokio::test]
     async fn file_remove_blocks_path_traversal() {
-        let dir = std::env::temp_dir().join("zeroclaw_test_file_remove_traversal");
+        let dir = std::env::temp_dir().join("agentzero_test_file_remove_traversal");
         let _ = tokio::fs::remove_dir_all(&dir).await;
         tokio::fs::create_dir_all(&dir).await.unwrap();
 
@@ -351,7 +351,7 @@ mod tests {
 
     #[tokio::test]
     async fn file_remove_blocks_bootstrap_file() {
-        let dir = std::env::temp_dir().join("zeroclaw_test_file_remove_bootstrap");
+        let dir = std::env::temp_dir().join("agentzero_test_file_remove_bootstrap");
         let _ = tokio::fs::remove_dir_all(&dir).await;
         tokio::fs::create_dir_all(&dir).await.unwrap();
 
@@ -380,7 +380,7 @@ mod tests {
 
     #[tokio::test]
     async fn file_remove_blocks_protected_dir() {
-        let dir = std::env::temp_dir().join("zeroclaw_test_file_remove_protdir");
+        let dir = std::env::temp_dir().join("agentzero_test_file_remove_protdir");
         let _ = tokio::fs::remove_dir_all(&dir).await;
         tokio::fs::create_dir_all(&dir).await.unwrap();
 
@@ -420,7 +420,7 @@ mod tests {
     async fn file_remove_blocks_symlink() {
         use std::os::unix::fs::symlink;
 
-        let root = std::env::temp_dir().join("zeroclaw_test_file_remove_symlink");
+        let root = std::env::temp_dir().join("agentzero_test_file_remove_symlink");
         let workspace = root.join("workspace");
         let outside = root.join("outside");
 

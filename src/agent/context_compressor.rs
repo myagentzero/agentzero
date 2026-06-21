@@ -866,7 +866,7 @@ mod tests {
     #[test]
     fn test_build_summarizer_transcript_strips_media_markers_before_truncation() {
         let long_path = format!(
-            "/private/tmp/zeroclaw/signal_inbound/{}",
+            "/private/tmp/agentzero/signal_inbound/{}",
             "nested-directory/".repeat(12)
         );
         let messages = vec![msg(

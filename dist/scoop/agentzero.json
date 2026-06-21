@@ -1,0 +1,27 @@
+{
+    "version": "0.5.9",
+    "description": "Zero overhead. Zero compromise. 100% Rust. The fastest, smallest AI assistant.",
+    "homepage": "https://github.com/myagentzero/agentzero",
+    "license": "MIT|Apache-2.0",
+    "architecture": {
+        "64bit": {
+            "url": "https://github.com/myagentzero/agentzero/releases/download/v0.5.9/agentzero-x86_64-pc-windows-msvc.zip",
+            "hash": "",
+            "bin": "agentzero.exe"
+        }
+    },
+    "checkver": {
+        "github": "https://github.com/myagentzero/agentzero"
+    },
+    "autoupdate": {
+        "architecture": {
+            "64bit": {
+                "url": "https://github.com/myagentzero/agentzero/releases/download/v$version/agentzero-x86_64-pc-windows-msvc.zip"
+            }
+        },
+        "hash": {
+            "url": "https://github.com/myagentzero/agentzero/releases/download/v$version/SHA256SUMS",
+            "regex": "([a-f0-9]{64})\\s+agentzero-x86_64-pc-windows-msvc\\.zip"
+        }
+    }
+}

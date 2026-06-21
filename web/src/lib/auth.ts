@@ -1,4 +1,4 @@
-export const TOKEN_STORAGE_KEY = 'zeroclaw_token';
+export const TOKEN_STORAGE_KEY = 'agentzero_token';
 let inMemoryToken: string | null = null;
 
 function readStorage(key: string): string | null {

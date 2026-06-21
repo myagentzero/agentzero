@@ -125,7 +125,7 @@ fn default_true() -> bool {
     true
 }
 fn default_imap_id_name() -> String {
-    "zeroclaw".into()
+    "agentzero".into()
 }
 fn default_imap_id_version() -> String {
     env!("CARGO_PKG_VERSION").into()
@@ -598,10 +598,10 @@ impl Channel for EmailChannel {
             if let Some(pos) = message.content.find('\n') {
                 (&message.content[9..pos], message.content[pos + 1..].trim())
             } else {
-                ("ZeroClaw Message", message.content.as_str())
+                ("AgentZero Message", message.content.as_str())
             }
         } else {
-            ("ZeroClaw Message", message.content.as_str())
+            ("AgentZero Message", message.content.as_str())
         };
 
         let email = Message::builder()
@@ -700,7 +700,7 @@ mod tests {
         assert_eq!(config.idle_timeout_secs, 1740);
         assert!(config.allowed_senders.is_empty());
         assert!(config.imap_id.enabled);
-        assert_eq!(config.imap_id.name, "zeroclaw");
+        assert_eq!(config.imap_id.name, "agentzero");
         assert_eq!(config.imap_id.version, env!("CARGO_PKG_VERSION"));
         assert_eq!(config.imap_id.vendor, "myagentzero");
     }
@@ -1013,7 +1013,7 @@ mod tests {
         assert!(config.smtp_tls); // default
         assert_eq!(config.idle_timeout_secs, 1740); // default
         assert!(config.imap_id.enabled); // default
-        assert_eq!(config.imap_id.name, "zeroclaw"); // default
+        assert_eq!(config.imap_id.name, "agentzero"); // default
     }
 
     #[test]
@@ -1066,7 +1066,7 @@ mod tests {
 
         let config: EmailConfig = serde_json::from_str(json).unwrap();
         assert!(config.imap_id.enabled);
-        assert_eq!(config.imap_id.name, "zeroclaw");
+        assert_eq!(config.imap_id.name, "agentzero");
         assert_eq!(config.imap_id.vendor, "myagentzero");
     }
 

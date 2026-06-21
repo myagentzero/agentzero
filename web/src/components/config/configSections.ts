@@ -134,7 +134,7 @@ export const CONFIG_SECTIONS: SectionDef[] = [
         ]
       },
       { key: 'otel_endpoint', label: 'OTEL Endpoint', type: 'text', description: 'e.g. http://localhost:4317' },
-      { key: 'otel_service_name', label: 'OTEL Service Name', type: 'text', description: 'e.g. zeroclaw-prod' },
+      { key: 'otel_service_name', label: 'OTEL Service Name', type: 'text', description: 'e.g. agentzero-prod' },
       {
         key: 'runtime_trace_mode', label: 'Runtime Trace Mode', type: 'select', defaultValue: 'none', options: [
           { value: 'none', label: 'None' },
@@ -287,7 +287,7 @@ export const CONFIG_SECTIONS: SectionDef[] = [
     defaultCollapsed: true,
     fields: [
       { key: 'enabled', label: 'Enabled', type: 'toggle', defaultValue: false },
-      { key: 'state_file', label: 'State File', type: 'text', defaultValue: '~/.zeroclaw/estop-state.json', description: 'Default: ~/.zeroclaw/estop-state.json' },
+      { key: 'state_file', label: 'State File', type: 'text', defaultValue: '~/.agentzero/estop-state.json', description: 'Default: ~/.agentzero/estop-state.json' },
       { key: 'require_otp_to_resume', label: 'Require OTP to Resume', type: 'toggle', defaultValue: true },
     ],
   },
@@ -486,7 +486,7 @@ export const CONFIG_SECTIONS: SectionDef[] = [
     icon: Sparkles,
     fields: [
       { key: 'open_skills_enabled', label: 'Open Skills Enabled', type: 'toggle', defaultValue: false, description: 'Enable community open-skills repository' },
-      { key: 'open_skills_dir', label: 'Open Skills Directory', type: 'text', description: 'e.g. ./skills or /opt/zeroclaw/skills' },
+      { key: 'open_skills_dir', label: 'Open Skills Directory', type: 'text', description: 'e.g. ./skills or /opt/agentzero/skills' },
       { key: 'trusted_skill_roots', label: 'Trusted Skill Roots', type: 'tag-list', tagPlaceholder: 'e.g. /home/user/skills, /opt/shared-skills', description: 'Allowlist of canonical directory roots for workspace skill symlink targets' },
       { key: 'allow_scripts', label: 'Allow Scripts', type: 'toggle', defaultValue: false, description: 'Allow .sh/.bash/.zsh/.ps1/.bat/.cmd files in skill packages' },
       {
@@ -707,7 +707,7 @@ export const CONFIG_SECTIONS: SectionDef[] = [
     defaultCollapsed: true,
     fields: [
       { key: 'url', label: 'URL', type: 'text', description: 'e.g. http://localhost:6334' },
-      { key: 'collection', label: 'Collection', type: 'text', defaultValue: 'zeroclaw_memories', description: 'Default: zeroclaw_memories' },
+      { key: 'collection', label: 'Collection', type: 'text', defaultValue: 'agentzero_memories', description: 'Default: agentzero_memories' },
       { key: 'api_key', label: 'API Key', type: 'password', sensitive: true, description: 'Qdrant Cloud API key' },
     ],
   },
@@ -902,7 +902,7 @@ export const CONFIG_SECTIONS: SectionDef[] = [
     defaultCollapsed: true,
     fields: [
       { key: 'enabled', label: 'Enabled', type: 'toggle', defaultValue: false },
-      { key: 'access_token', label: 'Access Token', type: 'password', sensitive: true, description: 'Fine-grained PAT or installation token. Falls back to ZEROCLAW_GITHUB_TOOL_TOKEN, then GITHUB_TOKEN, when blank.' },
+      { key: 'access_token', label: 'Access Token', type: 'password', sensitive: true, description: 'Fine-grained PAT or installation token. Falls back to AGENTZERO_GITHUB_TOOL_TOKEN, then GITHUB_TOKEN, when blank.' },
       { key: 'api_base_url', label: 'API Base URL', type: 'text', description: 'For GHES. Defaults to https://api.github.com' },
       { key: 'allowed_repos', label: 'Allowed Repos', type: 'tag-list', tagPlaceholder: 'e.g. owner/repo or owner/*' },
       { key: 'allowed_actions', label: 'Allowed Actions', type: 'tag-list', tagPlaceholder: 'e.g. get_issue', description: 'Options: get_issue, get_pr, list_comments, list_pr_review_comments, add_comment, create_pull_request, close_pr, merge_pr, request_review' },
@@ -977,9 +977,9 @@ export const CONFIG_SECTIONS: SectionDef[] = [
       { key: 'all_proxy', label: 'All Proxy', type: 'text', description: 'e.g. socks5://proxy.example.com:1080' },
       { key: 'no_proxy', label: 'No Proxy', type: 'tag-list', tagPlaceholder: 'e.g. localhost, 127.0.0.1, .internal' },
       {
-        key: 'scope', label: 'Scope', type: 'select', defaultValue: 'zeroclaw', options: [
+        key: 'scope', label: 'Scope', type: 'select', defaultValue: 'agentzero', options: [
           { value: 'environment', label: 'Environment' },
-          { value: 'zeroclaw', label: 'ZeroClaw Only' },
+          { value: 'agentzero', label: 'AgentZero Only' },
           { value: 'services', label: 'Services' },
         ]
       },
@@ -1194,7 +1194,7 @@ export const CONFIG_SECTIONS: SectionDef[] = [
       { key: 'enabled', label: 'Enabled', type: 'toggle', defaultValue: true },
       { key: 'allow', label: 'Allow List', type: 'tag-list', tagPlaceholder: 'e.g. my-plugin, tools-extra' },
       { key: 'deny', label: 'Deny List', type: 'tag-list', tagPlaceholder: 'e.g. untrusted-plugin' },
-      { key: 'load_paths', label: 'Load Paths', type: 'tag-list', tagPlaceholder: 'e.g. ./plugins, /opt/zeroclaw/plugins' },
+      { key: 'load_paths', label: 'Load Paths', type: 'tag-list', tagPlaceholder: 'e.g. ./plugins, /opt/agentzero/plugins' },
     ],
   },
 
@@ -1246,7 +1246,7 @@ export const CONFIG_SECTIONS: SectionDef[] = [
     defaultCollapsed: true,
     fields: [
       { key: 'enabled', label: 'Enabled', type: 'toggle', defaultValue: false },
-      { key: 'db_path', label: 'Database Path', type: 'text', defaultValue: '~/.zeroclaw/agents.db', description: 'Default: ~/.zeroclaw/agents.db' },
+      { key: 'db_path', label: 'Database Path', type: 'text', defaultValue: '~/.agentzero/agents.db', description: 'Default: ~/.agentzero/agents.db' },
       { key: 'staleness_secs', label: 'Staleness (s)', type: 'number', min: 1, defaultValue: 300, description: 'Default: 300 (5 min)' },
     ],
   },

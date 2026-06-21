@@ -239,7 +239,7 @@ async fn dockerignore_excludes_image_files() {
     let patterns = parse_dockerignore(&content);
 
     assert!(
-        is_excluded(&patterns, "zeroclaw.png"),
+        is_excluded(&patterns, "agentzero.png"),
         "*.png files must be excluded"
     );
     assert!(

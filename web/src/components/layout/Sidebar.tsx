@@ -95,18 +95,18 @@ export default function Sidebar({
                     focusable="false"
                   >
                     <defs>
-                      <radialGradient id="zeroclaw-brand-bg" cx="50%" cy="50%" r="50%">
+                      <radialGradient id="agentzero-brand-bg" cx="50%" cy="50%" r="50%">
                         <stop offset="0%" stopColor="#1a1a2e" />
                         <stop offset="100%" stopColor="#0d0d1a" />
                       </radialGradient>
-                      <filter id="zeroclaw-brand-glow">
+                      <filter id="agentzero-brand-glow">
                         <feGaussianBlur stdDeviation="4" result="blur" />
                         <feMerge>
                           <feMergeNode in="blur" />
                           <feMergeNode in="SourceGraphic" />
                         </feMerge>
                       </filter>
-                      <filter id="zeroclaw-brand-eye-glow">
+                      <filter id="agentzero-brand-eye-glow">
                         <feGaussianBlur stdDeviation="8" result="blur" />
                         <feMerge>
                           <feMergeNode in="blur" />
@@ -114,7 +114,7 @@ export default function Sidebar({
                           <feMergeNode in="SourceGraphic" />
                         </feMerge>
                       </filter>
-                      <filter id="zeroclaw-brand-circuit-glow">
+                      <filter id="agentzero-brand-circuit-glow">
                         <feGaussianBlur stdDeviation="2" result="blur" />
                         <feMerge>
                           <feMergeNode in="blur" />
@@ -122,7 +122,7 @@ export default function Sidebar({
                         </feMerge>
                       </filter>
                     </defs>
-                    <circle cx="256" cy="256" r="256" fill="url(#zeroclaw-brand-bg)" />
+                    <circle cx="256" cy="256" r="256" fill="url(#agentzero-brand-bg)" />
                     <g opacity="0.08" stroke="#ff6b35" strokeWidth="0.5" fill="none">
                       <path d="M128,80 L158,60 L188,80 L188,120 L158,140 L128,120Z" />
                       <path d="M188,80 L218,60 L248,80 L248,120 L218,140 L188,120Z" />
@@ -136,7 +136,7 @@ export default function Sidebar({
                       <path d="M188,400 L218,380 L248,400 L248,440 L218,460 L188,440Z" />
                       <path d="M248,400 L278,380 L308,400 L308,440 L278,460 L248,440Z" />
                     </g>
-                    <g filter="url(#zeroclaw-brand-circuit-glow)" stroke="#ff6b35" strokeWidth="1.5" fill="none" opacity="0.25">
+                    <g filter="url(#agentzero-brand-circuit-glow)" stroke="#ff6b35" strokeWidth="1.5" fill="none" opacity="0.25">
                       <path d="M80,256 L130,256 L145,240" />
                       <path d="M432,256 L382,256 L367,240" />
                       <path d="M256,440 L256,410 L240,395" />
@@ -154,14 +154,14 @@ export default function Sidebar({
                       <path d="M190,260 Q256,235 322,260" />
                       <path d="M195,285 Q256,260 317,285" />
                     </g>
-                    <g filter="url(#zeroclaw-brand-glow)">
+                    <g filter="url(#agentzero-brand-glow)">
                       <path d="M168,260 L120,220 L95,195" stroke="#e74c3c" strokeWidth="14" fill="none" strokeLinecap="round" strokeLinejoin="round" />
                       <path d="M95,195 L55,160 L70,175" stroke="#ff6b35" strokeWidth="12" fill="none" strokeLinecap="round" strokeLinejoin="round" />
                       <path d="M95,195 L60,200 L75,190" stroke="#ff6b35" strokeWidth="12" fill="none" strokeLinecap="round" strokeLinejoin="round" />
                       <circle cx="55" cy="160" r="5" fill="#ff9f43" />
                       <circle cx="60" cy="200" r="5" fill="#ff9f43" />
                     </g>
-                    <g filter="url(#zeroclaw-brand-glow)">
+                    <g filter="url(#agentzero-brand-glow)">
                       <path d="M344,260 L392,220 L417,195" stroke="#e74c3c" strokeWidth="14" fill="none" strokeLinecap="round" strokeLinejoin="round" />
                       <path d="M417,195 L457,160 L442,175" stroke="#ff6b35" strokeWidth="12" fill="none" strokeLinecap="round" strokeLinejoin="round" />
                       <path d="M417,195 L452,200 L437,190" stroke="#ff6b35" strokeWidth="12" fill="none" strokeLinecap="round" strokeLinejoin="round" />
@@ -190,7 +190,7 @@ export default function Sidebar({
                     </g>
                     <path d="M220,215 L210,175 L208,155" stroke="#e74c3c" strokeWidth="8" fill="none" strokeLinecap="round" />
                     <path d="M292,215 L302,175 L304,155" stroke="#e74c3c" strokeWidth="8" fill="none" strokeLinecap="round" />
-                    <g filter="url(#zeroclaw-brand-eye-glow)">
+                    <g filter="url(#agentzero-brand-eye-glow)">
                       <circle cx="208" cy="150" r="18" fill="#1a1a2e" stroke="#ff6b35" strokeWidth="2" />
                       <circle cx="208" cy="150" r="12" fill="#ff6b35" />
                       <circle cx="208" cy="150" r="6" fill="#fff" opacity="0.9" />
@@ -213,9 +213,9 @@ export default function Sidebar({
                       </g>
                       <circle r="4" fill="#ff6b35" />
                     </g>
-                    <path id="zeroclaw-brand-text-arc" d="M130,400 Q256,460 382,400" fill="none" />
-                    <text fontFamily="'Courier New', monospace" fontSize="22" fontWeight="bold" fill="#ff6b35" textAnchor="middle" filter="url(#zeroclaw-brand-circuit-glow)" opacity="0.85">
-                      <textPath href="#zeroclaw-brand-text-arc" startOffset="50%">AgentZero</textPath>
+                    <path id="agentzero-brand-text-arc" d="M130,400 Q256,460 382,400" fill="none" />
+                    <text fontFamily="'Courier New', monospace" fontSize="22" fontWeight="bold" fill="#ff6b35" textAnchor="middle" filter="url(#agentzero-brand-circuit-glow)" opacity="0.85">
+                      <textPath href="#agentzero-brand-text-arc" startOffset="50%">AgentZero</textPath>
                     </text>
                     <text fontFamily="'Courier New', monospace" fontSize="9" fill="#ff6b35" opacity="0.15" textAnchor="middle">
                       <tspan x="256" y="480">01011010 01000011</tspan>

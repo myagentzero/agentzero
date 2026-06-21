@@ -75,7 +75,7 @@ use tracing::{info, warn};
 use tracing_subscriber::{EnvFilter, fmt};
 
 const PROFILE_MISMATCH_PREFIX: &str = "Pending login profile mismatch:";
-const ZEROCLAW_BUILD_VERSION: &str = env!("ZEROCLAW_BUILD_VERSION");
+const AGENTZERO_BUILD_VERSION: &str = env!("AGENTZERO_BUILD_VERSION");
 
 #[derive(Debug, Clone, ValueEnum)]
 enum QuotaFormat {
@@ -193,11 +193,11 @@ enum EstopLevelArg {
     ToolFreeze,
 }
 
-/// `ZeroClaw` - Zero overhead. Zero compromise. 100% Rust.
+/// `AgentZero` - Zero overhead. Zero compromise. 100% Rust.
 #[derive(Parser, Debug)]
 #[command(name = "agentzero")]
 #[command(author = "myagentzero")]
-#[command(version = ZEROCLAW_BUILD_VERSION)]
+#[command(version = AGENTZERO_BUILD_VERSION)]
 #[command(about = "The fastest, smallest AI assistant.", long_about = None)]
 struct Cli {
     #[arg(long, global = true)]
@@ -250,11 +250,11 @@ Launches an interactive chat session with the configured AI provider. \
 Use --message for single-shot queries without entering interactive mode.
 
 Examples:
-  zeroclaw agent                              # interactive session
-  zeroclaw agent -m \"Summarize today's logs\"  # single message
-  zeroclaw agent -p anthropic --model claude-sonnet-4-20250514
-  zeroclaw agent --autonomy-level full --max-actions-per-hour 100
-  zeroclaw agent -m \"quick task\" --memory-backend none --light-context")]
+  agentzero agent                              # interactive session
+  agentzero agent -m \"Summarize today's logs\"  # single message
+  agentzero agent -p anthropic --model claude-sonnet-4-20250514
+  agentzero agent --autonomy-level full --max-actions-per-hour 100
+  agentzero agent -m \"quick task\" --memory-backend none --light-context")]
     Agent {
         /// Single message mode (don't enter interactive mode)
         #[arg(short, long)]
@@ -306,12 +306,12 @@ and WebSocket connections. Bind address defaults to the values in \
 your config file (gateway.host / gateway.port).
 
 Examples:
-  zeroclaw gateway                  # use config defaults
-  zeroclaw gateway -p 8080          # listen on port 8080
-  zeroclaw gateway --host 0.0.0.0   # bind to all interfaces
-  zeroclaw gateway --open-dashboard # open web dashboard automatically
-  zeroclaw gateway -p 0             # random available port
-  zeroclaw gateway --new-pairing 123456  # clear tokens and set pairing code")]
+  agentzero gateway                  # use config defaults
+  agentzero gateway -p 8080          # listen on port 8080
+  agentzero gateway --host 0.0.0.0   # bind to all interfaces
+  agentzero gateway --open-dashboard # open web dashboard automatically
+  agentzero gateway -p 0             # random available port
+  agentzero gateway --new-pairing 123456  # clear tokens and set pairing code")]
     Gateway {
         /// Port to listen on (use 0 for random available port); defaults to config gateway.port
         #[arg(short, long)]
@@ -341,8 +341,8 @@ responses as notifications.
 Methods: initialize, session/new, session/prompt, session/stop.
 
 Examples:
-  zeroclaw acp                        # start ACP server
-  zeroclaw acp --max-sessions 5       # limit concurrent sessions")]
+  agentzero acp                        # start ACP server
+  agentzero acp --max-sessions 5       # limit concurrent sessions")]
     Acp {
         /// Maximum concurrent sessions (default: 10)
         #[arg(long)]
@@ -357,18 +357,18 @@ Examples:
     #[command(long_about = "\
 Start the long-running autonomous daemon.
 
-Launches the full ZeroClaw runtime: gateway server, all configured \
+Launches the full AgentZero runtime: gateway server, all configured \
 channels (Notion, Discord, Slack, etc.), heartbeat monitor, and \
-the cron scheduler. This is the recommended way to run ZeroClaw in \
+the cron scheduler. This is the recommended way to run AgentZero in \
 production or as an always-on assistant.
 
-Use 'zeroclaw service install' to register the daemon as an OS \
+Use 'agentzero service install' to register the daemon as an OS \
 service (systemd/launchd) for auto-start on boot.
 
 Examples:
-  zeroclaw daemon                   # use config defaults
-  zeroclaw daemon -p 9090           # gateway on port 9090
-  zeroclaw daemon --host 127.0.0.1  # localhost only")]
+  agentzero daemon                   # use config defaults
+  agentzero daemon -p 9090           # gateway on port 9090
+  agentzero daemon --host 127.0.0.1  # localhost only")]
     Daemon {
         /// Port to listen on (use 0 for random available port); defaults to config gateway.port
         #[arg(short, long)]
@@ -405,19 +405,19 @@ Examples:
     /// Engage, inspect, and resume emergency-stop states.
     ///
     /// Examples:
-    /// - `zeroclaw estop`
-    /// - `zeroclaw estop --level network-kill`
-    /// - `zeroclaw estop --level domain-block --domain "*.chase.com"`
-    /// - `zeroclaw estop --level tool-freeze --tool shell --tool browser`
-    /// - `zeroclaw estop status`
-    /// - `zeroclaw estop resume --network`
-    /// - `zeroclaw estop resume --domain "*.chase.com"`
-    /// - `zeroclaw estop resume --tool shell`
+    /// - `agentzero estop`
+    /// - `agentzero estop --level network-kill`
+    /// - `agentzero estop --level domain-block --domain "*.chase.com"`
+    /// - `agentzero estop --level tool-freeze --tool shell --tool browser`
+    /// - `agentzero estop status`
+    /// - `agentzero estop resume --network`
+    /// - `agentzero estop resume --domain "*.chase.com"`
+    /// - `agentzero estop resume --tool shell`
     Estop {
         #[command(subcommand)]
         estop_command: Option<EstopSubcommands>,
 
-        /// Level used when engaging estop from `zeroclaw estop`.
+        /// Level used when engaging estop from `agentzero estop`.
         #[arg(long, value_enum)]
         level: Option<EstopLevelArg>,
 
@@ -437,10 +437,10 @@ Manage security maintenance tasks.
 Commands in this group maintain security-related data stores used at runtime.
 
 Examples:
-  zeroclaw security update-guard-corpus
-  zeroclaw security update-guard-corpus --source builtin
-  zeroclaw security update-guard-corpus --source ./data/security/attack-corpus-v1.jsonl
-  zeroclaw security update-guard-corpus --source https://example.com/guard-corpus.jsonl --checksum <sha256>")]
+  agentzero security update-guard-corpus
+  agentzero security update-guard-corpus --source builtin
+  agentzero security update-guard-corpus --source ./data/security/attack-corpus-v1.jsonl
+  agentzero security update-guard-corpus --source https://example.com/guard-corpus.jsonl --checksum <sha256>")]
     Security {
         #[command(subcommand)]
         security_command: SecurityCommands,
@@ -458,14 +458,14 @@ Cron expressions use the standard 5-field format: \
 override with --tz and an IANA timezone name.
 
 Examples:
-  zeroclaw cron list
-  zeroclaw cron add '0 9 * * 1-5' 'Good morning' --tz America/New_York
-  zeroclaw cron add '*/30 * * * *' 'Check system health'
-  zeroclaw cron add-at 2025-01-15T14:00:00Z 'Send reminder'
-  zeroclaw cron add-every 60000 'Ping heartbeat'
-  zeroclaw cron once 30m 'Run backup in 30 minutes'
-  zeroclaw cron pause <task-id>
-  zeroclaw cron update <task-id> --expression '0 8 * * *' --tz Europe/London")]
+  agentzero cron list
+  agentzero cron add '0 9 * * 1-5' 'Good morning' --tz America/New_York
+  agentzero cron add '*/30 * * * *' 'Check system health'
+  agentzero cron add-at 2025-01-15T14:00:00Z 'Send reminder'
+  agentzero cron add-every 60000 'Ping heartbeat'
+  agentzero cron once 30m 'Run backup in 30 minutes'
+  agentzero cron pause <task-id>
+  agentzero cron update <task-id> --expression '0 8 * * *' --tz Europe/London")]
     Cron {
         #[command(subcommand)]
         cron_command: CronCommands,
@@ -491,9 +491,9 @@ and per-profile breakdown for all configured providers. Helps diagnose \
 quota exhaustion and rate limiting issues.
 
 Examples:
-  zeroclaw providers-quota                    # text output, all providers
-  zeroclaw providers-quota --format json      # JSON output
-  zeroclaw providers-quota --provider gemini  # filter by provider"
+  agentzero providers-quota                    # text output, all providers
+  agentzero providers-quota --format json      # JSON output
+  agentzero providers-quota --provider gemini  # filter by provider"
     )]
     ProvidersQuota {
         /// Filter by provider name (optional, shows all if omitted)
@@ -508,15 +508,15 @@ Examples:
     #[command(long_about = "\
 Manage communication channels.
 
-Add, remove, list, and health-check channels that connect ZeroClaw \
+Add, remove, list, and health-check channels that connect AgentZero \
 to messaging platforms. Supported channel types: notion, discord, \
 slack, github, email.
 
 Examples:
-  zeroclaw channel list
-  zeroclaw channel doctor
-  zeroclaw channel add notion '{\"bot_token\":\"...\",\"name\":\"my-bot\"}'
-  zeroclaw channel remove my-bot")]
+  agentzero channel list
+  agentzero channel doctor
+  agentzero channel add notion '{\"bot_token\":\"...\",\"name\":\"my-bot\"}'
+  agentzero channel remove my-bot")]
     Channel {
         #[command(subcommand)]
         channel_command: ChannelCommands,
@@ -550,9 +550,9 @@ Enumerate connected USB devices, identify known development boards \
 probe-rs / ST-Link.
 
 Examples:
-  zeroclaw hardware discover
-  zeroclaw hardware introspect /dev/ttyACM0
-  zeroclaw hardware info --chip STM32F401RETx")]
+  agentzero hardware discover
+  agentzero hardware introspect /dev/ttyACM0
+  agentzero hardware info --chip STM32F401RETx")]
     Hardware {
         #[command(subcommand)]
         hardware_command: agentzero::HardwareCommands,
@@ -567,11 +567,11 @@ to the agent (GPIO, sensors, actuators). Supported boards: \
 nucleo-f401re, rpi-gpio, esp32, arduino-uno.
 
 Examples:
-  zeroclaw peripheral list
-  zeroclaw peripheral add nucleo-f401re /dev/ttyACM0
-  zeroclaw peripheral add rpi-gpio native
-  zeroclaw peripheral flash --port /dev/cu.usbmodem12345
-  zeroclaw peripheral flash-nucleo")]
+  agentzero peripheral list
+  agentzero peripheral add nucleo-f401re /dev/ttyACM0
+  agentzero peripheral add rpi-gpio native
+  agentzero peripheral flash --port /dev/cu.usbmodem12345
+  agentzero peripheral flash-nucleo")]
     Peripheral {
         #[command(subcommand)]
         peripheral_command: agentzero::PeripheralCommands,
@@ -586,13 +586,13 @@ Supports filtering by category and session, pagination, and \
 batch clearing with confirmation.
 
 Examples:
-  zeroclaw memory stats
-  zeroclaw memory list
-  zeroclaw memory list --category core --limit 10
-  zeroclaw memory get <key>
-  zeroclaw memory store user_lang rust
-  zeroclaw memory store project_stack \"rust + tokio\" --category core
-  zeroclaw memory clear --category conversation --yes")]
+  agentzero memory stats
+  agentzero memory list
+  agentzero memory list --category core --limit 10
+  agentzero memory get <key>
+  agentzero memory store user_lang rust
+  agentzero memory store project_stack \"rust + tokio\" --category core
+  agentzero memory clear --category conversation --yes")]
     Memory {
         #[command(subcommand)]
         memory_command: MemoryCommands,
@@ -600,7 +600,7 @@ Examples:
 
     /// Manage configuration
     #[command(long_about = "\
-Manage ZeroClaw configuration.
+Manage AgentZero configuration.
 
 Inspect, query, and modify configuration settings.
 
@@ -876,7 +876,7 @@ async fn main() -> Result<()> {
             bail!("--config-dir cannot be empty");
         }
         // SAFETY: called early in main before any threads are spawned.
-        unsafe { std::env::set_var("ZEROCLAW_CONFIG_DIR", config_dir) };
+        unsafe { std::env::set_var("AGENTZERO_CONFIG_DIR", config_dir) };
     }
 
     // Initialize logging - respects RUST_LOG env var, defaults to INFO
@@ -962,7 +962,7 @@ async fn main() -> Result<()> {
             .await
         }?;
         // Auto-start channels if user said yes during wizard
-        if std::env::var("ZEROCLAW_AUTOSTART_CHANNELS").as_deref() == Ok("1") {
+        if std::env::var("AGENTZERO_AUTOSTART_CHANNELS").as_deref() == Ok("1") {
             Box::pin(channels::start_channels(config, None, None)).await?;
         }
         return Ok(());
@@ -981,7 +981,7 @@ async fn main() -> Result<()> {
         let (_validator, enrollment_uri) =
             security::OtpValidator::from_config(&config.security.otp, config_dir, &store)?;
         if let Some(uri) = enrollment_uri {
-            println!("Initialized OTP secret for ZeroClaw.");
+            println!("Initialized OTP secret for AgentZero.");
             println!("Enrollment URI: {uri}");
         }
     }
@@ -1060,9 +1060,9 @@ async fn main() -> Result<()> {
             let port = port.unwrap_or(config.gateway.port);
             let host = host.unwrap_or_else(|| config.gateway.host.clone());
             if port == 0 {
-                info!("🚀 Starting ZeroClaw Gateway on {host} (random port)");
+                info!("🚀 Starting AgentZero Gateway on {host} (random port)");
             } else {
-                info!("🚀 Starting ZeroClaw Gateway on {host}:{port}");
+                info!("🚀 Starting AgentZero Gateway on {host}:{port}");
             }
             if open_dashboard {
                 if port == 0 {
@@ -1108,9 +1108,9 @@ async fn main() -> Result<()> {
         }
 
         Commands::Status => {
-            println!("🦀 ZeroClaw Status");
+            println!("🦀 AgentZero Status");
             println!();
-            println!("Version:     {}", ZEROCLAW_BUILD_VERSION);
+            println!("Version:     {}", AGENTZERO_BUILD_VERSION);
             println!("Workspace:   {}", config.workspace_dir.display());
             println!("Config:      {}", config.config_path.display());
             println!();
@@ -1524,7 +1524,7 @@ fn handle_estop_command(
                 let (validator, enrollment_uri) =
                     security::OtpValidator::from_config(&config.security.otp, config_dir, &store)?;
                 if let Some(uri) = enrollment_uri {
-                    println!("Initialized OTP secret for ZeroClaw.");
+                    println!("Initialized OTP secret for AgentZero.");
                     println!("Enrollment URI: {uri}");
                 }
                 Some(validator)
@@ -1938,7 +1938,7 @@ async fn handle_auth_command(auth_command: AuthCommands, config: &Config) -> Res
                         Err(e) => {
                             println!("Callback capture failed: {e}");
                             println!(
-                                "Run `zeroclaw auth paste-redirect --provider gemini --profile {profile}`"
+                                "Run `agentzero auth paste-redirect --provider gemini --profile {profile}`"
                             );
                             return Ok(());
                         }
@@ -2034,7 +2034,7 @@ async fn handle_auth_command(auth_command: AuthCommands, config: &Config) -> Res
                         Err(e) => {
                             println!("Callback capture failed: {e}");
                             println!(
-                                "Run `zeroclaw auth paste-redirect --provider openai-codex --profile {profile}`"
+                                "Run `agentzero auth paste-redirect --provider openai-codex --profile {profile}`"
                             );
                             return Ok(());
                         }
@@ -2076,7 +2076,7 @@ async fn handle_auth_command(auth_command: AuthCommands, config: &Config) -> Res
                                 anyhow::anyhow!(
                                     "No pending OpenAI login found.\n\n\
                                 💡 Please start the login flow first:\n   \
-                                zeroclaw auth login --provider openai-codex --profile {}\n\n\
+                                agentzero auth login --provider openai-codex --profile {}\n\n\
                                 Then paste the callback URL or code here.",
                                     profile
                                 )
@@ -2136,7 +2136,7 @@ async fn handle_auth_command(auth_command: AuthCommands, config: &Config) -> Res
                             eprintln!("   The pending auth file has been cleared.");
                             eprintln!("   Please start fresh with:");
                             eprintln!(
-                                "   zeroclaw auth login --provider openai-codex --profile {}",
+                                "   agentzero auth login --provider openai-codex --profile {}",
                                 profile
                             );
                             std::process::exit(1);
@@ -2151,7 +2151,7 @@ async fn handle_auth_command(auth_command: AuthCommands, config: &Config) -> Res
                                 anyhow::anyhow!(
                                     "No pending Gemini login found.\n\n\
                                 💡 Please start the login flow first:\n   \
-                                zeroclaw auth login --provider gemini --profile {}\n\n\
+                                agentzero auth login --provider gemini --profile {}\n\n\
                                 Then paste the callback URL or code here.",
                                     profile
                                 )
@@ -2213,7 +2213,7 @@ async fn handle_auth_command(auth_command: AuthCommands, config: &Config) -> Res
                             eprintln!("   The pending auth file has been cleared.");
                             eprintln!("   Please start fresh with:");
                             eprintln!(
-                                "   zeroclaw auth login --provider gemini --profile {}",
+                                "   agentzero auth login --provider gemini --profile {}",
                                 profile
                             );
                             std::process::exit(1);
@@ -2295,7 +2295,7 @@ async fn handle_auth_command(auth_command: AuthCommands, config: &Config) -> Res
                         }
                         None => {
                             bail!(
-                                "No OpenAI Codex auth profile found. Run `zeroclaw auth login --provider openai-codex`."
+                                "No OpenAI Codex auth profile found. Run `agentzero auth login --provider openai-codex`."
                             )
                         }
                     }
@@ -2313,7 +2313,7 @@ async fn handle_auth_command(auth_command: AuthCommands, config: &Config) -> Res
                         }
                         None => {
                             bail!(
-                                "No Gemini auth profile found. Run `zeroclaw auth login --provider gemini`."
+                                "No Gemini auth profile found. Run `agentzero auth login --provider gemini`."
                             )
                         }
                     }

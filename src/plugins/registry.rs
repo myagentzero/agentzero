@@ -25,9 +25,9 @@ pub enum PluginStatus {
 pub enum PluginOrigin {
     /// Shipped with the binary.
     Bundled,
-    /// Found in `~/.zeroclaw/extensions/`.
+    /// Found in `~/.agentzero/extensions/`.
     Global,
-    /// Found in `<workspace>/.zeroclaw/extensions/`.
+    /// Found in `<workspace>/.agentzero/extensions/`.
     Workspace,
 }
 
@@ -215,7 +215,7 @@ mod tests {
             config_schema: None,
             capabilities: Vec::new(),
             module_path: "plugins/demo.wasm".to_string(),
-            wit_packages: vec!["zeroclaw:tools@1.0.0".to_string()],
+            wit_packages: vec!["agentzero:tools@1.0.0".to_string()],
             tools: vec![PluginToolManifest {
                 name: tool_name.to_string(),
                 description: format!("{tool_name} description"),

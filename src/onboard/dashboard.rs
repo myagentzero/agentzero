@@ -1,4 +1,4 @@
-//! `zeroclaw dashboard` — multi-tab TUI dashboard (Costs, Memory, Cron, Metrics, and live Logs).
+//! `agentzero dashboard` — multi-tab TUI dashboard (Costs, Memory, Cron, Metrics, and live Logs).
 
 use crate::config::Config;
 use anyhow::Result;
@@ -2880,14 +2880,14 @@ mod tests {
     #[test]
     fn parses_help_type_and_simple_counter() {
         let text = "\
-# HELP zeroclaw_heartbeat_ticks_total Total heartbeat ticks
-# TYPE zeroclaw_heartbeat_ticks_total counter
-zeroclaw_heartbeat_ticks_total 7
+# HELP agentzero_heartbeat_ticks_total Total heartbeat ticks
+# TYPE agentzero_heartbeat_ticks_total counter
+agentzero_heartbeat_ticks_total 7
 ";
         let families = parse_prometheus_text(text);
         assert_eq!(families.len(), 1);
         let f = &families[0];
-        assert_eq!(f.name, "zeroclaw_heartbeat_ticks_total");
+        assert_eq!(f.name, "agentzero_heartbeat_ticks_total");
         assert_eq!(f.kind, "counter");
         assert_eq!(f.help, "Total heartbeat ticks");
         assert_eq!(f.samples.len(), 1);
@@ -2899,9 +2899,9 @@ zeroclaw_heartbeat_ticks_total 7
     fn parses_labels_with_escapes() {
         // Two label values: one plain, one using \" \\ \n escapes.
         let text = "\
-# TYPE zeroclaw_errors_total counter
-zeroclaw_errors_total{component=\"provider\"} 2
-zeroclaw_errors_total{component=\"a\\\"b\\\\c\\nd\"} 1
+# TYPE agentzero_errors_total counter
+agentzero_errors_total{component=\"provider\"} 2
+agentzero_errors_total{component=\"a\\\"b\\\\c\\nd\"} 1
 ";
         let families = parse_prometheus_text(text);
         assert_eq!(families.len(), 1);
@@ -2919,17 +2919,17 @@ zeroclaw_errors_total{component=\"a\\\"b\\\\c\\nd\"} 1
     #[test]
     fn collapses_histogram_suffixes_onto_base_family() {
         let text = "\
-# HELP zeroclaw_tool_duration_seconds Tool execution duration
-# TYPE zeroclaw_tool_duration_seconds histogram
-zeroclaw_tool_duration_seconds_bucket{tool=\"shell\",le=\"0.1\"} 3
-zeroclaw_tool_duration_seconds_bucket{tool=\"shell\",le=\"+Inf\"} 5
-zeroclaw_tool_duration_seconds_sum{tool=\"shell\"} 0.42
-zeroclaw_tool_duration_seconds_count{tool=\"shell\"} 5
+# HELP agentzero_tool_duration_seconds Tool execution duration
+# TYPE agentzero_tool_duration_seconds histogram
+agentzero_tool_duration_seconds_bucket{tool=\"shell\",le=\"0.1\"} 3
+agentzero_tool_duration_seconds_bucket{tool=\"shell\",le=\"+Inf\"} 5
+agentzero_tool_duration_seconds_sum{tool=\"shell\"} 0.42
+agentzero_tool_duration_seconds_count{tool=\"shell\"} 5
 ";
         let families = parse_prometheus_text(text);
         assert_eq!(families.len(), 1);
         let f = &families[0];
-        assert_eq!(f.name, "zeroclaw_tool_duration_seconds");
+        assert_eq!(f.name, "agentzero_tool_duration_seconds");
         assert_eq!(f.kind, "histogram");
         assert_eq!(f.samples.len(), 4);
         let suffixes: Vec<&str> = f

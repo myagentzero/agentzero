@@ -1,6 +1,6 @@
 # Architecture Documentation
 
-This directory contains architectural decision records (ADRs) and technical design documents for ZeroClaw.
+This directory contains architectural decision records (ADRs) and technical design documents for AgentZero.
 
 ## Agent Prompt Building Flow
 

@@ -108,7 +108,7 @@ pub fn config_from_wizard_choice(choice: usize, devices: &[DiscoveredDevice]) ->
     }
 }
 
-/// Handle `zeroclaw hardware` subcommands.
+/// Handle `agentzero hardware` subcommands.
 #[allow(clippy::module_name_repetitions)]
 pub fn handle_command(cmd: crate::HardwareCommands, _config: &Config) -> Result<()> {
     #[cfg(not(feature = "hardware"))]
@@ -224,7 +224,7 @@ fn run_info(chip: &str) -> Result<()> {
         println!();
         println!("Build with: cargo build --features hardware,probe");
         println!();
-        println!("Then run: zeroclaw hardware info --chip {}", chip);
+        println!("Then run: agentzero hardware info --chip {}", chip);
         println!();
         println!("This uses probe-rs to attach to the Nucleo's ST-Link over USB");
         println!("and read chip info (memory map, etc.) — no firmware on target needed.");

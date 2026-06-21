@@ -1,7 +1,7 @@
 # Skills Authoring Guide
 
 Skills are user-defined or community-built capabilities that extend the agent.
-Each skill lives in its own directory under `~/.zeroclaw/workspace/skills/<name>/`
+Each skill lives in its own directory under `~/.agentzero/workspace/skills/<name>/`
 and is defined by either a `SKILL.toml` manifest or a `SKILL.md` markdown file.
 
 ## Skill Formats
@@ -148,7 +148,7 @@ command = "https://api.example.com/deployments/status"
 
 ## Skill Self-Improvement
 
-When `skills.skill_improvement.enabled = true` (the default), ZeroClaw can
+When `skills.skill_improvement.enabled = true` (the default), AgentZero can
 automatically refine skill files after successful usage. Improvements are
 throttled by `skills.skill_improvement.cooldown_secs` (default: 3600, i.e. one
 hour between improvements for the same skill).
@@ -225,7 +225,7 @@ allow_scripts = true
 To manually audit a skill before installing:
 
 ```bash
-zeroclaw skills audit <path_or_name>
+agentzero skills audit <path_or_name>
 ```
 
 ## Prompt Injection Modes
@@ -249,7 +249,7 @@ prompt_injection_mode = "compact"  # or "full"
 A skill that provides deployment tools with both shell and HTTP capabilities:
 
 ```
-~/.zeroclaw/workspace/skills/deploy-tools/
+~/.agentzero/workspace/skills/deploy-tools/
   SKILL.toml
   TEST.sh
 ```

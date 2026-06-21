@@ -1,8 +1,8 @@
 //! OpenClaw migration compatibility layer.
 //!
-//! Provides two endpoints for callers migrating from OpenClaw to ZeroClaw:
+//! Provides two endpoints for callers migrating from OpenClaw to AgentZero:
 //!
-//! 1. **`POST /api/chat`** (recommended) — ZeroClaw-native endpoint that invokes the
+//! 1. **`POST /api/chat`** (recommended) — AgentZero-native endpoint that invokes the
 //!    full agent loop (`process_message`) with tools, memory recall, and context
 //!    enrichment. Same code path as WhatsApp handlers.
 //!
@@ -13,7 +13,7 @@
 //! ## Why this exists
 //!
 //! OpenClaw exposed `/v1/chat/completions` as an OpenAI-compatible API server.
-//! ZeroClaw's existing `/v1/chat/completions` (in `openai_compat.rs`) uses the
+//! AgentZero's existing `/v1/chat/completions` (in `openai_compat.rs`) uses the
 //! simpler `provider.chat_with_history()` path — no tools, no memory, no agent loop.
 //!
 //! This module bridges the gap so callers coming from OpenClaw get the full agent
@@ -43,7 +43,7 @@ use std::time::Instant;
 use uuid::Uuid;
 
 // ══════════════════════════════════════════════════════════════════════════════
-// /api/chat — ZeroClaw-native endpoint
+// /api/chat — AgentZero-native endpoint
 // ══════════════════════════════════════════════════════════════════════════════
 
 /// Request body for `POST /api/chat`.
@@ -58,7 +58,7 @@ pub struct ApiChatBody {
     pub session_id: Option<String>,
 
     /// Optional context lines to prepend to the message.
-    /// Use this to inject recent conversation history that ZeroClaw's
+    /// Use this to inject recent conversation history that AgentZero's
     /// semantic memory might not surface (e.g., the last few exchanges).
     #[serde(default)]
     pub context: Vec<String>,
@@ -358,11 +358,11 @@ struct OaiDelta {
     content: Option<String>,
 }
 
-/// `POST /v1/chat/completions` — OpenAI-compatible shim over ZeroClaw's agent loop.
+/// `POST /v1/chat/completions` — OpenAI-compatible shim over AgentZero's agent loop.
 ///
 /// This replaces the simple `provider.chat_with_history()` path from `openai_compat.rs`
 /// with the full `run_gateway_chat_with_tools()` agent loop, giving OpenClaw callers
-/// the same tools + memory experience as native ZeroClaw channels.
+/// the same tools + memory experience as native AgentZero channels.
 pub async fn handle_v1_chat_completions_with_tools(
     State(state): State<AppState>,
     ConnectInfo(peer_addr): ConnectInfo<SocketAddr>,

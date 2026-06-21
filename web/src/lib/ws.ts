@@ -19,7 +19,7 @@ export interface WebSocketClientOptions {
 
 const DEFAULT_RECONNECT_DELAY = 1000;
 const MAX_RECONNECT_DELAY = 30000;
-const WS_SESSION_STORAGE_KEY = 'zeroclaw.ws.session_id';
+const WS_SESSION_STORAGE_KEY = 'agentzero.ws.session_id';
 
 export class WebSocketClient {
   private ws: WebSocket | null = null;
@@ -56,7 +56,7 @@ export class WebSocketClient {
 
     const token = getToken();
     const url = `${this.baseUrl}/ws/chat?session_id=${encodeURIComponent(this.sessionId)}`;
-    const protocols = ['zeroclaw.v1'];
+    const protocols = ['agentzero.v1'];
     if (token) {
       protocols.push(`bearer.${token}`);
     }

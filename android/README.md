@@ -106,7 +106,7 @@ Matches the web UI:
 | Health check | `GET /health` | Determines if pairing is required |
 | Pair | `POST /pair` | Header `X-Pairing-Code: <code>` → bearer token |
 | API calls | `Authorization: Bearer <token>` | Stored in EncryptedSharedPreferences |
-| WebSocket | `/ws/chat` | Subprotocols `zeroclaw.v1`, `bearer.<token>` |
+| WebSocket | `/ws/chat` | Subprotocols `agentzero.v1`, `bearer.<token>` |
 | SSE | `/api/events` | Bearer token in `Authorization` header |
 
 ## Network

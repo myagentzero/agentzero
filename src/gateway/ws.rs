@@ -382,7 +382,7 @@ pub async fn handle_ws_chat(
         .session_id
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
-    ws.protocols(["zeroclaw.v1"])
+    ws.protocols(["agentzero.v1"])
         .on_upgrade(move |socket| handle_socket(socket, state, session_id))
         .into_response()
 }
@@ -578,7 +578,7 @@ mod tests {
         );
         headers.insert(
             header::SEC_WEBSOCKET_PROTOCOL,
-            HeaderValue::from_static("zeroclaw.v1, bearer.from-protocol"),
+            HeaderValue::from_static("agentzero.v1, bearer.from-protocol"),
         );
 
         assert_eq!(
@@ -592,7 +592,7 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert(
             header::SEC_WEBSOCKET_PROTOCOL,
-            HeaderValue::from_static("zeroclaw.v1, bearer.protocol-token"),
+            HeaderValue::from_static("agentzero.v1, bearer.protocol-token"),
         );
 
         assert_eq!(
@@ -610,7 +610,7 @@ mod tests {
         );
         headers.insert(
             header::SEC_WEBSOCKET_PROTOCOL,
-            HeaderValue::from_static("zeroclaw.v1, bearer."),
+            HeaderValue::from_static("agentzero.v1, bearer."),
         );
 
         assert!(extract_ws_bearer_token(&headers, None).is_none());
@@ -630,7 +630,7 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert(
             header::SEC_WEBSOCKET_PROTOCOL,
-            HeaderValue::from_static("zeroclaw.v1, bearer.protocol-token"),
+            HeaderValue::from_static("agentzero.v1, bearer.protocol-token"),
         );
 
         assert_eq!(

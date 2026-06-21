@@ -93,7 +93,7 @@ async fn compare_recall_quality() {
         ("tz", "Timezone is EST, works 9-5", MemoryCategory::Core),
         (
             "proj1",
-            "Working on ZeroClaw AI assistant",
+            "Working on AgentZero AI assistant",
             MemoryCategory::Daily,
         ),
         (

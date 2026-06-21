@@ -1,4 +1,4 @@
-//! Utility functions for `ZeroClaw`.
+//! Utility functions for `AgentZero`.
 //!
 //! This module contains reusable helper functions used across the codebase.
 

@@ -55,13 +55,13 @@ fn emit_git_rerun_hints(manifest_dir: &str) {
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
-    println!("cargo:rerun-if-env-changed=ZEROCLAW_GIT_SHORT_SHA");
+    println!("cargo:rerun-if-env-changed=AGENTZERO_GIT_SHORT_SHA");
 
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| ".".to_string());
     emit_git_rerun_hints(&manifest_dir);
 
     let package_version = env::var("CARGO_PKG_VERSION").unwrap_or_else(|_| "0.0.0".to_string());
-    let short_sha = env::var("ZEROCLAW_GIT_SHORT_SHA")
+    let short_sha = env::var("AGENTZERO_GIT_SHORT_SHA")
         .ok()
         .filter(|v| !v.trim().is_empty())
         .or_else(|| git_short_sha(&manifest_dir));
@@ -72,9 +72,9 @@ fn main() {
         package_version
     };
 
-    println!("cargo:rustc-env=ZEROCLAW_BUILD_VERSION={build_version}");
+    println!("cargo:rustc-env=AGENTZERO_BUILD_VERSION={build_version}");
     println!(
-        "cargo:rustc-env=ZEROCLAW_GIT_SHORT_SHA={}",
+        "cargo:rustc-env=AGENTZERO_GIT_SHORT_SHA={}",
         short_sha.unwrap_or_default()
     );
 }

@@ -1522,7 +1522,7 @@ impl OpenAiCompatibleProvider {
     }
 
     fn should_try_responses_websocket(&self) -> bool {
-        if let Ok(raw) = std::env::var("ZEROCLAW_RESPONSES_WEBSOCKET") {
+        if let Ok(raw) = std::env::var("AGENTZERO_RESPONSES_WEBSOCKET") {
             let normalized = raw.trim().to_ascii_lowercase();
             if matches!(normalized.as_str(), "0" | "false" | "off" | "no") {
                 return false;
@@ -2220,7 +2220,7 @@ impl OpenAiCompatibleProvider {
     }
 
     /// Detects upstream 400 responses indicating the model requires an
-    /// explicit `temperature` value in the request body. ZeroClaw omits
+    /// explicit `temperature` value in the request body. AgentZero omits
     /// `temperature` by default for forward compatibility with models that
     /// reject custom values (gpt-5, o-series, Claude 4.x on Bedrock). When
     /// a legacy provider instead demands temperature, this classifier
@@ -2377,7 +2377,7 @@ impl Provider for OpenAiCompatibleProvider {
     ) -> anyhow::Result<String> {
         let credential = self.credential.as_ref().ok_or_else(|| {
             anyhow::anyhow!(
-                "{} API key not set. Run `zeroclaw onboard` or set the appropriate env var.",
+                "{} API key not set. Run `agentzero onboard` or set the appropriate env var.",
                 self.name
             )
         })?;
@@ -2523,7 +2523,7 @@ impl Provider for OpenAiCompatibleProvider {
     ) -> anyhow::Result<String> {
         let credential = self.credential.as_ref().ok_or_else(|| {
             anyhow::anyhow!(
-                "{} API key not set. Run `zeroclaw onboard` or set the appropriate env var.",
+                "{} API key not set. Run `agentzero onboard` or set the appropriate env var.",
                 self.name
             )
         })?;
@@ -2651,7 +2651,7 @@ impl Provider for OpenAiCompatibleProvider {
     ) -> anyhow::Result<ProviderChatResponse> {
         let credential = self.credential.as_ref().ok_or_else(|| {
             anyhow::anyhow!(
-                "{} API key not set. Run `zeroclaw onboard` or set the appropriate env var.",
+                "{} API key not set. Run `agentzero onboard` or set the appropriate env var.",
                 self.name
             )
         })?;
@@ -2828,7 +2828,7 @@ impl Provider for OpenAiCompatibleProvider {
     ) -> anyhow::Result<ProviderChatResponse> {
         let credential = self.credential.as_ref().ok_or_else(|| {
             anyhow::anyhow!(
-                "{} API key not set. Run `zeroclaw onboard` or set the appropriate env var.",
+                "{} API key not set. Run `agentzero onboard` or set the appropriate env var.",
                 self.name
             )
         })?;
@@ -3229,7 +3229,7 @@ mod tests {
             messages: vec![
                 Message {
                     role: "system".to_string(),
-                    content: MessageContent::Text("You are ZeroClaw".to_string()),
+                    content: MessageContent::Text("You are AgentZero".to_string()),
                 },
                 Message {
                     role: "user".to_string(),
@@ -4748,12 +4748,12 @@ mod tests {
             "https://example.com",
             Some("k"),
             AuthStyle::Bearer,
-            "zeroclaw-test/1.0",
+            "agentzero-test/1.0",
         );
         let caps = <OpenAiCompatibleProvider as Provider>::capabilities(&p);
         assert!(caps.native_tool_calling);
         assert!(!caps.vision);
-        assert_eq!(p.user_agent.as_deref(), Some("zeroclaw-test/1.0"));
+        assert_eq!(p.user_agent.as_deref(), Some("agentzero-test/1.0"));
     }
 
     #[test]
@@ -4763,13 +4763,13 @@ mod tests {
             "https://example.com",
             Some("k"),
             AuthStyle::Bearer,
-            "zeroclaw-test/vision",
+            "agentzero-test/vision",
             true,
         );
         let caps = <OpenAiCompatibleProvider as Provider>::capabilities(&p);
         assert!(caps.native_tool_calling);
         assert!(caps.vision);
-        assert_eq!(p.user_agent.as_deref(), Some("zeroclaw-test/vision"));
+        assert_eq!(p.user_agent.as_deref(), Some("agentzero-test/vision"));
     }
 
     #[test]

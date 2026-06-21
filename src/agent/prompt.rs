@@ -524,7 +524,7 @@ mod tests {
     #[test]
     fn inject_workspace_file_injects_content() {
         let ws =
-            std::env::temp_dir().join(format!("zeroclaw_inject_test_{}", uuid::Uuid::new_v4()));
+            std::env::temp_dir().join(format!("agentzero_inject_test_{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&ws).unwrap();
         std::fs::write(ws.join("TEST.md"), "hello world").unwrap();
 
@@ -538,7 +538,7 @@ mod tests {
 
     #[test]
     fn inject_workspace_file_truncates_long_content() {
-        let ws = std::env::temp_dir().join(format!("zeroclaw_trunc_test_{}", uuid::Uuid::new_v4()));
+        let ws = std::env::temp_dir().join(format!("agentzero_trunc_test_{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&ws).unwrap();
         std::fs::write(ws.join("BIG.md"), "a".repeat(100)).unwrap();
 
@@ -559,7 +559,7 @@ mod tests {
     #[test]
     fn inject_workspace_file_shifts_headings() {
         let ws = std::env::temp_dir().join(format!(
-            "zeroclaw_heading_shift_test_{}",
+            "agentzero_heading_shift_test_{}",
             uuid::Uuid::new_v4()
         ));
         std::fs::create_dir_all(&ws).unwrap();

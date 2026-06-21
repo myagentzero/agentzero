@@ -35,7 +35,7 @@ class ChatWebSocketClient(
             "/ws/chat?session_id=${java.net.URLEncoder.encode(sessionId, Charsets.UTF_8.name())}"
 
         val protocols = buildList {
-            add("zeroclaw.v1")
+            add("agentzero.v1")
             if (!token.isNullOrBlank()) add("bearer.$token")
         }
 

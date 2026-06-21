@@ -1,4 +1,4 @@
-//! Wraps a discovered MCP tool as a zeroclaw [`Tool`] so it is dispatched
+//! Wraps a discovered MCP tool as a agentzero [`Tool`] so it is dispatched
 //! through the existing tool registry and agent loop without modification.
 
 use std::sync::Arc;
@@ -9,7 +9,7 @@ use crate::tools::mcp_client::McpRegistry;
 use crate::tools::mcp_protocol::McpToolDef;
 use crate::tools::traits::{Tool, ToolResult};
 
-/// A zeroclaw [`Tool`] backed by an MCP server tool.
+/// A agentzero [`Tool`] backed by an MCP server tool.
 ///
 /// The `prefixed_name` (e.g. `filesystem__read_file`) is what the agent loop
 /// sees. The registry knows how to route it to the correct server.

@@ -1,9 +1,9 @@
-# ZeroClaw Custom Provider API Support
+# AgentZero Custom Provider API Support
 ## Chat Completions vs Responses API Analysis
 
 ### Executive Summary
 
-ZeroClaw provides a multi-provider architecture with support for both **Chat Completions** (standard OpenAI-compatible endpoint) and **Responses** (newer, structured output-focused endpoint) APIs. The system uses an abstraction layer to normalize provider differences and intelligently routes requests based on provider capabilities.
+AgentZero provides a multi-provider architecture with support for both **Chat Completions** (standard OpenAI-compatible endpoint) and **Responses** (newer, structured output-focused endpoint) APIs. The system uses an abstraction layer to normalize provider differences and intelligently routes requests based on provider capabilities.
 
 ---
 
@@ -417,7 +417,7 @@ pub async fn chat(&self, request: ChatRequest<'_>, ...) -> Result<ChatResponse> 
 
 ### Per-Route API Mode Selection
 
-ZeroClaw now supports route-specific API protocol overrides via the `provider_api` field in `model_routes`:
+AgentZero now supports route-specific API protocol overrides via the `provider_api` field in `model_routes`:
 
 ```toml
 [[model_routes]]
@@ -614,7 +614,7 @@ let provider = compatible::OpenAiCompatibleProvider::new_with_options(
 
 ## Summary
 
-ZeroClaw's provider abstraction elegantly handles the transition from Chat Completions to Responses APIs:
+AgentZero's provider abstraction elegantly handles the transition from Chat Completions to Responses APIs:
 
 - **Unified Interface**: Single `Provider` trait abstracts API differences
 - **Capability Declaration**: Providers declare what they support; framework adapts

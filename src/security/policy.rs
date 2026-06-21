@@ -3047,7 +3047,7 @@ mod tests {
 
     #[test]
     fn workspace_only_false_allows_resolved_outside_workspace() {
-        let workspace = std::env::temp_dir().join("zeroclaw_test_ws_only_false");
+        let workspace = std::env::temp_dir().join("agentzero_test_ws_only_false");
         let _ = std::fs::create_dir_all(&workspace);
         let canonical_workspace = workspace
             .canonicalize()
@@ -3064,7 +3064,7 @@ mod tests {
         let outside = std::env::var_os("HOME")
             .map(std::path::PathBuf::from)
             .unwrap_or_else(|| PathBuf::from("/home"))
-            .join("zeroclaw_outside_ws");
+            .join("agentzero_outside_ws");
         assert!(
             p.is_resolved_path_allowed(&outside),
             "workspace_only=false must allow resolved paths outside workspace"
@@ -3085,7 +3085,7 @@ mod tests {
 
     #[test]
     fn workspace_only_true_blocks_resolved_outside_workspace() {
-        let workspace = std::env::temp_dir().join("zeroclaw_test_ws_only_true");
+        let workspace = std::env::temp_dir().join("agentzero_test_ws_only_true");
         let _ = std::fs::create_dir_all(&workspace);
         let canonical_workspace = workspace
             .canonicalize()
@@ -3108,7 +3108,7 @@ mod tests {
         let outside = std::env::temp_dir()
             .canonicalize()
             .unwrap_or_else(|_| std::env::temp_dir())
-            .join("zeroclaw_outside_ws_true");
+            .join("agentzero_outside_ws_true");
         assert!(
             !p.is_resolved_path_allowed(&outside),
             "workspace_only=true must block resolved paths outside workspace"
@@ -3290,7 +3290,7 @@ mod tests {
 
     #[test]
     fn resolved_path_blocks_outside_workspace() {
-        let workspace = std::env::temp_dir().join("zeroclaw_test_resolved_path");
+        let workspace = std::env::temp_dir().join("agentzero_test_resolved_path");
         let _ = std::fs::create_dir_all(&workspace);
 
         // Use the canonicalized workspace so starts_with checks match
@@ -3314,7 +3314,7 @@ mod tests {
         let canonical_temp = std::env::temp_dir()
             .canonicalize()
             .unwrap_or_else(|_| std::env::temp_dir());
-        let outside = canonical_temp.join("outside_workspace_zeroclaw");
+        let outside = canonical_temp.join("outside_workspace_agentzero");
         assert!(
             !policy.is_resolved_path_allowed(&outside),
             "path outside workspace must be blocked"
@@ -3326,7 +3326,7 @@ mod tests {
     #[test]
     fn resolved_path_blocks_root_escape() {
         let policy = SecurityPolicy {
-            workspace_dir: PathBuf::from("/home/zeroclaw_user/project"),
+            workspace_dir: PathBuf::from("/home/agentzero_user/project"),
             ..SecurityPolicy::default()
         };
 
@@ -3345,7 +3345,7 @@ mod tests {
     fn resolved_path_blocks_symlink_escape() {
         use std::os::unix::fs::symlink;
 
-        let root = std::env::temp_dir().join("zeroclaw_test_symlink_escape");
+        let root = std::env::temp_dir().join("agentzero_test_symlink_escape");
         let workspace = root.join("workspace");
         let outside = root.join("outside_target");
 
@@ -3377,7 +3377,7 @@ mod tests {
     fn allowed_roots_permits_paths_outside_workspace() {
         use std::os::unix::fs::symlink;
 
-        let root = std::env::temp_dir().join("zeroclaw_test_allowed_roots");
+        let root = std::env::temp_dir().join("agentzero_test_allowed_roots");
         let workspace = root.join("workspace");
         let extra = root.join("extra_root");
         let extra_file = extra.join("data.txt");

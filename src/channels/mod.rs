@@ -1,7 +1,7 @@
 //! Channel subsystem for messaging platform integrations.
 //!
 //! This module provides the multi-channel messaging infrastructure that connects
-//! ZeroClaw to external platforms. Each channel implements the [`Channel`] trait
+//! AgentZero to external platforms. Each channel implements the [`Channel`] trait
 //! defined in [`traits`], which provides a uniform interface for sending messages,
 //! listening for incoming messages, health checking, and typing indicators.
 //!
@@ -256,10 +256,10 @@ fn runtime_config_store() -> &'static Mutex<HashMap<PathBuf, RuntimeConfigState>
     STORE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-const SYSTEMD_STATUS_ARGS: [&str; 3] = ["--user", "is-active", "zeroclaw.service"];
-const SYSTEMD_RESTART_ARGS: [&str; 3] = ["--user", "restart", "zeroclaw.service"];
-const OPENRC_STATUS_ARGS: [&str; 2] = ["zeroclaw", "status"];
-const OPENRC_RESTART_ARGS: [&str; 2] = ["zeroclaw", "restart"];
+const SYSTEMD_STATUS_ARGS: [&str; 3] = ["--user", "is-active", "agentzero.service"];
+const SYSTEMD_RESTART_ARGS: [&str; 3] = ["--user", "restart", "agentzero.service"];
+const OPENRC_STATUS_ARGS: [&str; 2] = ["agentzero", "status"];
+const OPENRC_RESTART_ARGS: [&str; 2] = ["agentzero", "restart"];
 
 #[derive(Clone)]
 struct ChannelRuntimeContext {
@@ -964,7 +964,7 @@ fn runtime_autonomy_policy_from_config(config: &Config) -> RuntimeAutonomyPolicy
 
 fn runtime_config_path(ctx: &ChannelRuntimeContext) -> Option<PathBuf> {
     ctx.provider_runtime_options
-        .zeroclaw_dir
+        .agentzero_dir
         .as_ref()
         .map(|dir| dir.join("config.toml"))
 }
@@ -1162,8 +1162,8 @@ async fn load_runtime_defaults_from_config_file(
         toml::from_str(&contents).with_context(|| format!("Failed to parse {}", path.display()))?;
     parsed.config_path = path.to_path_buf();
 
-    if let Some(zeroclaw_dir) = path.parent() {
-        let store = crate::security::SecretStore::new(zeroclaw_dir, parsed.secrets.encrypt);
+    if let Some(agentzero_dir) = path.parent() {
+        let store = crate::security::SecretStore::new(agentzero_dir, parsed.secrets.encrypt);
         decrypt_optional_secret_for_runtime_reload(&store, &mut parsed.api_key, "config.api_key")?;
         decrypt_optional_secret_for_runtime_reload(
             &store,
@@ -4535,7 +4535,7 @@ fn maybe_restart_managed_daemon_service() -> Result<bool> {
         let plist = home
             .join("Library")
             .join("LaunchAgents")
-            .join("com.zeroclaw.daemon.plist");
+            .join("com.agentzero.daemon.plist");
         if !plist.exists() {
             return Ok(false);
         }
@@ -4545,15 +4545,15 @@ fn maybe_restart_managed_daemon_service() -> Result<bool> {
             .output()
             .context("Failed to query launchctl list")?;
         let listed = String::from_utf8_lossy(&list_output.stdout);
-        if !listed.contains("com.zeroclaw.daemon") {
+        if !listed.contains("com.agentzero.daemon") {
             return Ok(false);
         }
 
         let _ = Command::new("launchctl")
-            .args(["stop", "com.zeroclaw.daemon"])
+            .args(["stop", "com.agentzero.daemon"])
             .output();
         let start_output = Command::new("launchctl")
-            .args(["start", "com.zeroclaw.daemon"])
+            .args(["start", "com.agentzero.daemon"])
             .output()
             .context("Failed to start launchd daemon service")?;
         if !start_output.status.success() {
@@ -4566,7 +4566,7 @@ fn maybe_restart_managed_daemon_service() -> Result<bool> {
 
     if cfg!(target_os = "linux") {
         // OpenRC (system-wide) takes precedence over systemd (user-level)
-        let openrc_init_script = PathBuf::from("/etc/init.d/zeroclaw");
+        let openrc_init_script = PathBuf::from("/etc/init.d/agentzero");
         if openrc_init_script.exists() {
             if let Ok(status_output) = Command::new("rc-service").args(OPENRC_STATUS_ARGS).output()
             {
@@ -4593,7 +4593,7 @@ fn maybe_restart_managed_daemon_service() -> Result<bool> {
             .join(".config")
             .join("systemd")
             .join("user")
-            .join("zeroclaw.service");
+            .join("agentzero.service");
         if !unit_path.exists() {
             return Ok(false);
         }
@@ -4660,7 +4660,7 @@ pub(crate) async fn handle_command(command: crate::ChannelCommands, config: &Con
             );
         }
         crate::ChannelCommands::Remove { name } => {
-            anyhow::bail!("Remove channel '{name}' — edit ~/.zeroclaw/config.toml directly");
+            anyhow::bail!("Remove channel '{name}' — edit ~/.agentzero/config.toml directly");
         }
     }
 }
@@ -4791,7 +4791,7 @@ fn collect_configured_channels(config: &Config) -> Vec<ConfiguredChannel> {
 pub async fn doctor_channels(config: Config) -> Result<()> {
     let channels = collect_configured_channels(&config);
 
-    println!("🩺 ZeroClaw Channel Doctor");
+    println!("🩺 AgentZero Channel Doctor");
     println!();
 
     let mut healthy = 0_u32;
@@ -4823,7 +4823,7 @@ pub async fn doctor_channels(config: Config) -> Result<()> {
     }
 
     if config.channels_config.webhook.is_some() {
-        println!("  ℹ️  Webhook   check via `zeroclaw gateway` then GET /health");
+        println!("  ℹ️  Webhook   check via `agentzero gateway` then GET /health");
     }
 
     println!();
@@ -4847,7 +4847,7 @@ pub async fn start_channels(
         auth_profile_override: None,
         provider_api_url: config.api_url.clone(),
         provider_transport: config.effective_provider_transport(),
-        zeroclaw_dir: config.config_path.parent().map(std::path::PathBuf::from),
+        agentzero_dir: config.config_path.parent().map(std::path::PathBuf::from),
         secrets_encrypt: config.secrets.encrypt,
         reasoning_enabled: config.runtime.reasoning_enabled,
         reasoning_level: config.effective_provider_reasoning_level(),
@@ -4972,7 +4972,7 @@ pub async fn start_channels(
     let configured_channels = collect_configured_channels(&config);
 
     if configured_channels.is_empty() {
-        tracing::info!("No channels configured. Run `zeroclaw onboard` to set up channels.");
+        tracing::info!("No channels configured. Run `agentzero onboard` to set up channels.");
         return Ok(());
     }
 
@@ -5130,7 +5130,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         // Create minimal workspace files
         std::fs::write(tmp.path().join("SOUL.md"), "# Soul\nBe helpful.").unwrap();
-        std::fs::write(tmp.path().join("IDENTITY.md"), "# Identity\nName: ZeroClaw").unwrap();
+        std::fs::write(tmp.path().join("IDENTITY.md"), "# Identity\nName: AgentZero").unwrap();
         std::fs::write(tmp.path().join("USER.md"), "# User\nName: Test User").unwrap();
         std::fs::write(
             tmp.path().join("AGENTS.md"),
@@ -6962,7 +6962,7 @@ BTC is currently around $65,000 based on latest tool output."#
             api_url: None,
             reliability: Arc::new(crate::config::ReliabilityConfig::default()),
             provider_runtime_options: providers::ProviderRuntimeOptions {
-                zeroclaw_dir: Some(temp.path().to_path_buf()),
+                agentzero_dir: Some(temp.path().to_path_buf()),
                 ..providers::ProviderRuntimeOptions::default()
             },
             workspace_dir: Arc::new(std::env::temp_dir()),
@@ -7455,7 +7455,7 @@ BTC is currently around $65,000 based on latest tool output."#
             api_url: None,
             reliability: Arc::new(crate::config::ReliabilityConfig::default()),
             provider_runtime_options: providers::ProviderRuntimeOptions {
-                zeroclaw_dir: Some(temp.path().to_path_buf()),
+                agentzero_dir: Some(temp.path().to_path_buf()),
                 ..providers::ProviderRuntimeOptions::default()
             },
             workspace_dir: Arc::new(std::env::temp_dir()),
@@ -7577,7 +7577,7 @@ BTC is currently around $65,000 based on latest tool output."#
             api_url: None,
             reliability: Arc::new(crate::config::ReliabilityConfig::default()),
             provider_runtime_options: providers::ProviderRuntimeOptions {
-                zeroclaw_dir: Some(temp.path().to_path_buf()),
+                agentzero_dir: Some(temp.path().to_path_buf()),
                 ..providers::ProviderRuntimeOptions::default()
             },
             workspace_dir: Arc::new(std::env::temp_dir()),
@@ -7694,7 +7694,7 @@ BTC is currently around $65,000 based on latest tool output."#
             api_url: None,
             reliability: Arc::new(crate::config::ReliabilityConfig::default()),
             provider_runtime_options: providers::ProviderRuntimeOptions {
-                zeroclaw_dir: Some(temp.path().to_path_buf()),
+                agentzero_dir: Some(temp.path().to_path_buf()),
                 ..providers::ProviderRuntimeOptions::default()
             },
             workspace_dir: Arc::new(std::env::temp_dir()),
@@ -8010,7 +8010,7 @@ BTC is currently around $65,000 based on latest tool output."#
             api_url: None,
             reliability: Arc::new(crate::config::ReliabilityConfig::default()),
             provider_runtime_options: providers::ProviderRuntimeOptions {
-                zeroclaw_dir: Some(temp.path().to_path_buf()),
+                agentzero_dir: Some(temp.path().to_path_buf()),
                 ..providers::ProviderRuntimeOptions::default()
             },
             workspace_dir: Arc::new(temp.path().join("workspace")),
@@ -8176,7 +8176,7 @@ BTC is currently around $65,000 based on latest tool output."#
             api_url: None,
             reliability: Arc::new(crate::config::ReliabilityConfig::default()),
             provider_runtime_options: providers::ProviderRuntimeOptions {
-                zeroclaw_dir: Some(temp.path().to_path_buf()),
+                agentzero_dir: Some(temp.path().to_path_buf()),
                 ..providers::ProviderRuntimeOptions::default()
             },
             workspace_dir: Arc::new(std::env::temp_dir()),
@@ -8278,7 +8278,7 @@ BTC is currently around $65,000 based on latest tool output."#
             api_url: None,
             reliability: Arc::new(crate::config::ReliabilityConfig::default()),
             provider_runtime_options: providers::ProviderRuntimeOptions {
-                zeroclaw_dir: Some(temp.path().to_path_buf()),
+                agentzero_dir: Some(temp.path().to_path_buf()),
                 ..providers::ProviderRuntimeOptions::default()
             },
             workspace_dir: Arc::new(std::env::temp_dir()),
@@ -8433,7 +8433,7 @@ BTC is currently around $65,000 based on latest tool output."#
             api_url: None,
             reliability: Arc::new(crate::config::ReliabilityConfig::default()),
             provider_runtime_options: providers::ProviderRuntimeOptions {
-                zeroclaw_dir: Some(temp.path().to_path_buf()),
+                agentzero_dir: Some(temp.path().to_path_buf()),
                 ..providers::ProviderRuntimeOptions::default()
             },
             workspace_dir: Arc::new(std::env::temp_dir()),
@@ -8564,7 +8564,7 @@ BTC is currently around $65,000 based on latest tool output."#
             api_url: None,
             reliability: Arc::new(crate::config::ReliabilityConfig::default()),
             provider_runtime_options: providers::ProviderRuntimeOptions {
-                zeroclaw_dir: Some(temp.path().to_path_buf()),
+                agentzero_dir: Some(temp.path().to_path_buf()),
                 ..providers::ProviderRuntimeOptions::default()
             },
             workspace_dir: Arc::new(std::env::temp_dir()),
@@ -8671,7 +8671,7 @@ BTC is currently around $65,000 based on latest tool output."#
             api_url: None,
             reliability: Arc::new(crate::config::ReliabilityConfig::default()),
             provider_runtime_options: providers::ProviderRuntimeOptions {
-                zeroclaw_dir: Some(temp.path().to_path_buf()),
+                agentzero_dir: Some(temp.path().to_path_buf()),
                 ..providers::ProviderRuntimeOptions::default()
             },
             workspace_dir: Arc::new(std::env::temp_dir()),
@@ -9127,7 +9127,7 @@ BTC is currently around $65,000 based on latest tool output."#
             api_url: None,
             reliability: Arc::new(crate::config::ReliabilityConfig::default()),
             provider_runtime_options: providers::ProviderRuntimeOptions {
-                zeroclaw_dir: Some(temp.path().to_path_buf()),
+                agentzero_dir: Some(temp.path().to_path_buf()),
                 ..providers::ProviderRuntimeOptions::default()
             },
             workspace_dir: Arc::new(std::env::temp_dir()),
@@ -9327,7 +9327,7 @@ BTC is currently around $65,000 based on latest tool output."#
             api_url: None,
             reliability: Arc::new(crate::config::ReliabilityConfig::default()),
             provider_runtime_options: providers::ProviderRuntimeOptions {
-                zeroclaw_dir: Some(temp.path().to_path_buf()),
+                agentzero_dir: Some(temp.path().to_path_buf()),
                 ..providers::ProviderRuntimeOptions::default()
             },
             workspace_dir: Arc::new(std::env::temp_dir()),
@@ -9554,7 +9554,7 @@ BTC is currently around $65,000 based on latest tool output."#
             api_url: None,
             reliability: Arc::new(crate::config::ReliabilityConfig::default()),
             provider_runtime_options: providers::ProviderRuntimeOptions {
-                zeroclaw_dir: Some(temp.path().to_path_buf()),
+                agentzero_dir: Some(temp.path().to_path_buf()),
                 ..providers::ProviderRuntimeOptions::default()
             },
             workspace_dir: Arc::new(workspace_dir),
@@ -9652,7 +9652,7 @@ BTC is currently around $65,000 based on latest tool output."#
             api_url: None,
             reliability: Arc::new(crate::config::ReliabilityConfig::default()),
             provider_runtime_options: providers::ProviderRuntimeOptions {
-                zeroclaw_dir: Some(temp.path().to_path_buf()),
+                agentzero_dir: Some(temp.path().to_path_buf()),
                 ..providers::ProviderRuntimeOptions::default()
             },
             workspace_dir: Arc::new(workspace_dir),

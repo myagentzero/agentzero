@@ -3,7 +3,7 @@ import { useState } from 'react';
 import Sidebar from '@/components/layout/Sidebar';
 import Header from '@/components/layout/Header';
 
-const SIDEBAR_COLLAPSED_KEY = 'zeroclaw:sidebar-collapsed';
+const SIDEBAR_COLLAPSED_KEY = 'agentzero:sidebar-collapsed';
 
 export default function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);

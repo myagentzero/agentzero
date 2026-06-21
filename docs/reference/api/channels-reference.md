@@ -1,6 +1,6 @@
 # Channels Reference
 
-This document is the canonical reference for channel configuration in ZeroClaw.
+This document is the canonical reference for channel configuration in AgentZero.
 
 For encrypted Matrix rooms, also read the dedicated runbook:
 - [Matrix E2EE Guide](../../security/matrix-e2ee-guide.md)
@@ -20,13 +20,13 @@ This is the most common symptom (same class as issue #499). Check these in order
 3. **Token/account mismatch**: token is valid but belongs to another Matrix account.
 4. **E2EE device identity gap**: `whoami` does not return `device_id` and config does not provide one.
 5. **Key sharing/trust gap**: room keys were not shared to the bot device, so encrypted events cannot be decrypted.
-6. **Stale runtime state**: config changed but `zeroclaw daemon` was not restarted.
+6. **Stale runtime state**: config changed but `agentzero daemon` was not restarted.
 
 ---
 
 ## 1. Configuration Namespace
 
-All channel settings live under `channels_config` in `~/.zeroclaw/config.toml`.
+All channel settings live under `channels_config` in `~/.agentzero/config.toml`.
 
 ```toml
 [channels_config]
@@ -37,7 +37,7 @@ Each channel is enabled by creating its sub-table (for example, `[channels_confi
 
 ## In-Chat Runtime Model Switching (Telegram / Discord)
 
-When running `zeroclaw channel start` (or daemon mode), Telegram and Discord now support sender-scoped runtime switching:
+When running `agentzero channel start` (or daemon mode), Telegram and Discord now support sender-scoped runtime switching:
 
 - `/models` — show available providers and current selection
 - `/models <provider>` — switch provider for the current sender session
@@ -49,12 +49,12 @@ Notes:
 
 - Switching provider or model clears only that sender's in-memory conversation history to avoid cross-model context contamination.
 - `/new` clears the sender's conversation history without changing provider or model selection.
-- Model cache previews come from `zeroclaw models refresh --provider <ID>`.
+- Model cache previews come from `agentzero models refresh --provider <ID>`.
 - These are runtime chat commands, not CLI subcommands.
 
 ## Inbound Image Marker Protocol
 
-ZeroClaw supports multimodal input through inline message markers:
+AgentZero supports multimodal input through inline message markers:
 
 - Syntax: ``[IMAGE:<source>]``
 - `<source>` can be:
@@ -176,9 +176,9 @@ allowed_senders = ["*"]
 [channels_config.irc]
 server = "irc.libera.chat"
 port = 6697
-nickname = "zeroclaw-bot"
-username = "zeroclaw"              # optional
-channels = ["#zeroclaw"]
+nickname = "agentzero-bot"
+username = "agentzero"              # optional
+channels = ["#agentzero"]
 allowed_users = ["*"]
 server_password = ""                # optional
 nickserv_password = ""              # optional
@@ -194,8 +194,8 @@ verify_tls = true
 2. Run:
 
 ```bash
-zeroclaw onboard --channels-only
-zeroclaw daemon
+agentzero onboard --channels-only
+agentzero daemon
 ```
 
 1. Send a message from an expected sender.
@@ -214,7 +214,7 @@ If a channel appears connected but does not respond:
 4. Confirm transport mode assumptions:
    - polling/websocket channels do not need public inbound HTTP
    - webhook channels do need reachable HTTPS callback
-5. Restart `zeroclaw daemon` after config changes.
+5. Restart `agentzero daemon` after config changes.
 
 For Matrix encrypted rooms specifically, use:
 - [Matrix E2EE Guide](../../security/matrix-e2ee-guide.md)

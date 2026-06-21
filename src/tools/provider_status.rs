@@ -167,7 +167,7 @@ impl Tool for ProviderStatusTool {
                     success: false,
                     output: String::new(),
                     error: Some(
-                        "No api_key configured. Set api_key in config.toml or ZEROCLAW_API_KEY env var."
+                        "No api_key configured. Set api_key in config.toml or AGENTZERO_API_KEY env var."
                             .into(),
                     ),
                 });

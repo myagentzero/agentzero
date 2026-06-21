@@ -5,7 +5,7 @@
 //! external service dependencies. They complement the unit tests in
 //! `src/agent/tests.rs` by running at the integration test boundary.
 //!
-//! Ref: https://github.com/myagentzero/zeroclaw/issues/618 (item 6)
+//! Ref: https://github.com/myagentzero/agentzero/issues/618 (item 6)
 
 use crate::support::helpers::{
     StaticMemoryLoader, build_agent, build_agent_xml, build_recording_agent, text_response,
@@ -309,7 +309,7 @@ async fn e2e_multi_turn_with_memory_enrichment() {
     let (provider, recorded) =
         RecordingProvider::new(vec![text_response("answer 1"), text_response("answer 2")]);
 
-    let memory_context = "[Memory context]\n- project: zeroclaw\n\n";
+    let memory_context = "[Memory context]\n- project: agentzero\n\n";
     let loader = StaticMemoryLoader::new(memory_context);
 
     let mut agent = build_recording_agent(Box::new(provider), vec![], Some(Box::new(loader)));
@@ -326,7 +326,7 @@ async fn e2e_multi_turn_with_memory_enrichment() {
     // Turn 1: user message is enriched
     let req1_user = requests[0].iter().find(|m| m.role == "user").unwrap();
     assert!(req1_user.content.contains("[Memory context]"));
-    assert!(req1_user.content.contains("project: zeroclaw"));
+    assert!(req1_user.content.contains("project: agentzero"));
     assert!(req1_user.content.ends_with("first question"));
 
     // Turn 2: both user messages enriched, assistant from turn 1 present

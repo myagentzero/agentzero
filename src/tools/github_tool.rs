@@ -734,7 +734,7 @@ mod tests {
         GitHubTool::new(
             "ghp_test".into(),
             None,
-            vec!["myagentzero/zeroclaw".to_string()],
+            vec!["myagentzero/agentzero".to_string()],
             allowed_actions.into_iter().map(String::from).collect(),
             security,
             30,
@@ -859,25 +859,25 @@ mod tests {
             let args = match action {
                 "add_comment" => json!({
                     "action": action,
-                    "repo": "myagentzero/zeroclaw",
+                    "repo": "myagentzero/agentzero",
                     "issue_number": 1,
                     "body": "hi"
                 }),
                 "create_pull_request" => json!({
                     "action": action,
-                    "repo": "myagentzero/zeroclaw",
+                    "repo": "myagentzero/agentzero",
                     "title": "t",
                     "head": "f",
                     "base": "main"
                 }),
                 "close_pr" | "merge_pr" => json!({
                     "action": action,
-                    "repo": "myagentzero/zeroclaw",
+                    "repo": "myagentzero/agentzero",
                     "pr_number": 1
                 }),
                 "request_review" => json!({
                     "action": action,
-                    "repo": "myagentzero/zeroclaw",
+                    "repo": "myagentzero/agentzero",
                     "pr_number": 1,
                     "reviewers": ["alice"]
                 }),
@@ -891,18 +891,18 @@ mod tests {
     #[test]
     fn repo_allowlist_wildcards() {
         let t1 = make_tool(vec![], vec!["myagentzero/*"]);
-        assert!(t1.repo_is_allowed("myagentzero/zeroclaw"));
+        assert!(t1.repo_is_allowed("myagentzero/agentzero"));
         assert!(!t1.repo_is_allowed("other/repo"));
 
         let t2 = make_tool(vec![], vec!["*"]);
         assert!(t2.repo_is_allowed("anything/repo"));
 
-        let t3 = make_tool(vec![], vec!["myagentzero/zeroclaw"]);
-        assert!(t3.repo_is_allowed("myagentzero/zeroclaw"));
+        let t3 = make_tool(vec![], vec!["myagentzero/agentzero"]);
+        assert!(t3.repo_is_allowed("myagentzero/agentzero"));
         assert!(!t3.repo_is_allowed("myagentzero/other"));
 
         let empty = make_tool(vec![], vec![]);
-        assert!(!empty.repo_is_allowed("myagentzero/zeroclaw"));
+        assert!(!empty.repo_is_allowed("myagentzero/agentzero"));
     }
 
     #[test]
@@ -929,11 +929,11 @@ mod tests {
 
     #[tokio::test]
     async fn create_pr_rejects_head_equals_base() {
-        let tool = make_tool(vec!["create_pull_request"], vec!["myagentzero/zeroclaw"]);
+        let tool = make_tool(vec!["create_pull_request"], vec!["myagentzero/agentzero"]);
         let result = tool
             .execute(json!({
                 "action": "create_pull_request",
-                "repo": "myagentzero/zeroclaw",
+                "repo": "myagentzero/agentzero",
                 "title": "t",
                 "head": "main",
                 "base": "main"
@@ -946,11 +946,11 @@ mod tests {
 
     #[tokio::test]
     async fn merge_pr_rejects_invalid_method() {
-        let tool = make_tool(vec!["merge_pr"], vec!["myagentzero/zeroclaw"]);
+        let tool = make_tool(vec!["merge_pr"], vec!["myagentzero/agentzero"]);
         let result = tool
             .execute(json!({
                 "action": "merge_pr",
-                "repo": "myagentzero/zeroclaw",
+                "repo": "myagentzero/agentzero",
                 "pr_number": 1,
                 "merge_method": "weird"
             }))
@@ -962,7 +962,7 @@ mod tests {
 
     #[tokio::test]
     async fn unauthorized_repo_rejected() {
-        let tool = make_tool(vec!["get_issue"], vec!["myagentzero/zeroclaw"]);
+        let tool = make_tool(vec!["get_issue"], vec!["myagentzero/agentzero"]);
         let result = tool
             .execute(json!({
                 "action": "get_issue",

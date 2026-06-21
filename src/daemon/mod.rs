@@ -61,13 +61,13 @@ async fn wait_for_shutdown_signal() -> Result<ShutdownSignal> {
 }
 
 pub async fn run(config: Config, host: String, port: u16) -> Result<()> {
-    // Pre-flight: check if port is already in use by another zeroclaw daemon
+    // Pre-flight: check if port is already in use by another agentzero daemon
     if let Err(_e) = check_port_available(&host, port).await {
         // Port is in use - check if it's our daemon
-        if is_zeroclaw_daemon_running(&host, port).await {
-            tracing::info!("ZeroClaw daemon already running on {host}:{port}");
-            println!("✓ ZeroClaw daemon already running on http://{host}:{port}");
-            println!("  Use 'zeroclaw restart' to restart, or 'zeroclaw status' to check health.");
+        if is_agentzero_daemon_running(&host, port).await {
+            tracing::info!("AgentZero daemon already running on {host}:{port}");
+            println!("✓ AgentZero daemon already running on http://{host}:{port}");
+            println!("  Use 'agentzero restart' to restart, or 'agentzero status' to check health.");
             return Ok(());
         }
         // Something else is using the port
@@ -654,8 +654,8 @@ async fn check_port_available(host: &str, port: u16) -> Result<()> {
     }
 }
 
-/// Check if a running daemon on this port is our zeroclaw daemon
-async fn is_zeroclaw_daemon_running(host: &str, port: u16) -> bool {
+/// Check if a running daemon on this port is our agentzero daemon
+async fn is_agentzero_daemon_running(host: &str, port: u16) -> bool {
     let url = format!("http://{}:{}/health", host, port);
     match reqwest::Client::builder()
         .timeout(Duration::from_secs(2))

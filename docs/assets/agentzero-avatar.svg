@@ -163,9 +163,9 @@
     <circle r="4" fill="#ff6b35"/>
   </g>
 
-  <!-- "ZEROCLAW" text arc at bottom -->
+  <!-- "AGENTZERO" text arc at bottom -->
   <text font-family="'Courier New', monospace" font-size="22" font-weight="bold" fill="#ff6b35" text-anchor="middle" filter="url(#circuitGlow)" opacity="0.85">
-    <textPath href="#textArc" startOffset="50%">ZEROCLAW</textPath>
+    <textPath href="#textArc" startOffset="50%">AGENTZERO</textPath>
   </text>
   <path id="textArc" d="M130,400 Q256,460 382,400" fill="none"/>
 

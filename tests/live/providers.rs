@@ -9,7 +9,7 @@ use agentzero::providers::traits::{ChatMessage, Provider};
 /// Sends a real multi-turn conversation to OpenAI Codex and verifies
 /// the model retains context from earlier messages.
 ///
-/// Requires valid OAuth credentials in `~/.zeroclaw/`.
+/// Requires valid OAuth credentials in `~/.agentzero/`.
 /// Run manually: `cargo test e2e_live_openai_codex_multi_turn -- --ignored`
 #[tokio::test]
 #[ignore = "requires live OpenAI Codex OAuth credentials"]

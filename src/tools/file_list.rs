@@ -176,7 +176,7 @@ mod tests {
 
     #[tokio::test]
     async fn file_list_defaults_to_workspace_root() {
-        let dir = std::env::temp_dir().join("zeroclaw_test_file_list_default_root");
+        let dir = std::env::temp_dir().join("agentzero_test_file_list_default_root");
         let _ = tokio::fs::remove_dir_all(&dir).await;
         tokio::fs::create_dir_all(&dir).await.unwrap();
         tokio::fs::write(dir.join("root.txt"), "content")
@@ -203,7 +203,7 @@ mod tests {
 
     #[tokio::test]
     async fn file_list_lists_files() {
-        let dir = std::env::temp_dir().join("zeroclaw_test_file_list");
+        let dir = std::env::temp_dir().join("agentzero_test_file_list");
         let _ = tokio::fs::remove_dir_all(&dir).await;
         tokio::fs::create_dir_all(&dir).await.unwrap();
 
@@ -239,7 +239,7 @@ mod tests {
 
     #[tokio::test]
     async fn file_list_filters_env_files() {
-        let dir = std::env::temp_dir().join("zeroclaw_test_file_list_filter");
+        let dir = std::env::temp_dir().join("agentzero_test_file_list_filter");
         let _ = tokio::fs::remove_dir_all(&dir).await;
         tokio::fs::create_dir_all(&dir).await.unwrap();
 
@@ -273,7 +273,7 @@ mod tests {
 
     #[tokio::test]
     async fn file_list_filters_git_folder() {
-        let dir = std::env::temp_dir().join("zeroclaw_test_file_list_filter_git");
+        let dir = std::env::temp_dir().join("agentzero_test_file_list_filter_git");
         let _ = tokio::fs::remove_dir_all(&dir).await;
         tokio::fs::create_dir_all(&dir).await.unwrap();
 
@@ -306,7 +306,7 @@ mod tests {
 
     #[tokio::test]
     async fn file_list_respects_depth_zero() {
-        let dir = std::env::temp_dir().join("zeroclaw_test_file_list_depth0");
+        let dir = std::env::temp_dir().join("agentzero_test_file_list_depth0");
         let _ = tokio::fs::remove_dir_all(&dir).await;
         tokio::fs::create_dir_all(dir.join("a/b")).await.unwrap();
 
@@ -330,7 +330,7 @@ mod tests {
 
     #[tokio::test]
     async fn file_list_respects_depth_one() {
-        let dir = std::env::temp_dir().join("zeroclaw_test_file_list_depth1");
+        let dir = std::env::temp_dir().join("agentzero_test_file_list_depth1");
         let _ = tokio::fs::remove_dir_all(&dir).await;
         tokio::fs::create_dir_all(dir.join("a/b")).await.unwrap();
 
@@ -356,7 +356,7 @@ mod tests {
 
     #[tokio::test]
     async fn file_list_unlimited_depth() {
-        let dir = std::env::temp_dir().join("zeroclaw_test_file_list_unlimited");
+        let dir = std::env::temp_dir().join("agentzero_test_file_list_unlimited");
         let _ = tokio::fs::remove_dir_all(&dir).await;
         tokio::fs::create_dir_all(dir.join("a/b/c")).await.unwrap();
 
@@ -384,7 +384,7 @@ mod tests {
 
     #[tokio::test]
     async fn file_list_nonexistent_path() {
-        let dir = std::env::temp_dir().join("zeroclaw_test_file_list_nonexistent");
+        let dir = std::env::temp_dir().join("agentzero_test_file_list_nonexistent");
         let _ = tokio::fs::remove_dir_all(&dir).await;
         tokio::fs::create_dir_all(&dir).await.unwrap();
 
@@ -402,7 +402,7 @@ mod tests {
 
     #[tokio::test]
     async fn file_list_file_not_directory() {
-        let dir = std::env::temp_dir().join("zeroclaw_test_file_list_not_dir");
+        let dir = std::env::temp_dir().join("agentzero_test_file_list_not_dir");
         let _ = tokio::fs::remove_dir_all(&dir).await;
         tokio::fs::create_dir_all(&dir).await.unwrap();
         tokio::fs::write(dir.join("file.txt"), "content")

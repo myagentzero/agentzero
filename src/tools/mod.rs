@@ -563,7 +563,7 @@ pub fn all_tools_with_runtime(
     // GitHub API tool (conditionally registered)
     if root_config.github.enabled {
         let token = if root_config.github.access_token.trim().is_empty() {
-            std::env::var("ZEROCLAW_GITHUB_TOOL_TOKEN")
+            std::env::var("AGENTZERO_GITHUB_TOOL_TOKEN")
                 .ok()
                 .or_else(|| std::env::var("GITHUB_TOKEN").ok())
                 .unwrap_or_default()
@@ -573,7 +573,7 @@ pub fn all_tools_with_runtime(
 
         if token.trim().is_empty() {
             tracing::warn!(
-                "GitHub tool enabled but no access_token configured (set [github].access_token, ZEROCLAW_GITHUB_TOOL_TOKEN, or GITHUB_TOKEN)"
+                "GitHub tool enabled but no access_token configured (set [github].access_token, AGENTZERO_GITHUB_TOOL_TOKEN, or GITHUB_TOKEN)"
             );
         } else {
             tool_arcs.push(Arc::new(GitHubTool::new(
@@ -639,7 +639,7 @@ pub fn all_tools_with_runtime(
             auth_profile_override: None,
             provider_api_url: root_config.api_url.clone(),
             provider_transport: root_config.effective_provider_transport(),
-            zeroclaw_dir: root_config
+            agentzero_dir: root_config
                 .config_path
                 .parent()
                 .map(std::path::PathBuf::from),

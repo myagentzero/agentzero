@@ -1,4 +1,4 @@
-//! Flash ZeroClaw Arduino firmware via arduino-cli.
+//! Flash AgentZero Arduino firmware via arduino-cli.
 //!
 //! Reads Arduino firmware from workspace/firmware/arduino/ at runtime and uses
 //! arduino-cli to compile and upload to the target board.
@@ -103,14 +103,14 @@ fn read_firmware(workspace_dir: &Path) -> Result<String> {
     })
 }
 
-/// Flash ZeroClaw firmware to Arduino at the given port.
+/// Flash AgentZero firmware to Arduino at the given port.
 pub fn flash_arduino_firmware(port: &str, workspace_dir: &Path) -> Result<()> {
     ensure_arduino_cli()?;
     ensure_avr_core()?;
 
     let firmware_ino = read_firmware(workspace_dir)?;
 
-    let temp_dir = std::env::temp_dir().join(format!("zeroclaw_flash_{}", uuid::Uuid::new_v4()));
+    let temp_dir = std::env::temp_dir().join(format!("agentzero_flash_{}", uuid::Uuid::new_v4()));
     let sketch_dir = temp_dir.join(SKETCH_NAME);
     let ino_path = sketch_dir.join(format!("{}.ino", SKETCH_NAME));
 
@@ -120,7 +120,7 @@ pub fn flash_arduino_firmware(port: &str, workspace_dir: &Path) -> Result<()> {
     let sketch_path = sketch_dir.to_string_lossy();
 
     // Compile
-    println!("Compiling ZeroClaw Arduino firmware...");
+    println!("Compiling AgentZero Arduino firmware...");
     let compile = Command::new("arduino-cli")
         .args(["compile", "--fqbn", FQBN, &*sketch_path])
         .output()
@@ -149,7 +149,7 @@ pub fn flash_arduino_firmware(port: &str, workspace_dir: &Path) -> Result<()> {
         );
     }
 
-    println!("ZeroClaw firmware flashed successfully.");
+    println!("AgentZero firmware flashed successfully.");
     println!("The Arduino now supports: capabilities, gpio_read, gpio_write.");
     Ok(())
 }

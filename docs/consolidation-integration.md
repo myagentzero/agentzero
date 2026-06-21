@@ -2,7 +2,7 @@
 
 ## Overview
 
-The `src/cron/consolidation.rs` module provides **nightly memory consolidation** functionality for the ZeroClaw system. It distills operational activity from the past 24 hours into actionable summaries stored in long-term memory.
+The `src/cron/consolidation.rs` module provides **nightly memory consolidation** functionality for the AgentZero system. It distills operational activity from the past 24 hours into actionable summaries stored in long-term memory.
 
 ## Architecture
 
@@ -142,7 +142,7 @@ The consolidation agent is instructed to:
 - **Automatic Creation**: Not enabled by default
 - **Manual Creation**: Must call `create_consolidation_job(&config)` explicitly
 - **Likely Trigger Points** (not yet implemented):
-  - CLI command (e.g., `zeroclaw cron add-consolidation`)
+  - CLI command (e.g., `agentzero cron add-consolidation`)
   - Onboarding flow
   - Config-driven auto-setup
   - Dashboard/API endpoint

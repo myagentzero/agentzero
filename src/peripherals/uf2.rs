@@ -4,7 +4,7 @@
 //! 1. [`find_rpi_rp2_mount`] — check well-known mount points for the RPI-RP2 volume
 //!    that appears when a Pico is held in BOOTSEL mode.
 //! 2. [`ensure_firmware_dir`] — read firmware files from workspace/firmware/pico/
-//!    or extract to `~/.zeroclaw/firmware/pico/` as a cache.
+//!    or extract to `~/.agentzero/firmware/pico/` as a cache.
 //! 3. [`flash_uf2`] — copy the UF2 to the mount point; the Pico reboots automatically.
 
 use anyhow::{Result, bail};
@@ -54,14 +54,14 @@ pub fn ensure_firmware_dir(workspace_dir: &Path) -> Result<PathBuf> {
     if !firmware_dir.exists() {
         bail!(
             "firmware/pico directory not found at {}\n\
-             Ensure you have firmware/pico/zeroclaw-pico.uf2 and firmware/pico/main.py \
+             Ensure you have firmware/pico/agentzero-pico.uf2 and firmware/pico/main.py \
              in your workspace.",
             firmware_dir.display()
         );
     }
 
     // UF2 — validate magic before use.
-    let uf2_path = firmware_dir.join("zeroclaw-pico.uf2");
+    let uf2_path = firmware_dir.join("agentzero-pico.uf2");
     if !uf2_path.exists() {
         bail!(
             "UF2 firmware not found at {}\n\
@@ -107,7 +107,7 @@ pub fn ensure_firmware_dir(workspace_dir: &Path) -> Result<PathBuf> {
 /// 3. `sudo cp …`      — escalates for locked volumes.
 /// 4. Error — instructs the user to run the `sudo cp` manually.
 pub async fn flash_uf2(mount_point: &Path, firmware_dir: &Path) -> Result<()> {
-    let uf2_src = firmware_dir.join("zeroclaw-pico.uf2");
+    let uf2_src = firmware_dir.join("agentzero-pico.uf2");
     let uf2_dst = mount_point.join("firmware.uf2");
     let src_str = uf2_src.to_string_lossy().into_owned();
     let dst_str = uf2_dst.to_string_lossy().into_owned();
@@ -124,7 +124,7 @@ pub async fn flash_uf2(mount_point: &Path, firmware_dir: &Path) -> Result<()> {
         bail!(
             "UF2 at {} does not look like a valid UF2 file (magic mismatch). \
              Download from https://micropython.org/download/RPI_PICO/ and delete \
-             the existing file so ZeroClaw can re-extract it.",
+             the existing file so AgentZero can re-extract it.",
             uf2_src.display()
         );
     }
@@ -207,7 +207,7 @@ pub async fn flash_uf2(mount_point: &Path, firmware_dir: &Path) -> Result<()> {
 
     // ── All attempts failed — give the user a clear manual command ────────────
     bail!(
-        "All copy methods failed. Run this command manually, then restart ZeroClaw:\n\
+        "All copy methods failed. Run this command manually, then restart AgentZero:\n\
          \n  sudo cp {src_str} {dst_str}\n"
     )
 }

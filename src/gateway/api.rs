@@ -89,7 +89,7 @@ pub async fn handle_api_status(
     }
 
     let body = serde_json::json!({
-        "version": env!("ZEROCLAW_BUILD_VERSION"),
+        "version": env!("AGENTZERO_BUILD_VERSION"),
         "provider": format_provider_display(config.default_provider.as_ref()),
         "model": state.model,
         "temperature": state.temperature,

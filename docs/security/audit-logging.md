@@ -1,4 +1,4 @@
-# Audit Logging for ZeroClaw
+# Audit Logging for AgentZero
 
 > ⚠️ **Status: Proposal / Roadmap**
 >
@@ -6,7 +6,7 @@
 > For current runtime behavior, see [config-reference.md](../reference/api/config-reference.md), [operations-runbook.md](../ops/operations-runbook.md), and [troubleshooting.md](../ops/troubleshooting.md).
 
 ## Problem
-ZeroClaw logs actions but lacks tamper-evident audit trails for:
+AgentZero logs actions but lacks tamper-evident audit trails for:
 - Who executed what command
 - When and from which channel
 - What resources were accessed
@@ -115,13 +115,13 @@ impl AuditLogger {
 ```toml
 [security.audit]
 enabled = true
-log_path = "~/.config/zeroclaw/audit.log"
+log_path = "~/.config/agentzero/audit.log"
 max_size_mb = 100
 rotate = "daily"  # daily | weekly | size
 
 # Tamper evidence
 sign_events = true
-signing_key_path = "~/.config/zeroclaw/audit.key"
+signing_key_path = "~/.config/agentzero/audit.key"
 
 # What to log
 log_commands = true
@@ -136,19 +136,19 @@ log_policy_violations = true
 
 ```bash
 # Show all commands executed by @alice
-zeroclaw audit --user @alice
+agentzero audit --user @alice
 
 # Show all high-risk commands
-zeroclaw audit --risk high
+agentzero audit --risk high
 
 # Show violations from last 24 hours
-zeroclaw audit --since 24h --violations-only
+agentzero audit --since 24h --violations-only
 
 # Export to JSON for analysis
-zeroclaw audit --format json --output audit.json
+agentzero audit --format json --output audit.json
 
 # Verify log integrity
-zeroclaw audit --verify-signatures
+agentzero audit --verify-signatures
 ```
 
 ---
