@@ -177,11 +177,11 @@ async fn dockerignore_excludes_target_directory() {
 
     assert!(is_excluded(&patterns, "target"), "target must be excluded");
     assert!(
-        is_excluded(&patterns, "target/debug/zeroclaw"),
+        is_excluded(&patterns, "target/debug/agentzero"),
         "target/debug must be excluded"
     );
     assert!(
-        is_excluded(&patterns, "target/release/zeroclaw"),
+        is_excluded(&patterns, "target/release/agentzero"),
         "target/release must be excluded"
     );
 }

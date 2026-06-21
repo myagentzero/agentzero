@@ -3,7 +3,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
-BIN_PATH="${1:-$ROOT_DIR/target/debug/zeroclaw}"
+BIN_PATH="${1:-$ROOT_DIR/target/debug/agentzero}"
 TMP_ROOT="/tmp/zeroclaw-tmux-onboard-$$"
 
 cleanup() {

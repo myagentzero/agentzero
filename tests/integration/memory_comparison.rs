@@ -6,7 +6,7 @@ use std::time::Instant;
 use tempfile::TempDir;
 
 // We test both backends through the public memory module
-use zeroclaw::memory::{Memory, MemoryCategory, markdown::MarkdownMemory, sqlite::SqliteMemory};
+use agentzero::memory::{Memory, MemoryCategory, markdown::MarkdownMemory, sqlite::SqliteMemory};
 
 // ── Helpers ────────────────────────────────────────────────────
 

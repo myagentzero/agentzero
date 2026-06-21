@@ -14,7 +14,7 @@
 //! # Quick start
 //!
 //! ```rust,ignore
-//! use zeroclaw::plugins::{Plugin, PluginApi, PluginManifest};
+//! use agentzero::plugins::{Plugin, PluginApi, PluginManifest};
 //!
 //! pub struct MyPlugin { manifest: PluginManifest }
 //!

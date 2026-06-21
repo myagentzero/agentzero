@@ -4,8 +4,8 @@
 //! through the public Provider trait, ensuring the agent loop selects the
 //! right tool-calling strategy (prompt-guided, not native).
 
-use zeroclaw::providers::create_provider_with_url;
-use zeroclaw::providers::traits::Provider;
+use agentzero::providers::create_provider_with_url;
+use agentzero::providers::traits::Provider;
 
 fn gemini_provider() -> Box<dyn Provider> {
     create_provider_with_url("gemini", Some("test-key"), None)

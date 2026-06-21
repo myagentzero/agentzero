@@ -2049,7 +2049,7 @@ fn build_models_help_response(current: &ChannelRouteSelection, workspace_dir: &P
     if cached_models.is_empty() {
         let _ = writeln!(
             response,
-            "\nNo cached model list found for `{}`. Ask the operator to run `zeroclaw models refresh --provider {}`.",
+            "\nNo cached model list found for `{}`. Ask the operator to run `agentzero models refresh --provider {}`.",
             current.provider, current.provider
         );
     } else {
@@ -4646,9 +4646,9 @@ pub(crate) async fn handle_command(command: crate::ChannelCommands, config: &Con
                     config.notion.enabled && !config.notion.database_id.trim().is_empty();
                 println!("  {} Notion", if notion_configured { "✅" } else { "❌" });
             }
-            println!("\nTo start channels: zeroclaw channel start");
-            println!("To check health:    zeroclaw channel doctor");
-            println!("To configure:      zeroclaw onboard");
+            println!("\nTo start channels: agentzero channel start");
+            println!("To check health:    agentzero channel doctor");
+            println!("To configure:      agentzero onboard");
             Ok(())
         }
         crate::ChannelCommands::Add {
@@ -4656,7 +4656,7 @@ pub(crate) async fn handle_command(command: crate::ChannelCommands, config: &Con
             config: _,
         } => {
             anyhow::bail!(
-                "Channel type '{channel_type}' — use `zeroclaw onboard` to configure channels"
+                "Channel type '{channel_type}' — use `agentzero onboard` to configure channels"
             );
         }
         crate::ChannelCommands::Remove { name } => {
@@ -4972,7 +4972,7 @@ pub async fn start_channels(
     let configured_channels = collect_configured_channels(&config);
 
     if configured_channels.is_empty() {
-        println!("No channels configured. Run `zeroclaw onboard` to set up channels.");
+        tracing::info!("No channels configured. Run `zeroclaw onboard` to set up channels.");
         return Ok(());
     }
 
@@ -4981,25 +4981,24 @@ pub async fn start_channels(
         .map(|configured| configured.channel)
         .collect();
 
-    println!("  🤖 Model:    {model}");
+    tracing::info!("🤖 Model:    {model}");
     let effective_backend = memory::effective_memory_backend_name(
         &config.memory.backend,
         Some(&config.storage.provider.config),
     );
-    println!(
-        "  🧠 Memory:   {} (auto-save: {})",
+    tracing::info!(
+        "🧠 Memory:   {} (auto-save: {})",
         effective_backend,
         if config.memory.auto_save { "on" } else { "off" }
     );
-    println!(
-        "  📡 Channels: {}",
+    tracing::info!(
+        "📡 Channels: {}",
         channels
             .iter()
             .map(|c| c.name())
             .collect::<Vec<_>>()
             .join(", ")
     );
-    println!();
 
     crate::health::mark_component_ok("channels");
 
@@ -5035,8 +5034,6 @@ pub async fn start_channels(
     );
     register_live_channels(channels_by_name.as_ref());
     let max_in_flight_messages = compute_max_in_flight_messages(channels.len());
-
-    println!("  🚦 In-flight message limit: {max_in_flight_messages}");
 
     let mut provider_cache_seed: HashMap<String, Arc<dyn Provider>> = HashMap::new();
     provider_cache_seed.insert(provider_name.clone(), Arc::clone(&provider));

@@ -30,7 +30,7 @@ pub(crate) fn install_default_tls_provider() {}
 ///
 /// # Examples
 /// ```ignore
-/// use zeroclaw::util::truncate_with_ellipsis;
+/// use agentzero::util::truncate_with_ellipsis;
 ///
 /// // ASCII string - no truncation needed
 /// assert_eq!(truncate_with_ellipsis("hello", 10), "hello");

@@ -57,17 +57,17 @@ RUN touch src/main.rs
 RUN --mount=type=cache,id=zeroclaw-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,id=zeroclaw-cargo-git,target=/usr/local/cargo/git,sharing=locked \
     --mount=type=cache,id=zeroclaw-target,target=/app/target,sharing=locked \
-    rm -rf target/release/.fingerprint/zeroclawlabs-* \
-           target/release/deps/zeroclawlabs-* \
-           target/release/incremental/zeroclawlabs-* && \
+    rm -rf target/release/.fingerprint/agentzero-* \
+           target/release/deps/agentzero-* \
+           target/release/incremental/agentzero-* && \
     if [ -n "$ZEROCLAW_CARGO_FEATURES" ]; then \
       cargo build --release --locked --features "$ZEROCLAW_CARGO_FEATURES"; \
     else \
       cargo build --release --locked; \
     fi && \
-    cp target/release/zeroclaw /app/zeroclaw && \
-    strip /app/zeroclaw
-RUN size=$(stat -c%s /app/zeroclaw) && \
+    cp target/release/agentzero /app/agentzero && \
+    strip /app/agentzero
+RUN size=$(stat -c%s /app/agentzero) && \
     if [ "$size" -lt 1000000 ]; then echo "ERROR: binary too small (${size} bytes), likely dummy build artifact" && exit 1; fi
 
 # Prepare runtime directory structure and default config inline (no extra stage)
@@ -102,7 +102,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /zeroclaw-data /zeroclaw-data
-COPY --from=builder /app/zeroclaw /usr/local/bin/zeroclaw
+COPY --from=builder /app/agentzero /usr/local/bin/agentzero
 
 # Overwrite minimal config with DEV template (Ollama defaults)
 COPY dev/config.template.toml /zeroclaw-data/.zeroclaw/config.toml
@@ -126,14 +126,14 @@ WORKDIR /zeroclaw-data
 USER 65534:65534
 EXPOSE 42617
 HEALTHCHECK --interval=60s --timeout=10s --retries=3 --start-period=10s \
-    CMD ["zeroclaw", "status", "--format=exit-code"]
-ENTRYPOINT ["zeroclaw"]
+    CMD ["agentzero", "status", "--format=exit-code"]
+ENTRYPOINT ["agentzero"]
 CMD ["daemon"]
 
 # ── Stage 3: Production Runtime (Distroless) ─────────────────
 FROM gcr.io/distroless/cc-debian13:nonroot@sha256:84fcd3c223b144b0cb6edc5ecc75641819842a9679a3a58fd6294bec47532bf7 AS release
 
-COPY --from=builder /app/zeroclaw /usr/local/bin/zeroclaw
+COPY --from=builder /app/agentzero /usr/local/bin/agentzero
 COPY --from=builder /zeroclaw-data /zeroclaw-data
 
 # Environment setup
@@ -152,6 +152,6 @@ WORKDIR /zeroclaw-data
 USER 65534:65534
 EXPOSE 42617
 HEALTHCHECK --interval=60s --timeout=10s --retries=3 --start-period=10s \
-    CMD ["zeroclaw", "status", "--format=exit-code"]
-ENTRYPOINT ["zeroclaw"]
+    CMD ["agentzero", "status", "--format=exit-code"]
+ENTRYPOINT ["agentzero"]
 CMD ["daemon"]

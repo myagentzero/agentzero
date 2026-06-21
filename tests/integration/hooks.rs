@@ -3,8 +3,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
-use zeroclaw::hooks::{HookHandler, HookResult, HookRunner};
-use zeroclaw::tools::ToolResult;
+use agentzero::hooks::{HookHandler, HookResult, HookRunner};
+use agentzero::tools::ToolResult;
 
 struct CounterHook {
     gateway_starts: Arc<AtomicUsize>,

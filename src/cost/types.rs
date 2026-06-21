@@ -151,9 +151,9 @@ pub struct CostSummary {
     pub daily_cost_usd: f64,
     /// Total cost for the month
     pub monthly_cost_usd: f64,
-    /// Total tokens used
+    /// Total tokens used in the last 24 hours (rolling window).
     pub total_tokens: u64,
-    /// Number of requests
+    /// Number of requests in the last 24 hours (rolling window).
     pub request_count: usize,
     /// Breakdown by model
     pub by_model: std::collections::HashMap<String, ModelStats>,

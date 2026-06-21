@@ -99,9 +99,10 @@ export default function Cost() {
 
       {/* Token Statistics */}
       <div className="bg-gray-900 rounded-xl border border-gray-800 p-5">
-        <h3 className="text-base font-semibold text-white mb-4">
+        <h3 className="text-base font-semibold text-white mb-1">
           Token Statistics
         </h3>
+        <p className="text-xs text-gray-500 mb-4">Last 24 hours</p>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div className="bg-gray-800/50 rounded-lg p-4">
             <p className="text-sm text-gray-400">Total Tokens</p>
@@ -118,10 +119,10 @@ export default function Cost() {
             </p>
           </div>
           <div className="bg-gray-800/50 rounded-lg p-4">
-            <p className="text-sm text-gray-400">Cost per 1K Tokens</p>
+            <p className="text-sm text-gray-400">Cost per 1K Tokens (24h)</p>
             <p className="text-xl font-bold text-white mt-1">
               {cost.total_tokens > 0
-                ? formatUSD((cost.monthly_cost_usd / cost.total_tokens) * 1000)
+                ? formatUSD((cost.daily_cost_usd / cost.total_tokens) * 1000)
                 : '$0.0000'}
             </p>
           </div>

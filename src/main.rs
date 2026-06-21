@@ -176,7 +176,7 @@ mod util;
 use config::Config;
 
 // Re-export so binary modules can use crate::<CommandEnum> while keeping a single source of truth.
-pub use zeroclaw::{
+pub use agentzero::{
     ChannelCommands, CronCommands, HardwareCommands, IntegrationCommands, PeripheralCommands,
     ServiceCommands, SkillCommands,
 };
@@ -195,7 +195,7 @@ enum EstopLevelArg {
 
 /// `ZeroClaw` - Zero overhead. Zero compromise. 100% Rust.
 #[derive(Parser, Debug)]
-#[command(name = "zeroclaw")]
+#[command(name = "agentzero")]
 #[command(author = "myagentzero")]
 #[command(version = ZEROCLAW_BUILD_VERSION)]
 #[command(about = "The fastest, smallest AI assistant.", long_about = None)]
@@ -555,7 +555,7 @@ Examples:
   zeroclaw hardware info --chip STM32F401RETx")]
     Hardware {
         #[command(subcommand)]
-        hardware_command: zeroclaw::HardwareCommands,
+        hardware_command: agentzero::HardwareCommands,
     },
 
     /// Manage hardware peripherals (STM32, RPi GPIO, etc.)
@@ -574,7 +574,7 @@ Examples:
   zeroclaw peripheral flash-nucleo")]
     Peripheral {
         #[command(subcommand)]
-        peripheral_command: zeroclaw::PeripheralCommands,
+        peripheral_command: agentzero::PeripheralCommands,
     },
 
     /// Manage agent memory (list, get, store, stats, clear)
@@ -605,10 +605,10 @@ Manage ZeroClaw configuration.
 Inspect, query, and modify configuration settings.
 
 Examples:
-  zeroclaw config show                        # show effective config (secrets masked)
-  zeroclaw config get gateway.port            # query a specific value by dot-path
-  zeroclaw config set gateway.port 8080       # update a value and save to config.toml
-  zeroclaw config schema                      # print full JSON Schema to stdout")]
+  agentzero config show                        # show effective config (secrets masked)
+  agentzero config get gateway.port            # query a specific value by dot-path
+  agentzero config set gateway.port 8080       # update a value and save to config.toml
+  agentzero config schema                      # print full JSON Schema to stdout")]
     Config {
         #[command(subcommand)]
         config_command: ConfigCommands,
@@ -2424,7 +2424,7 @@ mod tests {
     #[test]
     fn onboard_cli_accepts_model_provider_and_api_key_in_quick_mode() {
         let cli = Cli::try_parse_from([
-            "zeroclaw",
+            "agentzero",
             "onboard",
             "--provider",
             "openrouter",
@@ -2494,7 +2494,7 @@ mod tests {
 
     #[test]
     fn gateway_cli_accepts_new_pairing_with_code() {
-        let cli = Cli::try_parse_from(["zeroclaw", "gateway", "--new-pairing", "123456"])
+        let cli = Cli::try_parse_from(["agentzero", "gateway", "--new-pairing", "123456"])
             .expect("gateway --new-pairing CODE should parse");
 
         match cli.command {
@@ -2507,7 +2507,7 @@ mod tests {
 
     #[test]
     fn gateway_cli_accepts_open_dashboard_flag() {
-        let cli = Cli::try_parse_from(["zeroclaw", "gateway", "--open-dashboard"])
+        let cli = Cli::try_parse_from(["agentzero", "gateway", "--open-dashboard"])
             .expect("gateway --open-dashboard should parse");
 
         match cli.command {
@@ -2518,7 +2518,7 @@ mod tests {
 
     #[test]
     fn gateway_cli_defaults_flags_to_false() {
-        let cli = Cli::try_parse_from(["zeroclaw", "gateway"]).expect("gateway should parse");
+        let cli = Cli::try_parse_from(["agentzero", "gateway"]).expect("gateway should parse");
 
         match cli.command {
             Commands::Gateway {
@@ -2549,7 +2549,7 @@ mod tests {
 
     #[test]
     fn onboard_cli_accepts_force_flag() {
-        let cli = Cli::try_parse_from(["zeroclaw", "onboard", "--force"])
+        let cli = Cli::try_parse_from(["agentzero", "onboard", "--force"])
             .expect("onboard --force should parse");
 
         match cli.command {
@@ -2560,7 +2560,7 @@ mod tests {
 
     #[test]
     fn onboard_cli_accepts_no_totp_flag() {
-        let cli = Cli::try_parse_from(["zeroclaw", "onboard", "--no-totp"])
+        let cli = Cli::try_parse_from(["agentzero", "onboard", "--no-totp"])
             .expect("onboard --no-totp should parse");
 
         match cli.command {
@@ -2571,7 +2571,7 @@ mod tests {
 
     #[test]
     fn cli_parses_estop_default_engage() {
-        let cli = Cli::try_parse_from(["zeroclaw", "estop"]).expect("estop command should parse");
+        let cli = Cli::try_parse_from(["agentzero", "estop"]).expect("estop command should parse");
 
         match cli.command {
             Commands::Estop {
@@ -2591,7 +2591,7 @@ mod tests {
 
     #[test]
     fn cli_parses_estop_resume_domain() {
-        let cli = Cli::try_parse_from(["zeroclaw", "estop", "resume", "--domain", "*.chase.com"])
+        let cli = Cli::try_parse_from(["agentzero", "estop", "resume", "--domain", "*.chase.com"])
             .expect("estop resume command should parse");
 
         match cli.command {
@@ -2617,15 +2617,15 @@ mod tests {
             .write_long_help(&mut output)
             .expect("help generation should succeed");
         let help = String::from_utf8(output).expect("help output should be utf-8");
-        assert!(help.contains("zeroclaw config show"));
-        assert!(help.contains("zeroclaw config get gateway.port"));
-        assert!(help.contains("zeroclaw config set gateway.port 8080"));
+        assert!(help.contains("agentzero config show"));
+        assert!(help.contains("agentzero config get gateway.port"));
+        assert!(help.contains("agentzero config set gateway.port 8080"));
     }
 
     #[test]
     fn config_cli_parses_show_get_set_subcommands() {
         let show =
-            Cli::try_parse_from(["zeroclaw", "config", "show"]).expect("config show should parse");
+            Cli::try_parse_from(["agentzero", "config", "show"]).expect("config show should parse");
         match show.command {
             Commands::Config {
                 config_command: ConfigCommands::Show,
@@ -2633,7 +2633,7 @@ mod tests {
             other => panic!("expected config show, got {other:?}"),
         }
 
-        let get = Cli::try_parse_from(["zeroclaw", "config", "get", "gateway.port"])
+        let get = Cli::try_parse_from(["agentzero", "config", "get", "gateway.port"])
             .expect("config get should parse");
         match get.command {
             Commands::Config {
@@ -2642,7 +2642,7 @@ mod tests {
             other => panic!("expected config get, got {other:?}"),
         }
 
-        let set = Cli::try_parse_from(["zeroclaw", "config", "set", "gateway.port", "8080"])
+        let set = Cli::try_parse_from(["agentzero", "config", "set", "gateway.port", "8080"])
             .expect("config set should parse");
         match set.command {
             Commands::Config {

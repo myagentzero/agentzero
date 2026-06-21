@@ -131,10 +131,10 @@ private fun DashboardContent(status: StatusResponse, cost: CostSummary) {
             }
         }
 
-        CollapsibleCard("Token Statistics", tokensOpen, { tokensOpen = !tokensOpen }) {
+        CollapsibleCard("Token Statistics (24h)", tokensOpen, { tokensOpen = !tokensOpen }) {
             val avg = if (cost.requestCount > 0) cost.totalTokens / cost.requestCount else 0
             val costPer1k = if (cost.totalTokens > 0) {
-                (cost.monthlyCostUsd / cost.totalTokens) * 1000
+                (cost.dailyCostUsd / cost.totalTokens) * 1000
             } else 0.0
             Text("Total Tokens: ${cost.totalTokens}")
             Text("Avg Tokens / Request: $avg")

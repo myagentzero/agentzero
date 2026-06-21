@@ -12,8 +12,8 @@ use crate::support::helpers::{
     tool_response,
 };
 use crate::support::{CountingTool, EchoTool, MockProvider, RecordingProvider};
-use zeroclaw::providers::traits::ChatMessage;
-use zeroclaw::providers::{ChatResponse, ConversationMessage, ToolCall};
+use agentzero::providers::traits::ChatMessage;
+use agentzero::providers::{ChatResponse, ConversationMessage, ToolCall};
 
 // ═════════════════════════════════════════════════════════════════════════════
 // E2E smoke tests — full agent turn cycle

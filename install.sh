@@ -417,22 +417,22 @@ install_prebuilt_binary() {
     return 1
   fi
 
-  extracted_bin="$temp_dir/zeroclaw"
+  extracted_bin="$temp_dir/agentzero"
   if [[ ! -x "$extracted_bin" ]]; then
-    extracted_bin="$(find "$temp_dir" -maxdepth 2 -type f -name zeroclaw -perm -u+x | head -n 1 || true)"
+    extracted_bin="$(find "$temp_dir" -maxdepth 2 -type f \( -name agentzero -o -name zeroclaw \) -perm -u+x | head -n 1 || true)"
   fi
   if [[ -z "$extracted_bin" || ! -x "$extracted_bin" ]]; then
-    warn "Archive did not contain an executable zeroclaw binary."
+    warn "Archive did not contain an executable agentzero binary."
     rm -rf "$temp_dir"
     return 1
   fi
 
   install_dir="$HOME/.cargo/bin"
   mkdir -p "$install_dir"
-  install -m 0755 "$extracted_bin" "$install_dir/zeroclaw"
+  install -m 0755 "$extracted_bin" "$install_dir/agentzero"
   rm -rf "$temp_dir"
 
-  step_ok "Installed pre-built binary to $install_dir/zeroclaw"
+  step_ok "Installed pre-built binary to $install_dir/agentzero"
   if [[ ":$PATH:" != *":$install_dir:"* ]]; then
     warn "$install_dir is not in PATH for this shell."
     warn "Run: export PATH=\"$install_dir:\$PATH\""
@@ -1393,7 +1393,13 @@ step_ok "Detected: ${BOLD}$(echo "$OS_NAME" | tr '[:upper:]' '[:lower:]')${RESET
 # --- Detect existing installation and version ---
 EXISTING_VERSION=""
 INSTALL_MODE="fresh"
-if have_cmd zeroclaw; then
+if have_cmd agentzero; then
+  EXISTING_VERSION="$(agentzero --version 2>/dev/null | awk '{print $NF}' || true)"
+  INSTALL_MODE="upgrade"
+elif [[ -x "$HOME/.cargo/bin/agentzero" ]]; then
+  EXISTING_VERSION="$("$HOME/.cargo/bin/agentzero" --version 2>/dev/null | awk '{print $NF}' || true)"
+  INSTALL_MODE="upgrade"
+elif have_cmd zeroclaw; then
   EXISTING_VERSION="$(zeroclaw --version 2>/dev/null | awk '{print $NF}' || true)"
   INSTALL_MODE="upgrade"
 elif [[ -x "$HOME/.cargo/bin/zeroclaw" ]]; then
@@ -1555,7 +1561,7 @@ else
 fi
 
 if [[ "$SKIP_INSTALL" == false ]]; then
-  step_dot "Installing zeroclaw to cargo bin"
+  step_dot "Installing agentzero to cargo bin"
 
   # Clean up stale cargo install tracking from the old "zeroclaw" package name
   # (renamed to "zeroclawlabs"). Without this, `cargo install zeroclawlabs` from
@@ -1572,7 +1578,7 @@ if [[ "$SKIP_INSTALL" == false ]]; then
 
   # Sync binary to ~/.local/bin so PATH lookups find the fresh version
   if [[ -d "$HOME/.local/bin" ]]; then
-    cp -f "$HOME/.cargo/bin/zeroclaw" "$HOME/.local/bin/zeroclaw" 2>/dev/null && \
+    cp -f "$HOME/.cargo/bin/agentzero" "$HOME/.local/bin/agentzero" 2>/dev/null && \
       step_ok "Synced binary to ~/.local/bin" || true
   fi
 else
@@ -1659,7 +1665,13 @@ elif [[ "$DEVICE_CLASS" != "desktop" ]]; then
 fi
 
 ZEROCLAW_BIN=""
-if [[ -x "$HOME/.cargo/bin/zeroclaw" ]]; then
+if [[ -x "$HOME/.cargo/bin/agentzero" ]]; then
+  ZEROCLAW_BIN="$HOME/.cargo/bin/agentzero"
+elif [[ -x "$WORK_DIR/target/release/agentzero" ]]; then
+  ZEROCLAW_BIN="$WORK_DIR/target/release/agentzero"
+elif have_cmd agentzero; then
+  ZEROCLAW_BIN="agentzero"
+elif [[ -x "$HOME/.cargo/bin/zeroclaw" ]]; then
   ZEROCLAW_BIN="$HOME/.cargo/bin/zeroclaw"
 elif [[ -x "$WORK_DIR/target/release/zeroclaw" ]]; then
   ZEROCLAW_BIN="$WORK_DIR/target/release/zeroclaw"
@@ -1762,9 +1774,9 @@ else
   echo -e "${BOLD_BLUE}${CRAB} ZeroClaw installed successfully!${RESET}"
 fi
 
-if [[ -x "$HOME/.cargo/bin/zeroclaw" ]] && ! have_cmd zeroclaw; then
+if [[ -x "$HOME/.cargo/bin/agentzero" ]] && ! have_cmd agentzero; then
   echo
-  warn "zeroclaw is installed in $HOME/.cargo/bin, but that directory is not in PATH for this shell."
+  warn "agentzero is installed in $HOME/.cargo/bin, but that directory is not in PATH for this shell."
   warn 'Run: export PATH="$HOME/.cargo/bin:$PATH"'
   step_dot "To persist it, add that export line to ~/.bashrc, ~/.zshrc, or your shell profile, then open a new shell."
 fi

@@ -5,8 +5,8 @@ members = [
 resolver = "2"
 
 [package]
-name = "zeroclaw"
-version = "0.2.44"
+name = "agentzero"
+version = "0.2.45"
 edition = "2024"
 build = "build.rs"
 authors = ["myagentzero"]
@@ -17,6 +17,10 @@ readme = "README.md"
 keywords = ["ai", "agent", "cli", "assistant", "chatbot"]
 categories = ["command-line-utilities", "api-bindings"]
 rust-version = "1.87"
+
+[[bin]]
+name = "agentzero"
+path = "src/main.rs"
 
 [dependencies]
 # CLI - minimal and fast

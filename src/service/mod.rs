@@ -833,7 +833,7 @@ fn warn_if_binary_in_home(exe_path: &Path) {
         eprintln!(
             "⚠️  Warning: Binary path '{}' appears to be in a user home directory.\n\
              For system-wide OpenRC service, consider installing to /usr/local/bin:\n\
-             sudo cp '{}' /usr/local/bin/zeroclaw",
+             sudo cp '{}' /usr/local/bin/agentzero",
             exe_path.display(),
             exe_path.display()
         );
@@ -868,7 +868,7 @@ depend() {{
 }
 
 fn resolve_openrc_executable() -> Result<PathBuf> {
-    let preferred = Path::new("/usr/local/bin/zeroclaw");
+    let preferred = Path::new("/usr/local/bin/agentzero");
     if preferred.exists() {
         return Ok(preferred.to_path_buf());
     }
@@ -1256,13 +1256,13 @@ mod tests {
     fn generate_openrc_script_contains_required_directives() {
         use std::path::PathBuf;
 
-        let exe_path = PathBuf::from("/usr/local/bin/zeroclaw");
+        let exe_path = PathBuf::from("/usr/local/bin/agentzero");
         let script = generate_openrc_script(&exe_path, Path::new("/etc/zeroclaw"));
 
         assert!(script.starts_with("#!/sbin/openrc-run"));
         assert!(script.contains("name=\"zeroclaw\""));
         assert!(script.contains("description=\"ZeroClaw daemon\""));
-        assert!(script.contains("command=\"/usr/local/bin/zeroclaw\""));
+        assert!(script.contains("command=\"/usr/local/bin/agentzero\""));
         assert!(script.contains("command_args=\"--config-dir /etc/zeroclaw daemon\""));
         assert!(!script.contains("env ZEROCLAW_CONFIG_DIR"));
         assert!(!script.contains("env ZEROCLAW_WORKSPACE"));
@@ -1281,14 +1281,14 @@ mod tests {
     fn warn_if_binary_in_home_detects_home_path() {
         use std::path::PathBuf;
 
-        let home_path = PathBuf::from("/home/user/.cargo/bin/zeroclaw");
+        let home_path = PathBuf::from("/home/user/.cargo/bin/agentzero");
         assert!(home_path.to_string_lossy().contains("/home/"));
         assert!(home_path.to_string_lossy().contains(".cargo/bin"));
 
-        let cargo_path = PathBuf::from("/home/user/.cargo/bin/zeroclaw");
+        let cargo_path = PathBuf::from("/home/user/.cargo/bin/agentzero");
         assert!(cargo_path.to_string_lossy().contains(".cargo/bin"));
 
-        let system_path = PathBuf::from("/usr/local/bin/zeroclaw");
+        let system_path = PathBuf::from("/usr/local/bin/agentzero");
         assert!(!system_path.to_string_lossy().contains("/home/"));
         assert!(!system_path.to_string_lossy().contains(".cargo/bin"));
     }

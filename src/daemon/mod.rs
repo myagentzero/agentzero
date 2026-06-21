@@ -205,10 +205,7 @@ pub async fn run(config: Config, host: String, port: u16) -> Result<()> {
         tracing::info!("Cron disabled; scheduler supervisor not started");
     }
 
-    println!("🦀 ZeroClaw daemon started");
-    println!("   Gateway:  http://{host}:{port}");
-    println!("   Components: gateway, channels, heartbeat, scheduler");
-    println!("   {}", shutdown_hint());
+    tracing::info!("🦀 AgentZero daemon started");
 
     let signal = wait_for_shutdown_signal().await?;
     crate::health::mark_component_error("daemon", shutdown_reason(signal));

@@ -279,7 +279,7 @@ export default function Dashboard() {
 
         <CollapsibleSection
           title="Token Statistics"
-          subtitle="Total tokens, average per request, and cost per 1K tokens"
+          subtitle="Last 24 hours — tokens, average per request, and cost per 1K tokens"
           icon={Hash}
           sectionKey="tokens"
           openState={sectionsOpen}
@@ -299,10 +299,10 @@ export default function Dashboard() {
               </p>
             </div>
             <div className="rounded-xl border border-[#1d3770] bg-[#05112c]/90 px-4 py-3">
-              <p className="text-xs uppercase tracking-[0.12em] text-[#7ea5eb]">Cost per 1K Tokens</p>
+              <p className="text-xs uppercase tracking-[0.12em] text-[#7ea5eb]">Cost per 1K Tokens (24h)</p>
               <p className="mt-2 text-lg font-semibold text-white">
                 {cost.total_tokens > 0
-                  ? formatUSD((cost.monthly_cost_usd / cost.total_tokens) * 1000)
+                  ? formatUSD((cost.daily_cost_usd / cost.total_tokens) * 1000)
                   : '$0.0000'}
               </p>
             </div>

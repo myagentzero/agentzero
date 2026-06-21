@@ -510,26 +510,26 @@ pub async fn run_gateway(
     if let Some(ref tun) = tunnel {
         match tun.start(host, actual_port).await {
             Ok(url) => {
-                println!("  🔗 Tunnel active: {url}");
+                tracing::info!("🔗 Tunnel active: {url}");
             }
             Err(e) => {
-                println!("   ⚠️  Tunnel failed to start: {e}");
-                println!("   Falling back to local-only mode.");
+                tracing::warn!("⚠️  Tunnel failed to start: {e}");
+                tracing::warn!("Falling back to local-only mode.");
             }
         }
     }
 
     if let Some(code) = pairing.pairing_code() {
-        println!();
-        println!("  🔐 PAIRING REQUIRED — use this one-time code:");
-        println!("     ┌──────────────┐");
-        println!("        {code}");
-        println!("     └──────────────┘");
-        println!("     Send: POST /pair with header X-Pairing-Code: {code}");
+        tracing::info!("");
+        tracing::info!("🔐 PAIRING REQUIRED — use this one-time code:");
+        tracing::info!("   ┌──────────────┐");
+        tracing::info!("      {code}");
+        tracing::info!("   └──────────────┘");
+        tracing::info!("Send: POST /pair with header X-Pairing-Code: {code}");
     } else if pairing.require_pairing() {
-        println!("  🔒 Pairing: ACTIVE (bearer token required)");
+        tracing::info!("🔒 Pairing: ACTIVE (bearer token required)");
     } else {
-        println!("  ⚠️  Pairing: DISABLED (all requests accepted)");
+        tracing::warn!("⚠️  Pairing: DISABLED (all requests accepted)");
     }
 
     crate::health::mark_component_ok("gateway");
