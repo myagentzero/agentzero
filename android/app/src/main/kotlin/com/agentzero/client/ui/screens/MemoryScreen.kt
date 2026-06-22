@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -158,10 +159,16 @@ fun MemoryScreen(config: ServerConfig, container: AppContainer) {
             confirmButton = { TextButton(onClick = { selected = null }) { Text("Close") } },
             title = { Text(entry.key) },
             text = {
-                Column {
-                    Text("Category: ${entry.category}")
-                    Text("Created: ${formatDate(entry.timestamp)}")
-                    Text(entry.content)
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 400.dp),
+                ) {
+                    item {
+                        Text("Category: ${entry.category}")
+                        Text("Created: ${formatDate(entry.timestamp)}")
+                        Text(entry.content)
+                    }
                 }
             },
         )
