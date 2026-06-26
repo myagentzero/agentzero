@@ -38,14 +38,14 @@ mod execution;
 pub(crate) mod history;
 mod parsing;
 
+use super::context_compressor::ContextCompressor;
+use super::history_pruner::{prune_history, remove_orphaned_tool_messages};
 use context::build_injected_context;
 use detection::{DetectionVerdict, LoopDetectionConfig, LoopDetector};
 use execution::{
     ToolExecutionOutcome, execute_tools_parallel, execute_tools_sequential,
     should_execute_tools_in_parallel,
 };
-use super::context_compressor::ContextCompressor;
-use super::history_pruner::{prune_history, remove_orphaned_tool_messages};
 use history::{TurnBuffer, auto_compact_history, extract_facts_from_turns, trim_history};
 #[cfg(test)]
 use history::{apply_compaction_summary, build_compaction_transcript};
@@ -262,9 +262,29 @@ pub(crate) const DRAFT_PROGRESS_SENTINEL: &str = "\x00PROGRESS\x00";
 /// Sentinel prefix for full in-place progress blocks.
 pub(crate) const DRAFT_PROGRESS_BLOCK_SENTINEL: &str = "\x00PROGRESS_BLOCK\x00";
 /// Progress-section marker inserted into accumulated streaming drafts.
+pub(crate) fn record_tool_usage_from_context(tool_name: &str) {
+    let Ok(Some(workspace_dir)) = TOOL_LOOP_WORKSPACE_DIR.try_with(|dir| dir.clone()) else {
+        return;
+    };
+    crate::tools::usage_tracker::record_tool_usage(&workspace_dir, tool_name);
+}
+
+pub(crate) async fn scope_workspace_dir<F>(workspace_dir: std::path::PathBuf, fut: F) -> F::Output
+where
+    F: Future,
+{
+    TOOL_LOOP_WORKSPACE_DIR
+        .scope(Some(workspace_dir), fut)
+        .await
+}
+
 pub(crate) const DRAFT_PROGRESS_SECTION_START: &str = "\n<!-- progress-start -->\n";
 /// Progress-section marker inserted into accumulated streaming drafts.
 pub(crate) const DRAFT_PROGRESS_SECTION_END: &str = "\n<!-- progress-end -->\n";
+
+tokio::task_local! {
+    static TOOL_LOOP_WORKSPACE_DIR: Option<std::path::PathBuf>;
+}
 
 tokio::task_local! {
     static TOOL_LOOP_REPLY_TARGET: Option<String>;
@@ -3176,227 +3196,231 @@ async fn process_message_core(
     board_names: &[String],
     overrides: Option<&CliOverrides<'_>>,
 ) -> Result<(String, Vec<ChatMessage>)> {
-    // ── Research phase ──────────────────────────────────────────
-    let verbose_research = overrides.map_or(false, |o| o.research_verbose);
-    let research_temperature = overrides.map_or(config.default_temperature, |o| o.temperature);
-    let research_context = if crate::agent::research::should_trigger(&config.research, message) {
-        if verbose_research {
-            println!("[Research] Gathering information...");
-        }
-        match crate::agent::research::run_research_phase(
-            &config.research,
-            provider.as_ref(),
-            &tools_registry,
-            message,
-            model_name,
-            research_temperature,
-            observer.clone(),
-        )
-        .await
+    scope_workspace_dir(config.workspace_dir.clone(), async {
+        // ── Research phase ──────────────────────────────────────────
+        let verbose_research = overrides.map_or(false, |o| o.research_verbose);
+        let research_temperature = overrides.map_or(config.default_temperature, |o| o.temperature);
+        let research_context = if crate::agent::research::should_trigger(&config.research, message)
         {
-            Ok(result) => {
-                if verbose_research {
-                    println!(
-                        "[Research] Complete: {} tool calls, {} chars context",
-                        result.tool_call_count,
-                        result.context.len()
-                    );
-                    for summary in &result.tool_summaries {
-                        println!("  - {}: {}", summary.tool_name, summary.result_preview);
+            if verbose_research {
+                println!("[Research] Gathering information...");
+            }
+            match crate::agent::research::run_research_phase(
+                &config.research,
+                provider.as_ref(),
+                &tools_registry,
+                message,
+                model_name,
+                research_temperature,
+                observer.clone(),
+            )
+            .await
+            {
+                Ok(result) => {
+                    if verbose_research {
+                        println!(
+                            "[Research] Complete: {} tool calls, {} chars context",
+                            result.tool_call_count,
+                            result.context.len()
+                        );
+                        for summary in &result.tool_summaries {
+                            println!("  - {}: {}", summary.tool_name, summary.result_preview);
+                        }
+                    }
+                    if result.context.is_empty() {
+                        None
+                    } else {
+                        Some(result.context)
                     }
                 }
-                if result.context.is_empty() {
+                Err(e) => {
+                    tracing::warn!("Research phase failed: {}", e);
                     None
-                } else {
-                    Some(result.context)
                 }
             }
-            Err(e) => {
-                tracing::warn!("Research phase failed: {}", e);
-                None
-            }
-        }
-    } else {
-        None
-    };
-
-    let context = build_injected_context(
-        config,
-        mem.as_ref(),
-        message,
-        session_id,
-        hardware_rag,
-        board_names,
-    )
-    .await;
-    let enriched = match (&context, &research_context) {
-        (c, Some(r)) if !c.is_empty() => format!("{c}\n\n{r}\n\n{message}"),
-        (_, Some(r)) => format!("{r}\n\n{message}"),
-        (c, None) if !c.is_empty() => format!("{c}{message}"),
-        _ => message.to_string(),
-    };
-
-    // ── Classify model route ────────────────────────────────────
-    let route_model_by_hint: std::collections::HashMap<String, String> = config
-        .model_routes
-        .iter()
-        .map(|route| (route.hint.clone(), route.model.clone()))
-        .collect();
-    let available_hints: Vec<String> = route_model_by_hint.keys().cloned().collect();
-    let effective_model = classify_model_route(
-        &config.query_classification,
-        &available_hints,
-        &route_model_by_hint,
-        model_name,
-        message,
-    );
-
-    let mut history = vec![
-        ChatMessage::system(&system_prompt),
-        ChatMessage::user(&enriched),
-    ];
-
-    let temperature = overrides.map_or(config.default_temperature, |o| o.temperature);
-    let response = if let Some(cli_overrides) = overrides {
-        // CLI mode: use full run_tool_call_loop with all scopes
-        let ld_cfg = LoopDetectionConfig {
-            no_progress_threshold: config.agent.loop_detection_no_progress_threshold,
-            ping_pong_cycles: config.agent.loop_detection_ping_pong_cycles,
-            failure_streak_threshold: config.agent.loop_detection_failure_streak,
-        };
-        let hb_cfg = if config.agent.safety_heartbeat_interval > 0 {
-            Some(SafetyHeartbeatConfig {
-                body: security.summary_for_heartbeat(),
-                interval: config.agent.safety_heartbeat_interval,
-            })
         } else {
             None
         };
-        scope_cost_enforcement_context(
-            cost_enforcement_context,
-            SAFETY_HEARTBEAT_CONFIG.scope(
-                hb_cfg,
-                LOOP_DETECTION_CONFIG.scope(
-                    ld_cfg,
-                    TOOL_LOOP_CANARY_TOKENS_ENABLED.scope(
-                        cli_overrides.canary_tokens,
-                        run_tool_call_loop(
-                            provider.as_ref(),
-                            &mut history,
-                            &tools_registry,
-                            observer.as_ref(),
-                            provider_name,
-                            &effective_model,
-                            temperature,
-                            false,
-                            cli_overrides.approval_manager.as_ref().map(|arc| &**arc),
-                            cli_overrides.channel_name,
-                            &config.multimodal,
-                            config.agent.max_tool_iterations,
-                            None,
-                            None,
-                            cli_overrides.hooks,
-                            &[],
+
+        let context = build_injected_context(
+            config,
+            mem.as_ref(),
+            message,
+            session_id,
+            hardware_rag,
+            board_names,
+        )
+        .await;
+        let enriched = match (&context, &research_context) {
+            (c, Some(r)) if !c.is_empty() => format!("{c}\n\n{r}\n\n{message}"),
+            (_, Some(r)) => format!("{r}\n\n{message}"),
+            (c, None) if !c.is_empty() => format!("{c}{message}"),
+            _ => message.to_string(),
+        };
+
+        // ── Classify model route ────────────────────────────────────
+        let route_model_by_hint: std::collections::HashMap<String, String> = config
+            .model_routes
+            .iter()
+            .map(|route| (route.hint.clone(), route.model.clone()))
+            .collect();
+        let available_hints: Vec<String> = route_model_by_hint.keys().cloned().collect();
+        let effective_model = classify_model_route(
+            &config.query_classification,
+            &available_hints,
+            &route_model_by_hint,
+            model_name,
+            message,
+        );
+
+        let mut history = vec![
+            ChatMessage::system(&system_prompt),
+            ChatMessage::user(&enriched),
+        ];
+
+        let temperature = overrides.map_or(config.default_temperature, |o| o.temperature);
+        let response = if let Some(cli_overrides) = overrides {
+            // CLI mode: use full run_tool_call_loop with all scopes
+            let ld_cfg = LoopDetectionConfig {
+                no_progress_threshold: config.agent.loop_detection_no_progress_threshold,
+                ping_pong_cycles: config.agent.loop_detection_ping_pong_cycles,
+                failure_streak_threshold: config.agent.loop_detection_failure_streak,
+            };
+            let hb_cfg = if config.agent.safety_heartbeat_interval > 0 {
+                Some(SafetyHeartbeatConfig {
+                    body: security.summary_for_heartbeat(),
+                    interval: config.agent.safety_heartbeat_interval,
+                })
+            } else {
+                None
+            };
+            scope_cost_enforcement_context(
+                cost_enforcement_context,
+                SAFETY_HEARTBEAT_CONFIG.scope(
+                    hb_cfg,
+                    LOOP_DETECTION_CONFIG.scope(
+                        ld_cfg,
+                        TOOL_LOOP_CANARY_TOKENS_ENABLED.scope(
+                            cli_overrides.canary_tokens,
+                            run_tool_call_loop(
+                                provider.as_ref(),
+                                &mut history,
+                                &tools_registry,
+                                observer.as_ref(),
+                                provider_name,
+                                &effective_model,
+                                temperature,
+                                false,
+                                cli_overrides.approval_manager.as_ref().map(|arc| &**arc),
+                                cli_overrides.channel_name,
+                                &config.multimodal,
+                                config.agent.max_tool_iterations,
+                                None,
+                                None,
+                                cli_overrides.hooks,
+                                &[],
+                            ),
                         ),
                     ),
                 ),
-            ),
-        )
-        .await?
-    } else {
-        // Channel mode: use simplified agent_turn
-        let hb_cfg = if config.agent.safety_heartbeat_interval > 0 {
-            Some(SafetyHeartbeatConfig {
-                body: security.summary_for_heartbeat(),
-                interval: config.agent.safety_heartbeat_interval,
-            })
+            )
+            .await?
         } else {
-            None
+            // Channel mode: use simplified agent_turn
+            let hb_cfg = if config.agent.safety_heartbeat_interval > 0 {
+                Some(SafetyHeartbeatConfig {
+                    body: security.summary_for_heartbeat(),
+                    interval: config.agent.safety_heartbeat_interval,
+                })
+            } else {
+                None
+            };
+            scope_cost_enforcement_context(
+                cost_enforcement_context,
+                SAFETY_HEARTBEAT_CONFIG.scope(
+                    hb_cfg,
+                    agent_turn(
+                        provider.as_ref(),
+                        &mut history,
+                        &tools_registry,
+                        observer.as_ref(),
+                        provider_name,
+                        &effective_model,
+                        temperature,
+                        true,
+                        &config.multimodal,
+                        config.agent.max_tool_iterations,
+                    ),
+                ),
+            )
+            .await?
         };
-        scope_cost_enforcement_context(
-            cost_enforcement_context,
-            SAFETY_HEARTBEAT_CONFIG.scope(
-                hb_cfg,
-                agent_turn(
-                    provider.as_ref(),
-                    &mut history,
-                    &tools_registry,
-                    observer.as_ref(),
-                    provider_name,
-                    &effective_model,
-                    temperature,
-                    true,
-                    &config.multimodal,
-                    config.agent.max_tool_iterations,
-                ),
-            ),
-        )
-        .await?
-    };
 
-    // ── Post-turn fact extraction ──────────────────────────────
-    if config.memory.auto_save {
-        let turns = vec![(message.to_owned(), response.clone())];
-        let _ = extract_facts_from_turns(
-            provider.as_ref(),
-            model_name,
-            &turns,
-            mem.as_ref(),
-            session_id,
-        )
-        .await;
-    }
-
-    // ── Auto-skill creation (CLI only, feature-gated) ──────────
-    #[cfg(feature = "skill-creation")]
-    if overrides.is_some() && config.skills.skill_creation.enabled {
-        let tool_calls = crate::skills::creator::extract_tool_calls_from_history(&history);
-        tracing::debug!(
-            tool_call_count = tool_calls.len(),
-            "Evaluating auto skill creation from execution history"
-        );
-
-        if tool_calls.len() >= 2 {
-            let creator = crate::skills::creator::SkillCreator::new(
-                config.workspace_dir.clone(),
-                config.skills.skill_creation.clone(),
-            );
-            tracing::debug!(
-                tool_call_count = tool_calls.len(),
-                "Attempting auto skill creation"
-            );
-
-            match creator
-                .create_from_execution(message, &tool_calls, None)
-                .await
-            {
-                Ok(Some(slug)) => {
-                    tracing::info!(
-                        slug,
-                        tool_call_count = tool_calls.len(),
-                        "Auto-created skill from execution"
-                    );
-                }
-                Ok(None) => {
-                    tracing::debug!(
-                        tool_call_count = tool_calls.len(),
-                        "Skill creation skipped by creator"
-                    );
-                }
-                Err(e) => tracing::warn!(
-                    tool_call_count = tool_calls.len(),
-                    "Skill creation failed: {e}"
-                ),
-            }
-        } else {
-            tracing::debug!(
-                tool_call_count = tool_calls.len(),
-                "Skill creation skipped: requires at least 2 tool calls"
-            );
+        // ── Post-turn fact extraction ──────────────────────────────
+        if config.memory.auto_save {
+            let turns = vec![(message.to_owned(), response.clone())];
+            let _ = extract_facts_from_turns(
+                provider.as_ref(),
+                model_name,
+                &turns,
+                mem.as_ref(),
+                session_id,
+            )
+            .await;
         }
-    }
 
-    Ok((response, history))
+        // ── Auto-skill creation (CLI only, feature-gated) ──────────
+        #[cfg(feature = "skill-creation")]
+        if overrides.is_some() && config.skills.skill_creation.enabled {
+            let tool_calls = crate::skills::creator::extract_tool_calls_from_history(&history);
+            tracing::debug!(
+                tool_call_count = tool_calls.len(),
+                "Evaluating auto skill creation from execution history"
+            );
+
+            if tool_calls.len() >= 2 {
+                let creator = crate::skills::creator::SkillCreator::new(
+                    config.workspace_dir.clone(),
+                    config.skills.skill_creation.clone(),
+                );
+                tracing::debug!(
+                    tool_call_count = tool_calls.len(),
+                    "Attempting auto skill creation"
+                );
+
+                match creator
+                    .create_from_execution(message, &tool_calls, None)
+                    .await
+                {
+                    Ok(Some(slug)) => {
+                        tracing::info!(
+                            slug,
+                            tool_call_count = tool_calls.len(),
+                            "Auto-created skill from execution"
+                        );
+                    }
+                    Ok(None) => {
+                        tracing::debug!(
+                            tool_call_count = tool_calls.len(),
+                            "Skill creation skipped by creator"
+                        );
+                    }
+                    Err(e) => tracing::warn!(
+                        tool_call_count = tool_calls.len(),
+                        "Skill creation failed: {e}"
+                    ),
+                }
+            } else {
+                tracing::debug!(
+                    tool_call_count = tool_calls.len(),
+                    "Skill creation skipped: requires at least 2 tool calls"
+                );
+            }
+        }
+
+        Ok((response, history))
+    })
+    .await
 }
 
 pub async fn process_message_with_session(

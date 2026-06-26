@@ -314,6 +314,7 @@ impl Tool for SubAgentSpawnTool {
         let is_agentic = agent_config.agentic;
         let parent_tools = self.parent_tools.clone();
         let multimodal_config = self.multimodal_config.clone();
+        let workspace_dir = self.security.workspace_dir.clone();
         let mut load_lease = self.load_tracker.start(&agent_name_owned);
 
         // Atomically check concurrent limit and register session to prevent race conditions.
@@ -357,6 +358,7 @@ impl Tool for SubAgentSpawnTool {
                     &full_prompt,
                     &parent_tools,
                     &multimodal_config,
+                    workspace_dir,
                 )
                 .await
             } else {
@@ -515,6 +517,7 @@ async fn run_agentic_background(
     full_prompt: &str,
     parent_tools: &[Arc<dyn Tool>],
     multimodal_config: &crate::config::MultimodalConfig,
+    workspace_dir: std::path::PathBuf,
 ) -> anyhow::Result<ToolResult> {
     if agent_config.allowed_tools.is_empty() {
         return Ok(ToolResult {
@@ -566,23 +569,26 @@ async fn run_agentic_background(
 
     let result = tokio::time::timeout(
         Duration::from_secs(SPAWN_TIMEOUT_SECS),
-        crate::agent::loop_::run_tool_call_loop(
-            provider,
-            &mut history,
-            &sub_tools,
-            &noop_observer,
-            &agent_config.provider,
-            &agent_config.model,
-            temperature,
-            true,
-            None,
-            "subagent_spawn",
-            multimodal_config,
-            agent_config.max_iterations,
-            None,
-            None,
-            None,
-            &[],
+        crate::agent::loop_::scope_workspace_dir(
+            workspace_dir,
+            crate::agent::loop_::run_tool_call_loop(
+                provider,
+                &mut history,
+                &sub_tools,
+                &noop_observer,
+                &agent_config.provider,
+                &agent_config.model,
+                temperature,
+                true,
+                None,
+                "subagent_spawn",
+                multimodal_config,
+                agent_config.max_iterations,
+                None,
+                None,
+                None,
+                &[],
+            ),
         ),
     )
     .await;

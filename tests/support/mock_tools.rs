@@ -1,10 +1,10 @@
 //! Shared mock tool implementations for integration tests.
 
+use agentzero::tools::{Tool, ToolResult};
 use anyhow::Result;
 use async_trait::async_trait;
 use serde_json::json;
 use std::sync::{Arc, Mutex};
-use agentzero::tools::{Tool, ToolResult};
 
 /// Simple tool that echoes its input argument.
 pub struct EchoTool;

@@ -517,7 +517,6 @@ pub trait Provider: Send + Sync {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

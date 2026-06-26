@@ -883,7 +883,9 @@ pub(super) fn map_tool_name_alias(tool_name: &str) -> &str {
         // File tool variations
         "fileread" | "file_read" | "readfile" | "read_file" | "file" => "file_read",
         "filewrite" | "file_write" | "writefile" | "write_file" => "file_write",
-        "filelist" | "file_list" | "listfiles" | "list_files" | "list_dir" | "listdir" | "ls" => "file_list",
+        "filelist" | "file_list" | "listfiles" | "list_files" | "list_dir" | "listdir" | "ls" => {
+            "file_list"
+        }
         // Content search variations (ripgrep/grep)
         "contentsearch" | "content_search" | "ripgrep" | "rg" | "grep" => "content_search",
         // Memory variations

@@ -369,7 +369,8 @@ impl Agent {
             config.api_key.as_deref(),
             config,
         );
-        let tools = crate::agent::tools_registry::filter_primary_agent_tools_or_fail(config, tools)?;
+        let tools =
+            crate::agent::tools_registry::filter_primary_agent_tools_or_fail(config, tools)?;
 
         let provider_name = config.default_provider.as_deref().unwrap_or("openrouter");
 
@@ -477,26 +478,31 @@ impl Agent {
 
         let (result, success) =
             if let Some(tool) = self.tools.iter().find(|t| t.name() == call.name) {
+                crate::tools::usage_tracker::record_tool_usage(&self.workspace_dir, &call.name);
                 match tool.execute(call.arguments.clone()).await {
                     Ok(r) => {
+                        let output = if r.success {
+                            r.output.clone()
+                        } else {
+                            format!("Error: {}", r.error.unwrap_or(r.output))
+                        };
                         self.observer.record_event(&ObserverEvent::ToolCall {
                             tool: call.name.clone(),
                             duration: start.elapsed(),
                             success: r.success,
+                            output: Some(output.clone()),
                         });
-                        if r.success {
-                            (r.output, true)
-                        } else {
-                            (format!("Error: {}", r.error.unwrap_or(r.output)), false)
-                        }
+                        (output, r.success)
                     }
                     Err(e) => {
+                        let output = format!("Error executing {}: {e}", call.name);
                         self.observer.record_event(&ObserverEvent::ToolCall {
                             tool: call.name.clone(),
                             duration: start.elapsed(),
                             success: false,
+                            output: Some(output.clone()),
                         });
-                        (format!("Error executing {}: {e}", call.name), false)
+                        (output, false)
                     }
                 }
             } else {

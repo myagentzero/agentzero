@@ -27,10 +27,16 @@ export interface ComponentHealth {
   restart_count: number;
 }
 
+export interface ToolUsage {
+  call_count: number;
+  last_called: string;
+}
+
 export interface ToolSpec {
   name: string;
   description: string;
   parameters: any;
+  usage?: ToolUsage | null;
 }
 
 export interface CronJobDelivery {

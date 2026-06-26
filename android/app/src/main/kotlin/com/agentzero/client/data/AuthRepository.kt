@@ -4,7 +4,6 @@ import android.content.Context
 import android.content.SharedPreferences
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
-import com.agentzero.client.data.model.PublicHealth
 import com.agentzero.client.data.model.ServerConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -46,20 +45,20 @@ class AuthRepository(context: Context) {
         }
 
         if (!health.requirePairing) {
-            return@withContext AuthState.Authenticated(requiresToken = false)
+            return@withContext AuthState.Authenticated
         }
 
         val token = getToken()
         if (token.isNullOrBlank()) {
-            return@withContext AuthState.NeedsPairing(health)
+            return@withContext AuthState.NeedsPairing
         }
 
-        AuthState.Authenticated(requiresToken = true)
+        AuthState.Authenticated
     }
 
     sealed interface AuthState {
-        data class Authenticated(val requiresToken: Boolean) : AuthState
-        data class NeedsPairing(val health: PublicHealth) : AuthState
+        data object Authenticated : AuthState
+        data object NeedsPairing : AuthState
         data class ServerUnreachable(val message: String) : AuthState
     }
 

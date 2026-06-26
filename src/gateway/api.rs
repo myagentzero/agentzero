@@ -230,14 +230,24 @@ pub async fn handle_api_tools(
         return e.into_response();
     }
 
+    let config_guard = state.config.lock();
+    let usage_stats = crate::tools::usage_tracker::load_usage_stats(&config_guard.workspace_dir);
+
     let tools: Vec<serde_json::Value> = state
         .tools_registry
         .iter()
         .map(|spec| {
+            let usage = usage_stats.get(&spec.name).map(|u| {
+                serde_json::json!({
+                    "call_count": u.call_count,
+                    "last_called": u.last_called.to_rfc3339(),
+                })
+            });
             serde_json::json!({
                 "name": spec.name,
                 "description": spec.description,
                 "parameters": spec.parameters,
+                "usage": usage,
             })
         })
         .collect();
@@ -261,10 +271,12 @@ pub async fn handle_api_skills(
     let skills_json: Vec<serde_json::Value> = skills
         .into_iter()
         .map(|s| {
-            let usage = usage_stats.get(&s.name).map(|u| serde_json::json!({
-                "call_count": u.call_count,
-                "last_called": u.last_called.to_rfc3339(),
-            }));
+            let usage = usage_stats.get(&s.name).map(|u| {
+                serde_json::json!({
+                    "call_count": u.call_count,
+                    "last_called": u.last_called.to_rfc3339(),
+                })
+            });
             serde_json::json!({
                 "name": s.name,
                 "description": s.description,
@@ -1226,7 +1238,9 @@ pub async fn handle_api_workspace_files(
 
 const VIEWABLE_EXTENSIONS: &[&str] = &["md", "json", "jsonl", "js", "py", "ps1", "txt", "svg"];
 const VIEWABLE_FILENAMES: &[&str] = &["license", "readme"];
-const DOWNLOADABLE_EXTENSIONS: &[&str] = &["pdf", "docx", "xlsx", "pptx", "png", "jpg", "jpeg", "gif", "zip", "tar", "gz"];
+const DOWNLOADABLE_EXTENSIONS: &[&str] = &[
+    "pdf", "docx", "xlsx", "pptx", "png", "jpg", "jpeg", "gif", "zip", "tar", "gz",
+];
 
 /// Maximum size of a workspace file served over the API (text or base64-encoded binary).
 const MAX_WORKSPACE_FILE_SIZE: u64 = 25 * 1024 * 1024;
@@ -1313,7 +1327,9 @@ pub async fn handle_api_workspace_file(
     if is_sensitive_file_path(StdPath::new(&rel)) {
         return (
             StatusCode::FORBIDDEN,
-            Json(serde_json::json!({"error": "Access to this file is blocked for security reasons"})),
+            Json(
+                serde_json::json!({"error": "Access to this file is blocked for security reasons"}),
+            ),
         )
             .into_response();
     }
@@ -1382,7 +1398,7 @@ pub async fn handle_api_workspace_file(
                 "ext": ext,
                 "encoding": "utf-8"
             }))
-                .into_response(),
+            .into_response(),
             Err(e) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(serde_json::json!({"error": format!("Failed to read file: {e}")})),
@@ -1401,7 +1417,7 @@ pub async fn handle_api_workspace_file(
                     "ext": ext,
                     "encoding": "base64"
                 }))
-                    .into_response()
+                .into_response()
             }
             Err(e) => (
                 StatusCode::INTERNAL_SERVER_ERROR,

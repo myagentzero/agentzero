@@ -289,9 +289,7 @@ pub(crate) fn build_tool_instructions(
          Never fabricate or guess tool results. Empty → \"No results found.\"; failed → report the error; uncertain → ask the user.\n\n",
     );
     if native_tools {
-        instructions.push_str(
-            "Available tools:\n\n",
-        );
+        instructions.push_str("Available tools:\n\n");
         for tool in tool_specs {
             let _ = writeln!(instructions, "- **{}**: {}", tool.name, tool.description);
         }
@@ -538,7 +536,8 @@ mod tests {
 
     #[test]
     fn inject_workspace_file_truncates_long_content() {
-        let ws = std::env::temp_dir().join(format!("agentzero_trunc_test_{}", uuid::Uuid::new_v4()));
+        let ws =
+            std::env::temp_dir().join(format!("agentzero_trunc_test_{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&ws).unwrap();
         std::fs::write(ws.join("BIG.md"), "a".repeat(100)).unwrap();
 
@@ -664,5 +663,4 @@ mod tests {
         assert!(instructions.contains("Parameters:\n```json"));
         assert!(instructions.contains("\"required\": [\n    \"name\"\n  ]"));
     }
-
 }

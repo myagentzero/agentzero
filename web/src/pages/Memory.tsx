@@ -10,7 +10,7 @@ import {
   Check,
 } from 'lucide-react';
 import type { MemoryEntry } from '@/types/api';
-import { getMemory, storeMemory, deleteMemory } from '@/lib/api';
+import { getMemory, storeMemory, deleteMemory, deleteMemories } from '@/lib/api';
 
 function truncate(text: string, max: number): string {
   if (text.length <= max) return text;
@@ -30,6 +30,9 @@ export default function Memory() {
   const [categoryFilter, setCategoryFilter] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
   const [selectedEntry, setSelectedEntry] = useState<MemoryEntry | null>(null);
   const [copied, setCopied] = useState(false);
 
@@ -51,6 +54,14 @@ export default function Memory() {
   useEffect(() => {
     fetchEntries();
   }, []);
+
+  useEffect(() => {
+    setSelectedKeys((prev) => {
+      const visible = new Set(entries.map((e) => e.key));
+      const next = new Set([...prev].filter((k) => visible.has(k)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [entries]);
 
   const handleSearch = () => {
     fetchEntries(search, categoryFilter);
@@ -91,10 +102,69 @@ export default function Memory() {
     try {
       await deleteMemory(key);
       setEntries((prev) => prev.filter((e) => e.key !== key));
+      setSelectedKeys((prev) => {
+        const next = new Set(prev);
+        next.delete(key);
+        return next;
+      });
+      if (selectedEntry?.key === key) {
+        setSelectedEntry(null);
+      }
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to delete memory');
     } finally {
       setConfirmDelete(null);
+    }
+  };
+
+  const toggleSelection = (key: string) => {
+    setSelectedKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  };
+
+  const allSelected =
+    entries.length > 0 && entries.every((e) => selectedKeys.has(e.key));
+  const someSelected = entries.some((e) => selectedKeys.has(e.key));
+
+  const toggleSelectAll = () => {
+    if (allSelected) {
+      setSelectedKeys(new Set());
+    } else {
+      setSelectedKeys(new Set(entries.map((e) => e.key)));
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    const keys = Array.from(selectedKeys);
+    if (keys.length === 0) return;
+
+    setBulkDeleting(true);
+    setError(null);
+    try {
+      const { failed } = await deleteMemories(keys);
+      const deleted = keys.filter((key) => !failed.includes(key));
+      setEntries((prev) => prev.filter((e) => !deleted.includes(e.key)));
+      setSelectedKeys(new Set(failed));
+      if (selectedEntry && deleted.includes(selectedEntry.key)) {
+        setSelectedEntry(null);
+      }
+      if (failed.length > 0) {
+        setError(
+          `Failed to delete ${failed.length} of ${keys.length} entries`,
+        );
+      }
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to delete memories');
+    } finally {
+      setBulkDeleting(false);
+      setConfirmBulkDelete(false);
     }
   };
 
@@ -162,6 +232,30 @@ export default function Memory() {
           Search
         </button>
       </div>
+
+      {/* Bulk actions */}
+      {selectedKeys.size > 0 && (
+        <div className="flex items-center justify-between rounded-lg bg-gray-900 border border-gray-700 px-4 py-3">
+          <span className="text-sm text-gray-300">
+            {selectedKeys.size} selected
+          </span>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setSelectedKeys(new Set())}
+              className="text-sm font-medium text-gray-300 hover:text-white transition-colors"
+            >
+              Clear
+            </button>
+            <button
+              onClick={() => setConfirmBulkDelete(true)}
+              className="flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+            >
+              <Trash2 className="h-4 w-4" />
+              Delete Selected
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Error banner (non-fatal) */}
       {error && (
@@ -254,6 +348,37 @@ export default function Memory() {
         </div>
       )}
 
+      {/* Bulk Delete Confirmation Modal */}
+      {confirmBulkDelete && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+          <div className="bg-gray-900 border border-gray-700 rounded-xl p-6 w-full max-w-md mx-4">
+            <h3 className="text-lg font-semibold text-white mb-2">
+              Delete {selectedKeys.size} memories?
+            </h3>
+            <p className="text-sm text-gray-400 mb-6">
+              This cannot be undone. Selected memory entries will be permanently
+              removed.
+            </p>
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => setConfirmBulkDelete(false)}
+                disabled={bulkDeleting}
+                className="px-4 py-2 text-sm font-medium text-gray-300 hover:text-white border border-gray-700 rounded-lg hover:bg-gray-800 transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleBulkDelete}
+                disabled={bulkDeleting}
+                className="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors disabled:opacity-50"
+              >
+                {bulkDeleting ? 'Deleting...' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Memory Table */}
       {loading ? (
         <div className="flex items-center justify-center h-32">
@@ -269,6 +394,18 @@ export default function Memory() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-800">
+                <th className="px-4 py-3 w-10">
+                  <input
+                    type="checkbox"
+                    checked={allSelected}
+                    ref={(el) => {
+                      if (el) el.indeterminate = someSelected && !allSelected;
+                    }}
+                    onChange={toggleSelectAll}
+                    className="rounded border-gray-600 bg-gray-800 text-blue-600 focus:ring-blue-500 focus:ring-offset-gray-900 cursor-pointer"
+                    aria-label="Select all memories"
+                  />
+                </th>
                 <th className="text-left px-4 py-3 text-gray-400 font-medium">
                   Key
                 </th>
@@ -291,8 +428,22 @@ export default function Memory() {
                 <tr
                   key={entry.id}
                   onClick={() => setSelectedEntry(entry)}
-                  className="border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors cursor-pointer"
+                  className={`border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors cursor-pointer ${
+                    selectedKeys.has(entry.key) ? 'bg-blue-900/10' : ''
+                  }`}
                 >
+                  <td
+                    className="px-4 py-3 w-10"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedKeys.has(entry.key)}
+                      onChange={() => toggleSelection(entry.key)}
+                      className="rounded border-gray-600 bg-gray-800 text-blue-600 focus:ring-blue-500 focus:ring-offset-gray-900 cursor-pointer"
+                      aria-label={`Select ${entry.key}`}
+                    />
+                  </td>
                   <td className="px-4 py-3 text-white font-medium font-mono text-xs">
                     {entry.key}
                   </td>

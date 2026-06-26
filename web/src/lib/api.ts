@@ -251,6 +251,14 @@ export function deleteMemory(key: string): Promise<void> {
   });
 }
 
+export async function deleteMemories(
+  keys: string[],
+): Promise<{ failed: string[] }> {
+  const results = await Promise.allSettled(keys.map((key) => deleteMemory(key)));
+  const failed = keys.filter((_, i) => results[i]?.status === 'rejected');
+  return { failed };
+}
+
 // ---------------------------------------------------------------------------
 // Paired Devices
 // ---------------------------------------------------------------------------

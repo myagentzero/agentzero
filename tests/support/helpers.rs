@@ -1,8 +1,5 @@
 //! Shared builder helpers for constructing test agents.
 
-use anyhow::Result;
-use async_trait::async_trait;
-use std::sync::Arc;
 use agentzero::agent::agent::Agent;
 use agentzero::agent::dispatcher::{NativeToolDispatcher, XmlToolDispatcher};
 use agentzero::agent::memory_loader::MemoryLoader;
@@ -12,6 +9,9 @@ use agentzero::memory::Memory;
 use agentzero::observability::{NoopObserver, Observer};
 use agentzero::providers::{ChatResponse, Provider, ToolCall};
 use agentzero::tools::Tool;
+use anyhow::Result;
+use async_trait::async_trait;
+use std::sync::Arc;
 
 /// Create an in-memory "none" backend for tests.
 pub fn make_memory() -> Arc<dyn Memory> {

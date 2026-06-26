@@ -87,7 +87,8 @@ impl SyscallAnomalyDetector {
     ) -> Self {
         let baseline = normalize_baseline(&config.baseline_syscalls);
         let anomaly_log_path = resolve_log_path(agentzero_dir.as_ref(), config.log_path.as_str());
-        let audit_logger = AuditLogger::new(audit_config, agentzero_dir.as_ref().to_path_buf()).ok();
+        let audit_logger =
+            AuditLogger::new(audit_config, agentzero_dir.as_ref().to_path_buf()).ok();
 
         Self {
             config,

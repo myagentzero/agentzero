@@ -21,8 +21,8 @@ use crate::providers::{self, ChatMessage, Provider};
 use crate::runtime;
 use crate::security::SecurityPolicy;
 use crate::security::pairing::{PairingGuard, constant_time_eq, is_public_bind};
-use crate::tools::traits::ToolSpec;
 use crate::tools::Tool;
+use crate::tools::traits::ToolSpec;
 use anyhow::{Context, Result};
 use axum::{
     Router,
@@ -473,7 +473,10 @@ pub async fn run_gateway(
     // Load persisted device metadata from workspace state directory
     let meta_path = paired_devices_meta_path(&config.workspace_dir);
     if let Ok(json) = tokio::fs::read_to_string(&meta_path).await {
-        if let Ok(meta_map) = serde_json::from_str::<std::collections::HashMap<String, crate::security::pairing::PairedDeviceMeta>>(&json) {
+        if let Ok(meta_map) = serde_json::from_str::<
+            std::collections::HashMap<String, crate::security::pairing::PairedDeviceMeta>,
+        >(&json)
+        {
             pairing.load_meta_from_file(meta_map);
         }
     }
@@ -910,7 +913,10 @@ fn paired_devices_meta_path(workspace_dir: &std::path::Path) -> std::path::PathB
     workspace_dir.join("state").join("paired_devices_meta.json")
 }
 
-pub async fn persist_pairing_meta(workspace_dir: &std::path::Path, pairing: &PairingGuard) -> Result<()> {
+pub async fn persist_pairing_meta(
+    workspace_dir: &std::path::Path,
+    pairing: &PairingGuard,
+) -> Result<()> {
     let meta = pairing.device_meta_snapshot();
     let path = paired_devices_meta_path(workspace_dir);
     // Use a unique temp name so concurrent writers (e.g. an overlapping /pair

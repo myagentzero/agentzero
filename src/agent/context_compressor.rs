@@ -247,7 +247,10 @@ impl ContextCompressor {
         // Fast-trim pass — may resolve overflow without an LLM call
         let chars_saved = self.fast_trim_tool_results(history);
         if chars_saved > 0 {
-            tracing::info!(chars_saved, "context_compressor: fast-trim saved chars from old tool results");
+            tracing::info!(
+                chars_saved,
+                "context_compressor: fast-trim saved chars from old tool results"
+            );
             let recheck = estimate_tokens(history);
             if recheck <= threshold {
                 return Ok(CompressionResult {
@@ -1011,7 +1014,12 @@ mod tests {
         ];
 
         let result = compressor
-            .compress_if_needed(&mut history, &provider, "default-vision-model", SUMMARIZER_TEMPERATURE)
+            .compress_if_needed(
+                &mut history,
+                &provider,
+                "default-vision-model",
+                SUMMARIZER_TEMPERATURE,
+            )
             .await
             .expect("compression should succeed");
 

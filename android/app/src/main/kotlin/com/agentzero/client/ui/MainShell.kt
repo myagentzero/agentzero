@@ -1,17 +1,19 @@
 package com.agentzero.client.ui
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.filled.Logout
-import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.MonitorHeart
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -44,6 +46,7 @@ import com.agentzero.client.ui.screens.DashboardScreen
 import com.agentzero.client.ui.screens.DevicesScreen
 import com.agentzero.client.ui.screens.MemoryScreen
 import com.agentzero.client.ui.screens.MissionControlScreen
+import com.agentzero.client.ui.screens.ScheduledJobsScreen
 import com.agentzero.client.ui.screens.WorkspaceScreen
 import kotlinx.coroutines.launch
 
@@ -52,9 +55,10 @@ enum class MainDestination(
     val icon: ImageVector,
 ) {
     Dashboard("Dashboard", Icons.Default.Dashboard),
-    AgentChat("Agent Chat", Icons.Default.Chat),
+    AgentChat("Agent Chat", Icons.AutoMirrored.Filled.Chat),
     MissionControl("Mission Control", Icons.Default.MonitorHeart),
     Memory("Memory", Icons.Default.Memory),
+    ScheduledJobs("Scheduled Jobs", Icons.Default.Schedule),
     Workspace("Workspace", Icons.Default.Folder),
     Devices("Devices", Icons.Default.Devices),
 }
@@ -117,6 +121,7 @@ fun MainShell(
                     MainDestination.AgentChat -> AgentChatScreen(config, container)
                     MainDestination.MissionControl -> MissionControlScreen(config, container)
                     MainDestination.Memory -> MemoryScreen(config, container)
+                    MainDestination.ScheduledJobs -> ScheduledJobsScreen(config, container)
                     MainDestination.Workspace -> WorkspaceScreen(config, container)
                     MainDestination.Devices -> DevicesScreen(config, container)
                 }
@@ -160,14 +165,9 @@ fun LoadingScreen() {
 @Composable
 fun ErrorScreen(message: String, onRetry: () -> Unit) {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        ColumnHorizontal(message, onRetry)
-    }
-}
-
-@Composable
-private fun ColumnHorizontal(message: String, onRetry: () -> Unit) {
-    androidx.compose.foundation.layout.Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(message)
-        TextButton(onClick = onRetry) { Text("Retry") }
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(message)
+            TextButton(onClick = onRetry) { Text("Retry") }
+        }
     }
 }

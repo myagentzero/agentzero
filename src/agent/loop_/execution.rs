@@ -29,6 +29,7 @@ async fn execute_one_tool(
             tool: call_name.to_string(),
             duration,
             success: false,
+            output: Some(reason.clone()),
         });
         return Ok(ToolExecutionOutcome {
             output: reason.clone(),
@@ -37,6 +38,8 @@ async fn execute_one_tool(
             duration,
         });
     };
+
+    super::record_tool_usage_from_context(call_name);
 
     let tool_future = tool.execute(call_arguments);
     let tool_result = if let Some(token) = cancellation_token {
@@ -51,14 +54,16 @@ async fn execute_one_tool(
     match tool_result {
         Ok(r) => {
             let duration = start.elapsed();
-            observer.record_event(&ObserverEvent::ToolCall {
-                tool: call_name.to_string(),
-                duration,
-                success: r.success,
-            });
             if r.success {
+                let output = scrub_credentials(&r.output);
+                observer.record_event(&ObserverEvent::ToolCall {
+                    tool: call_name.to_string(),
+                    duration,
+                    success: true,
+                    output: Some(output.clone()),
+                });
                 Ok(ToolExecutionOutcome {
-                    output: scrub_credentials(&r.output),
+                    output,
                     success: true,
                     error_reason: None,
                     duration,
@@ -66,8 +71,16 @@ async fn execute_one_tool(
             } else {
                 let reason = r.error.unwrap_or(r.output);
                 tracing::warn!(tool = %call_name, error = %reason, "tool returned failure");
+                let output = format!("Error: {reason}");
+                let scrubbed = scrub_credentials(&output);
+                observer.record_event(&ObserverEvent::ToolCall {
+                    tool: call_name.to_string(),
+                    duration,
+                    success: false,
+                    output: Some(scrubbed.clone()),
+                });
                 Ok(ToolExecutionOutcome {
-                    output: format!("Error: {reason}"),
+                    output: scrubbed,
                     success: false,
                     error_reason: Some(scrub_credentials(&reason)),
                     duration,
@@ -76,13 +89,14 @@ async fn execute_one_tool(
         }
         Err(e) => {
             let duration = start.elapsed();
+            tracing::warn!(tool = %call_name, error = %e, "tool execution error");
+            let reason = format!("Error executing {call_name}: {e}");
             observer.record_event(&ObserverEvent::ToolCall {
                 tool: call_name.to_string(),
                 duration,
                 success: false,
+                output: Some(reason.clone()),
             });
-            tracing::warn!(tool = %call_name, error = %e, "tool execution error");
-            let reason = format!("Error executing {call_name}: {e}");
             Ok(ToolExecutionOutcome {
                 output: reason.clone(),
                 success: false,

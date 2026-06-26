@@ -11,8 +11,8 @@
 //!
 //! Run manually: `cargo test provider_vision -- --ignored --nocapture`
 
-use anyhow::Result;
 use agentzero::providers::{ChatMessage, ChatRequest, ProviderRuntimeOptions};
+use anyhow::Result;
 
 /// Tests that provider supports vision input.
 ///

@@ -183,8 +183,11 @@ fn stop(config: &Config, init_system: InitSystem) -> Result<()> {
 fn stop_linux(init_system: InitSystem) -> Result<()> {
     match init_system {
         InitSystem::Systemd => {
-            let _ =
-                run_checked(Command::new("systemctl").args(["--user", "stop", "agentzero.service"]));
+            let _ = run_checked(Command::new("systemctl").args([
+                "--user",
+                "stop",
+                "agentzero.service",
+            ]));
         }
         InitSystem::Openrc => {
             let _ = run_checked(Command::new("rc-service").args(["agentzero", "stop"]));
@@ -222,7 +225,11 @@ fn restart_linux(init_system: InitSystem) -> Result<()> {
     match init_system {
         InitSystem::Systemd => {
             run_checked(Command::new("systemctl").args(["--user", "daemon-reload"]))?;
-            run_checked(Command::new("systemctl").args(["--user", "restart", "agentzero.service"]))?;
+            run_checked(Command::new("systemctl").args([
+                "--user",
+                "restart",
+                "agentzero.service",
+            ]))?;
         }
         InitSystem::Openrc => {
             run_checked(Command::new("rc-service").args(["agentzero", "restart"]))?;
@@ -489,7 +496,9 @@ fn current_uid() -> Option<u32> {
 /// Returns Ok if user doesn't exist (OpenRC will handle creation or fail gracefully).
 /// Returns error if user exists but has unexpected properties.
 fn check_agentzero_user() -> Result<()> {
-    let output = Command::new("getent").args(["passwd", "agentzero"]).output();
+    let output = Command::new("getent")
+        .args(["passwd", "agentzero"])
+        .output();
     let is_alpine = Path::new("/etc/alpine-release").exists();
 
     let (del_cmd, add_cmd) = if is_alpine {
@@ -547,7 +556,9 @@ fn check_agentzero_user() -> Result<()> {
 }
 
 fn ensure_agentzero_user() -> Result<()> {
-    let output = Command::new("getent").args(["passwd", "agentzero"]).output();
+    let output = Command::new("getent")
+        .args(["passwd", "agentzero"])
+        .output();
     if let Ok(output) = output {
         if output.status.success() {
             return check_agentzero_user();

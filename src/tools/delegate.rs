@@ -2,7 +2,7 @@ use super::agent_load_tracker::AgentLoadTracker;
 use super::agent_selection::{AgentSelectionPolicy, select_agent_with_load};
 use super::orchestration_settings::load_orchestration_settings;
 use super::traits::{Tool, ToolResult};
-use crate::agent::loop_::run_tool_call_loop;
+use crate::agent::loop_::{run_tool_call_loop, scope_workspace_dir};
 use crate::config::{AgentTeamsConfig, DelegateAgentConfig};
 use crate::coordination::{CoordinationEnvelope, CoordinationPayload, InMemoryMessageBus};
 use crate::observability::traits::{Observer, ObserverEvent, ObserverMetric};
@@ -584,23 +584,26 @@ impl DelegateTool {
 
         let result = tokio::time::timeout(
             Duration::from_secs(DELEGATE_AGENTIC_TIMEOUT_SECS),
-            run_tool_call_loop(
-                provider,
-                &mut history,
-                &sub_tools,
-                &noop_observer,
-                &agent_config.provider,
-                &agent_config.model,
-                temperature,
-                true,
-                None,
-                "delegate",
-                &self.multimodal_config,
-                agent_config.max_iterations,
-                None,
-                None,
-                None,
-                &[],
+            scope_workspace_dir(
+                self.security.workspace_dir.clone(),
+                run_tool_call_loop(
+                    provider,
+                    &mut history,
+                    &sub_tools,
+                    &noop_observer,
+                    &agent_config.provider,
+                    &agent_config.model,
+                    temperature,
+                    true,
+                    None,
+                    "delegate",
+                    &self.multimodal_config,
+                    agent_config.max_iterations,
+                    None,
+                    None,
+                    None,
+                    &[],
+                ),
             ),
         )
         .await;

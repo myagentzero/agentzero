@@ -6,11 +6,11 @@ use std::process::Command;
 use std::time::{Duration, SystemTime};
 
 mod audit;
-pub mod usage_tracker;
 #[cfg(feature = "skill-creation")]
 pub mod creator;
 #[cfg(feature = "skill-creation")]
 pub mod improver;
+pub mod usage_tracker;
 
 const OPEN_SKILLS_REPO_URL: &str = "git@github.com:myagentzero/open-skills.git";
 const OPEN_SKILLS_SYNC_MARKER: &str = ".agentzero-open-skills-sync";

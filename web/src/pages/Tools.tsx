@@ -5,9 +5,24 @@ import {
   ChevronDown,
   ChevronRight,
   Package,
+  Activity,
+  Clock,
 } from 'lucide-react';
 import type { ToolSpec } from '@/types/api';
 import { getTools } from '@/lib/api';
+
+function formatLastCalled(iso: string): string {
+  const date = new Date(iso);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+  if (diffDays === 0) return 'today';
+  if (diffDays === 1) return 'yesterday';
+  if (diffDays < 30) return `${diffDays}d ago`;
+  const diffMonths = Math.floor(diffDays / 30);
+  if (diffMonths < 12) return `${diffMonths}mo ago`;
+  return `${Math.floor(diffMonths / 12)}y ago`;
+}
 
 export default function Tools() {
   const [tools, setTools] = useState<ToolSpec[]>([]);
@@ -103,6 +118,24 @@ export default function Tools() {
                     <p className="text-sm text-gray-400 mt-2 line-clamp-2">
                       {tool.description}
                     </p>
+                    {tool.usage ? (
+                      <div className="flex items-center gap-3 mt-2">
+                        <span className="inline-flex items-center gap-1 text-xs text-blue-400">
+                          <Activity className="h-3 w-3" />
+                          {tool.usage.call_count === 1
+                            ? '1 call'
+                            : `${tool.usage.call_count} calls`}
+                        </span>
+                        <span className="inline-flex items-center gap-1 text-xs text-gray-500">
+                          <Clock className="h-3 w-3" />
+                          {formatLastCalled(tool.usage.last_called)}
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="mt-2">
+                        <span className="text-xs text-gray-600">never used</span>
+                      </div>
+                    )}
                   </button>
 
                   {isExpanded && tool.parameters && (

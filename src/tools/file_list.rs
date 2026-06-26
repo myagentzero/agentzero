@@ -2,7 +2,7 @@ use super::traits::{Tool, ToolResult};
 use crate::security::SecurityPolicy;
 use crate::security::sensitive_paths::is_sensitive_file_path;
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -52,10 +52,7 @@ impl Tool for FileListTool {
     async fn execute(&self, args: Value) -> anyhow::Result<ToolResult> {
         let path_str = normalize_list_path(args.get("path").and_then(|v| v.as_str()));
 
-        let depth = args
-            .get("depth")
-            .and_then(|v| v.as_i64())
-            .unwrap_or(0) as i32;
+        let depth = args.get("depth").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
 
         if !self.security.is_path_allowed(path_str) {
             return Ok(ToolResult {
@@ -85,8 +82,8 @@ impl Tool for FileListTool {
 
         match list_directory(&full_path, depth, 0) {
             Ok(entries) => {
-                let output = serde_json::to_string_pretty(&entries)
-                    .unwrap_or_else(|_| "[]".to_string());
+                let output =
+                    serde_json::to_string_pretty(&entries).unwrap_or_else(|_| "[]".to_string());
                 Ok(ToolResult {
                     success: true,
                     output,
@@ -105,8 +102,7 @@ impl Tool for FileListTool {
 fn list_directory(path: &Path, max_depth: i32, current_depth: i32) -> anyhow::Result<Value> {
     let mut entries = Vec::new();
 
-    let mut read_dir: Vec<_> = std::fs::read_dir(path)?
-        .collect::<Result<Vec<_>, _>>()?;
+    let mut read_dir: Vec<_> = std::fs::read_dir(path)?.collect::<Result<Vec<_>, _>>()?;
 
     read_dir.sort_by(|a, b| {
         let a_name = a.file_name();
@@ -216,20 +212,14 @@ mod tests {
         tokio::fs::create_dir(dir.join("subdir")).await.unwrap();
 
         let tool = FileListTool::new(test_security(dir.clone()));
-        let result = tool
-            .execute(json!({"path": "."}))
-            .await
-            .unwrap();
+        let result = tool.execute(json!({"path": "."})).await.unwrap();
 
         assert!(result.success, "listing should succeed: {:?}", result.error);
         let _output: Value = serde_json::from_str(&result.output).unwrap();
         let array = _output.as_array().unwrap();
         assert_eq!(array.len(), 3);
 
-        let names: Vec<&str> = array
-            .iter()
-            .filter_map(|e| e["name"].as_str())
-            .collect();
+        let names: Vec<&str> = array.iter().filter_map(|e| e["name"].as_str()).collect();
         assert!(names.contains(&"file1.txt"));
         assert!(names.contains(&"file2.md"));
         assert!(names.contains(&"subdir"));
@@ -251,10 +241,7 @@ mod tests {
             .unwrap();
 
         let tool = FileListTool::new(test_security(dir.clone()));
-        let result = tool
-            .execute(json!({"path": "."}))
-            .await
-            .unwrap();
+        let result = tool.execute(json!({"path": "."})).await.unwrap();
 
         assert!(result.success);
         let output: Value = serde_json::from_str(&result.output).unwrap();
@@ -284,10 +271,7 @@ mod tests {
             .unwrap();
 
         let tool = FileListTool::new(test_security(dir.clone()));
-        let result = tool
-            .execute(json!({"path": "."}))
-            .await
-            .unwrap();
+        let result = tool.execute(json!({"path": "."})).await.unwrap();
 
         assert!(result.success);
         let output: Value = serde_json::from_str(&result.output).unwrap();
@@ -336,7 +320,9 @@ mod tests {
 
         tokio::fs::write(dir.join("file1.txt"), "").await.unwrap();
         tokio::fs::write(dir.join("a/file2.txt"), "").await.unwrap();
-        tokio::fs::write(dir.join("a/b/file3.txt"), "").await.unwrap();
+        tokio::fs::write(dir.join("a/b/file3.txt"), "")
+            .await
+            .unwrap();
 
         let tool = FileListTool::new(test_security(dir.clone()));
         let result = tool
@@ -362,8 +348,12 @@ mod tests {
 
         tokio::fs::write(dir.join("file1.txt"), "").await.unwrap();
         tokio::fs::write(dir.join("a/file2.txt"), "").await.unwrap();
-        tokio::fs::write(dir.join("a/b/file3.txt"), "").await.unwrap();
-        tokio::fs::write(dir.join("a/b/c/file4.txt"), "").await.unwrap();
+        tokio::fs::write(dir.join("a/b/file3.txt"), "")
+            .await
+            .unwrap();
+        tokio::fs::write(dir.join("a/b/c/file4.txt"), "")
+            .await
+            .unwrap();
 
         let tool = FileListTool::new(test_security(dir.clone()));
         let result = tool
@@ -389,13 +379,16 @@ mod tests {
         tokio::fs::create_dir_all(&dir).await.unwrap();
 
         let tool = FileListTool::new(test_security(dir.clone()));
-        let result = tool
-            .execute(json!({"path": "nonexistent"}))
-            .await
-            .unwrap();
+        let result = tool.execute(json!({"path": "nonexistent"})).await.unwrap();
 
         assert!(!result.success);
-        assert!(result.error.as_deref().unwrap_or("").contains("does not exist"));
+        assert!(
+            result
+                .error
+                .as_deref()
+                .unwrap_or("")
+                .contains("does not exist")
+        );
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
@@ -410,13 +403,16 @@ mod tests {
             .unwrap();
 
         let tool = FileListTool::new(test_security(dir.clone()));
-        let result = tool
-            .execute(json!({"path": "file.txt"}))
-            .await
-            .unwrap();
+        let result = tool.execute(json!({"path": "file.txt"})).await.unwrap();
 
         assert!(!result.success);
-        assert!(result.error.as_deref().unwrap_or("").contains("not a directory"));
+        assert!(
+            result
+                .error
+                .as_deref()
+                .unwrap_or("")
+                .contains("not a directory")
+        );
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }

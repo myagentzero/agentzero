@@ -1,10 +1,10 @@
 //! Shared mock provider implementations for integration tests.
 
+use agentzero::providers::traits::{ChatMessage, TokenUsage};
+use agentzero::providers::{ChatRequest, ChatResponse, Provider, ToolCall};
 use anyhow::Result;
 use async_trait::async_trait;
 use std::sync::{Arc, Mutex};
-use agentzero::providers::traits::{ChatMessage, TokenUsage};
-use agentzero::providers::{ChatRequest, ChatResponse, Provider, ToolCall};
 
 use super::trace::{LlmTrace, TraceResponse};
 

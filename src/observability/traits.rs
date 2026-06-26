@@ -50,6 +50,8 @@ pub enum ObserverEvent {
         tool: String,
         duration: Duration,
         success: bool,
+        /// Scrubbed tool output for observability consumers (SSE, logs).
+        output: Option<String>,
     },
     /// The agent produced a final answer for the current user message.
     TurnComplete,
@@ -201,6 +203,7 @@ mod tests {
             tool: "shell".into(),
             duration: Duration::from_millis(10),
             success: true,
+            output: Some("ok".into()),
         };
         let metric = ObserverMetric::RequestLatency(Duration::from_millis(8));
 

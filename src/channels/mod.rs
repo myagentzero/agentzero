@@ -1777,7 +1777,13 @@ async fn compress_sender_history_on_error(
     .with_memory(ctx.memory.clone());
 
     let compressed = match compressor
-        .compress_on_error(&mut hist, ctx.provider.as_ref(), model, temperature, error_msg)
+        .compress_on_error(
+            &mut hist,
+            ctx.provider.as_ref(),
+            model,
+            temperature,
+            error_msg,
+        )
         .await
     {
         Ok(c) => c,
@@ -2767,9 +2773,7 @@ async fn handle_runtime_command_if_needed(
                             .join("state")
                             .join("paired_devices_meta.json");
                         let _ = tokio::fs::remove_file(&meta_path).await;
-                        format!(
-                            "Pairing reset. New code: `{code}`. All previous tokens revoked."
-                        )
+                        format!("Pairing reset. New code: `{code}`. All previous tokens revoked.")
                     }
                     Ok(None) => format!(
                         "Pairing reset in memory, but runtime config path was not available."
@@ -3914,7 +3918,9 @@ If this input is legitimate, rephrase the request and avoid instruction-override
         () = cancellation_token.cancelled() => LlmExecutionResult::Cancelled,
         result = tokio::time::timeout(
             Duration::from_secs(timeout_budget_secs),
-            crate::agent::loop_::scope_cost_enforcement_context(
+            crate::agent::loop_::scope_workspace_dir(
+                ctx.workspace_dir.as_ref().clone(),
+                crate::agent::loop_::scope_cost_enforcement_context(
                 cost_enforcement_context,
                 run_tool_call_loop_with_non_cli_approval_context(
                     active_provider.as_ref(),
@@ -3938,6 +3944,7 @@ If this input is legitimate, rephrase the request and avoid instruction-override
                     ctx.safety_heartbeat.clone(),
                     runtime_canary_tokens_snapshot(ctx.as_ref()),
                 ),
+            ),
             ),
         ) => LlmExecutionResult::Completed(result),
     };
@@ -5130,7 +5137,11 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         // Create minimal workspace files
         std::fs::write(tmp.path().join("SOUL.md"), "# Soul\nBe helpful.").unwrap();
-        std::fs::write(tmp.path().join("IDENTITY.md"), "# Identity\nName: AgentZero").unwrap();
+        std::fs::write(
+            tmp.path().join("IDENTITY.md"),
+            "# Identity\nName: AgentZero",
+        )
+        .unwrap();
         std::fs::write(tmp.path().join("USER.md"), "# User\nName: Test User").unwrap();
         std::fs::write(
             tmp.path().join("AGENTS.md"),
@@ -5600,7 +5611,9 @@ mod tests {
             .conversation_histories
             .lock()
             .unwrap_or_else(|e| e.into_inner());
-        let kept = histories.get(&sender).expect("sender history should remain");
+        let kept = histories
+            .get(&sender)
+            .expect("sender history should remain");
         assert!(
             kept.len() < before_len,
             "compressed history ({}) should be shorter than original ({before_len})",
@@ -5696,11 +5709,11 @@ mod tests {
             .conversation_histories
             .lock()
             .unwrap_or_else(|e| e.into_inner());
-        let kept = histories.get(&sender).expect("sender history should remain");
+        let kept = histories
+            .get(&sender)
+            .expect("sender history should remain");
         assert!(
-            !kept
-                .iter()
-                .any(|m| m.content.contains("toolu_orphan")),
+            !kept.iter().any(|m| m.content.contains("toolu_orphan")),
             "orphaned tool message must be pruned before compression"
         );
     }
@@ -9089,8 +9102,7 @@ BTC is currently around $65,000 based on latest tool output."#
                         multimodal: crate::config::MultimodalConfig::default(),
                         query_classification: crate::config::QueryClassificationConfig::default(),
                         model_routes: Vec::new(),
-                        context_compression:
-                            crate::config::ContextCompressionConfig::default(),
+                        context_compression: crate::config::ContextCompressionConfig::default(),
                         history_pruner: crate::config::HistoryPrunerConfig::default(),
                     },
                     perplexity_filter: crate::config::PerplexityFilterConfig::default(),
@@ -9586,7 +9598,8 @@ BTC is currently around $65,000 based on latest tool output."#
             .expect("config stamp after save");
 
         assert_ne!(
-            stamp_before, Some(stamp_after),
+            stamp_before,
+            Some(stamp_after),
             "pairing reset should perform exactly one config save"
         );
 
@@ -9604,8 +9617,8 @@ BTC is currently around $65,000 based on latest tool output."#
     }
 
     #[tokio::test]
-    async fn maybe_apply_runtime_config_update_supports_routed_providers_without_global_credentials(
-    ) {
+    async fn maybe_apply_runtime_config_update_supports_routed_providers_without_global_credentials()
+     {
         let temp = tempfile::TempDir::new().expect("temp dir");
         let config_path = temp.path().join("config.toml");
         let workspace_dir = temp.path().join("workspace");

@@ -145,8 +145,8 @@ fn unicode_emoji_to_slack_name(emoji: &str) -> &str {
         "\u{1F4CA}" => "bar_chart", // 📊
         // ITSM
         "\u{1F3AB}" => "ticket",    // 🎫
-        "\u{1F4CB}" => "clipboard",  // 📋
-        "\u{1F527}" => "wrench",     // 🔧
+        "\u{1F4CB}" => "clipboard", // 📋
+        "\u{1F527}" => "wrench",    // 🔧
         // Security
         "\u{1F512}" => "lock", // 🔒
         _ => {

@@ -68,6 +68,7 @@ pub mod subagent_registry;
 pub mod subagent_spawn;
 pub mod traits;
 pub mod url_validation;
+pub mod usage_tracker;
 pub mod weather_tool;
 pub mod web_fetch;
 mod web_search_provider_routing;

@@ -3,9 +3,9 @@
 //! `TestChannel` implements the `Channel` trait with MPSC-based message
 //! injection and response capture for race-free testing.
 
+use agentzero::channels::traits::{Channel, ChannelMessage, SendMessage};
 use async_trait::async_trait;
 use std::sync::{Arc, Mutex};
-use agentzero::channels::traits::{Channel, ChannelMessage, SendMessage};
 
 /// A test channel that captures sent messages and supports message injection.
 pub struct TestChannel {

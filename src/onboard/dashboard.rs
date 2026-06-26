@@ -467,7 +467,7 @@ fn event_type_color(t: &str) -> Color {
     match t.to_lowercase().as_str() {
         "error" => Color::Red,
         "warn" | "warning" => Color::Yellow,
-        "tool_call" | "tool_result" | "tool_call_start" => Color::Magenta,
+        "tool_call" | "tool_result" | "tool_call_start" | "tool_call_result" => Color::Magenta,
         "message" | "chat" => Color::Blue,
         "health" | "status" | "connected" | "heartbeat_tick" => Color::Green,
         "llm_response" => Color::Cyan,
@@ -549,7 +549,10 @@ fn draw_tab_bar(f: &mut Frame, area: Rect, app: &DashboardApp) {
             Span::raw(" "),
             Span::styled(" [3] Cron ", tab_style(app.tab == Tab::Cron)),
             Span::raw(" "),
-            Span::styled(" [4] Mission Control ", tab_style(app.tab == Tab::MissionControl)),
+            Span::styled(
+                " [4] Mission Control ",
+                tab_style(app.tab == Tab::MissionControl),
+            ),
             Span::raw(" "),
             Span::styled(" [5] Metrics ", tab_style(app.tab == Tab::Metrics)),
             Span::styled("   [q]uit", Style::default().fg(Color::DarkGray)),

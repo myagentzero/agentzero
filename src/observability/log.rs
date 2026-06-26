@@ -34,9 +34,20 @@ impl Observer for LogObserver {
                 tool,
                 duration,
                 success,
+                output,
             } => {
                 let ms = u64::try_from(duration.as_millis()).unwrap_or(u64::MAX);
-                info!(tool = %tool, duration_ms = ms, success = success, "tool.call");
+                if let Some(output) = output {
+                    info!(
+                        tool = %tool,
+                        duration_ms = ms,
+                        success = success,
+                        output = %output,
+                        "tool.call"
+                    );
+                } else {
+                    info!(tool = %tool, duration_ms = ms, success = success, "tool.call");
+                }
             }
             ObserverEvent::TurnComplete => {
                 info!("turn.complete");
@@ -186,6 +197,7 @@ mod tests {
             tool: "shell".into(),
             duration: Duration::from_millis(10),
             success: false,
+            output: None,
         });
         obs.record_event(&ObserverEvent::ChannelMessage {
             channel: "slack".into(),

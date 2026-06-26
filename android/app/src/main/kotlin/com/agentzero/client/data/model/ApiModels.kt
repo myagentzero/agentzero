@@ -13,9 +13,6 @@ data class PublicHealth(
 )
 
 @Serializable
-data class PairResponse(val token: String)
-
-@Serializable
 data class StatusResponse(
     val version: String,
     val provider: String? = null,
@@ -54,16 +51,6 @@ data class CostSummary(
     @SerialName("monthly_cost_usd") val monthlyCostUsd: Double = 0.0,
     @SerialName("total_tokens") val totalTokens: Long = 0,
     @SerialName("request_count") val requestCount: Long = 0,
-    @SerialName("by_model") val byModel: Map<String, ModelStats> = emptyMap(),
-)
-
-@Serializable
-data class ModelStats(
-    val model: String = "",
-    @SerialName("cost_usd") val costUsd: Double = 0.0,
-    @SerialName("total_tokens") val totalTokens: Long = 0,
-    @SerialName("request_count") val requestCount: Long = 0,
-    val channel: String? = null,
 )
 
 @Serializable
@@ -90,11 +77,6 @@ data class PairedDevice(
     @SerialName("token_fingerprint") val tokenFingerprint: String,
     @SerialName("created_at") val createdAt: String? = null,
     @SerialName("paired_by") val pairedBy: String? = null,
-)
-
-@Serializable
-data class PairingInitiateResponse(
-    @SerialName("pairing_code") val pairingCode: String,
 )
 
 @Serializable
@@ -139,6 +121,33 @@ data class WsHistoryMessage(
 )
 
 @Serializable
+data class CronJob(
+    val id: String,
+    val name: String? = null,
+    val command: String = "",
+    val expression: String = "",
+    val prompt: String? = null,
+    @SerialName("job_type") val jobType: String = "",
+    @SerialName("session_target") val sessionTarget: String = "",
+    val model: String? = null,
+    @SerialName("created_at") val createdAt: String = "",
+    @SerialName("next_run") val nextRun: String = "",
+    @SerialName("last_run") val lastRun: String? = null,
+    @SerialName("last_status") val lastStatus: String? = null,
+    @SerialName("last_output") val lastOutput: String? = null,
+    val enabled: Boolean = true,
+    @SerialName("light_context") val lightContext: Boolean = false,
+)
+
+@Serializable
+data class CronAddBody(
+    val name: String? = null,
+    val command: String,
+    val schedule: String,
+    val enabled: Boolean = true,
+)
+
+@Serializable
 data class SseEvent(
     val type: String = "message",
     val timestamp: String? = null,
@@ -149,6 +158,14 @@ data class SseEvent(
     val channel: String? = null,
     val signature: String? = null,
     val bearer: String? = null,
+    val tool: String? = null,
+    val output: String? = null,
+    val success: Boolean? = null,
+    @SerialName("duration_ms") val durationMs: Long? = null,
+    val arguments: String? = null,
+    val provider: String? = null,
+    val model: String? = null,
+    val iteration: Int? = null,
     val payload: JsonObject? = null,
 )
 

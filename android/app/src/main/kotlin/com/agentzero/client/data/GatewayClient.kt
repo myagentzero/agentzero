@@ -1,6 +1,8 @@
 package com.agentzero.client.data
 
 import com.agentzero.client.data.model.CostSummary
+import com.agentzero.client.data.model.CronAddBody
+import com.agentzero.client.data.model.CronJob
 import com.agentzero.client.data.model.MemoryEntry
 import com.agentzero.client.data.model.MemoryStoreBody
 import com.agentzero.client.data.model.PairedDevice
@@ -11,7 +13,6 @@ import com.agentzero.client.data.model.WorkspaceFileContent
 import com.agentzero.client.data.model.WorkspaceTree
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
-import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -124,6 +125,33 @@ class GatewayClient(
     suspend fun getWorkspaceFile(config: ServerConfig, path: String): WorkspaceFileContent {
         val body = fetch(config, "/api/workspace/file?path=${encode(path)}", auth = true)
         return json.decodeFromString(WorkspaceFileContent.serializer(), body)
+    }
+
+    suspend fun getCronJobs(config: ServerConfig): List<CronJob> {
+        val body = fetch(config, "/api/cron", auth = true)
+        return unwrapList(body, "jobs", CronJob.serializer())
+    }
+
+    suspend fun addCronJob(
+        config: ServerConfig,
+        name: String?,
+        schedule: String,
+        command: String,
+    ): CronJob {
+        val payload = json.encodeToString(
+            CronAddBody.serializer(),
+            CronAddBody(name = name, schedule = schedule, command = command),
+        )
+        val body = post(config, "/api/cron", payload, auth = true)
+        val element = json.parseToJsonElement(body)
+        if (element is JsonObject && element["job"] != null) {
+            return json.decodeFromJsonElement(CronJob.serializer(), element["job"]!!)
+        }
+        return json.decodeFromString(CronJob.serializer(), body)
+    }
+
+    suspend fun deleteCronJob(config: ServerConfig, id: String) {
+        delete(config, "/api/cron/${encode(id)}", auth = true)
     }
 
     private suspend inline fun <reified T> getJson(

@@ -33,10 +33,8 @@ import androidx.compose.ui.unit.dp
 import com.agentzero.client.AppContainer
 import com.agentzero.client.data.model.PairedDevice
 import com.agentzero.client.data.model.ServerConfig
+import com.agentzero.client.ui.util.formatIsoDateTime
 import kotlinx.coroutines.launch
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
 @Composable
 fun DevicesScreen(config: ServerConfig, container: AppContainer) {
@@ -121,7 +119,7 @@ fun DevicesScreen(config: ServerConfig, container: AppContainer) {
                         Column(Modifier.padding(12.dp)) {
                             Text(device.tokenFingerprint, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
                             Text("Paired by: ${device.pairedBy ?: "Unknown"}", style = MaterialTheme.typography.labelSmall)
-                            Text("Created: ${formatDate(device.createdAt)}", style = MaterialTheme.typography.labelSmall)
+                            Text("Created: ${formatIsoDateTime(device.createdAt)}", style = MaterialTheme.typography.labelSmall)
                             TextButton(onClick = { pendingRevoke = device }) {
                                 Text("Revoke", color = MaterialTheme.colorScheme.error)
                             }
@@ -157,9 +155,3 @@ fun DevicesScreen(config: ServerConfig, container: AppContainer) {
     }
 }
 
-private fun formatDate(value: String?): String {
-    if (value.isNullOrBlank()) return "Unknown"
-    return runCatching {
-        SimpleDateFormat.getDateTimeInstance().format(Date(value))
-    }.getOrElse { value }
-}

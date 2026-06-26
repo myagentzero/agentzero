@@ -11,7 +11,9 @@ pub mod scheduler;
 
 #[allow(unused_imports)]
 pub use schedule::{
-    next_run_for_schedule, normalize_expression, schedule_cron_expression, validate_schedule,
+    format_schedule_parse_error, next_run_for_schedule, normalize_expression,
+    parse_at_timestamp_lenient, parse_schedule_json, schedule_at_parse_hint,
+    schedule_cron_expression, validate_schedule,
 };
 #[allow(unused_imports)]
 pub use store::{

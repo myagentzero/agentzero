@@ -1,5 +1,5 @@
 use crate::config::MemoryConfig;
-use anyhow::{Result, Context};
+use anyhow::{Context, Result};
 use chrono::{DateTime, Duration, Local, NaiveDate, Utc};
 use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
@@ -474,13 +474,12 @@ fn prune_cost_records(workspace_dir: &Path, retention_days: u32) -> Result<()> {
                     if let Some(timestamp) = record.get("usage").and_then(|u| u.get("timestamp")) {
                         if let Some(ts_str) = timestamp.as_str() {
                             if ts_str >= cutoff.as_str() {
-                                writeln!(writer, "{}", record.to_string())
-                                    .with_context(|| {
-                                        format!(
-                                            "Failed to write cost record to {}",
-                                            temp_file.display()
-                                        )
-                                    })?;
+                                writeln!(writer, "{}", record.to_string()).with_context(|| {
+                                    format!(
+                                        "Failed to write cost record to {}",
+                                        temp_file.display()
+                                    )
+                                })?;
                             } else {
                                 pruned += 1;
                             }
@@ -769,14 +768,10 @@ mod tests {
         let state_dir = workspace.join("state");
         fs::create_dir_all(&state_dir).unwrap();
 
-        let old_timestamp = (Local::now() - Duration::days(70)).to_rfc3339_opts(
-            chrono::SecondsFormat::Millis,
-            true,
-        );
-        let recent_timestamp = (Local::now() - Duration::days(5)).to_rfc3339_opts(
-            chrono::SecondsFormat::Millis,
-            true,
-        );
+        let old_timestamp = (Local::now() - Duration::days(70))
+            .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        let recent_timestamp =
+            (Local::now() - Duration::days(5)).to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
 
         let old_record = serde_json::json!({
             "id": "old-record",

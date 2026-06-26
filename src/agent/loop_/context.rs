@@ -86,13 +86,8 @@ pub(super) async fn build_injected_context(
     hardware_rag: Option<&crate::hardware::datasheet::HardwareRag>,
     board_names: &[String],
 ) -> String {
-    let mem_context = build_context(
-        mem,
-        message,
-        config.memory.min_relevance_score,
-        session_id,
-    )
-    .await;
+    let mem_context =
+        build_context(mem, message, config.memory.min_relevance_score, session_id).await;
     let rag_limit = if config.agent.light_context { 2 } else { 5 };
     let hw_context = hardware_rag
         .map(|r| build_hardware_context(r, message, board_names, rag_limit))
@@ -107,10 +102,7 @@ pub(super) async fn build_injected_context(
 /// and chunks every file, so per-turn calls are wasteful.
 pub(super) fn load_peripheral_hardware_state(
     config: &Config,
-) -> (
-    Option<crate::hardware::datasheet::HardwareRag>,
-    Vec<String>,
-) {
+) -> (Option<crate::hardware::datasheet::HardwareRag>, Vec<String>) {
     let board_names: Vec<String> = config
         .peripherals
         .boards

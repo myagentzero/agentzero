@@ -22,8 +22,6 @@ pub use context_compressor::{
     parse_context_limit_from_error,
 };
 #[allow(unused_imports)]
-pub use history_pruner::{
-    PruneStats, PrunedOrphans, prune_history, remove_orphaned_tool_messages,
-};
+pub use history_pruner::{PruneStats, PrunedOrphans, prune_history, remove_orphaned_tool_messages};
 #[allow(unused_imports)]
 pub use loop_::{process_message, process_message_with_session, run, run_tool_call_loop};

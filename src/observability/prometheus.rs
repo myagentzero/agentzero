@@ -42,13 +42,19 @@ impl PrometheusObserver {
         .context("failed to create agentzero_agent_starts_total counter")?;
 
         let llm_requests = IntCounterVec::new(
-            prometheus::Opts::new("agentzero_llm_requests_total", "Total LLM provider requests"),
+            prometheus::Opts::new(
+                "agentzero_llm_requests_total",
+                "Total LLM provider requests",
+            ),
             &["provider", "model", "success"],
         )
         .context("failed to create agentzero_llm_requests_total counter")?;
 
         let tokens_input_total = IntCounterVec::new(
-            prometheus::Opts::new("agentzero_tokens_input_total", "Total input tokens consumed"),
+            prometheus::Opts::new(
+                "agentzero_tokens_input_total",
+                "Total input tokens consumed",
+            ),
             &["provider", "model"],
         )
         .context("failed to create agentzero_tokens_input_total counter")?;
@@ -270,6 +276,7 @@ impl Observer for PrometheusObserver {
                 tool,
                 duration,
                 success,
+                output: _,
             } => {
                 let success_str = if *success { "true" } else { "false" };
                 self.tool_calls
@@ -418,11 +425,13 @@ mod tests {
             tool: "shell".into(),
             duration: Duration::from_millis(10),
             success: true,
+            output: None,
         });
         obs.record_event(&ObserverEvent::ToolCall {
             tool: "file_read".into(),
             duration: Duration::from_millis(5),
             success: false,
+            output: None,
         });
         obs.record_event(&ObserverEvent::ChannelMessage {
             channel: "slack".into(),
@@ -456,6 +465,7 @@ mod tests {
             tool: "shell".into(),
             duration: Duration::from_millis(100),
             success: true,
+            output: None,
         });
         obs.record_event(&ObserverEvent::HeartbeatTick);
         obs.record_metric(&ObserverMetric::RequestLatency(Duration::from_millis(250)));
@@ -490,16 +500,19 @@ mod tests {
             tool: "shell".into(),
             duration: Duration::from_millis(10),
             success: true,
+            output: None,
         });
         obs.record_event(&ObserverEvent::ToolCall {
             tool: "shell".into(),
             duration: Duration::from_millis(10),
             success: true,
+            output: None,
         });
         obs.record_event(&ObserverEvent::ToolCall {
             tool: "shell".into(),
             duration: Duration::from_millis(10),
             success: false,
+            output: None,
         });
 
         let output = obs.encode();

@@ -255,6 +255,7 @@ async fn execute_tool_call(tools: &[Box<dyn Tool>], tool_call: &ToolCall) -> Too
 
     match tool {
         Some(t) => {
+            crate::agent::loop_::record_tool_usage_from_context(&tool_call.name);
             // Parse arguments
             let args: serde_json::Value = serde_json::from_str(&tool_call.arguments)
                 .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));

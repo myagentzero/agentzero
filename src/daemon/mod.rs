@@ -67,7 +67,9 @@ pub async fn run(config: Config, host: String, port: u16) -> Result<()> {
         if is_agentzero_daemon_running(&host, port).await {
             tracing::info!("AgentZero daemon already running on {host}:{port}");
             println!("✓ AgentZero daemon already running on http://{host}:{port}");
-            println!("  Use 'agentzero restart' to restart, or 'agentzero status' to check health.");
+            println!(
+                "  Use 'agentzero restart' to restart, or 'agentzero status' to check health."
+            );
             return Ok(());
         }
         // Something else is using the port

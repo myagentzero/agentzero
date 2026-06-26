@@ -10,6 +10,88 @@ import {
 import type { SSEEvent } from '@/types/api';
 import { SSEClient } from '@/lib/sse';
 
+function normalizeProviderForDisplay(value: unknown): unknown {
+  if (typeof value === 'string' && value.toLowerCase().startsWith('custom:')) {
+    return 'custom';
+  }
+  return value;
+}
+
+function normalizeEventForDisplay(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => normalizeEventForDisplay(item));
+  }
+  if (value !== null && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, entryValue]) => [
+        key,
+        key === 'provider'
+          ? normalizeProviderForDisplay(entryValue)
+          : normalizeEventForDisplay(entryValue),
+      ]),
+    );
+  }
+  return value;
+}
+
+function formatToolCallResultSummary(event: SSEEvent): string {
+  const summary: Record<string, unknown> = {};
+
+  const tool = typeof event.tool === 'string' ? event.tool : event.payload?.tool;
+  if (tool) summary.tool = tool;
+
+  const success = event.success ?? event.payload?.success;
+  if (success !== undefined) summary.success = success;
+
+  const iteration = event.iteration ?? event.payload?.iteration;
+  if (iteration !== undefined && iteration !== null) {
+    summary.iteration = iteration;
+  }
+
+  const model = typeof event.model === 'string' ? event.model : event.payload?.model;
+  if (model) summary.model = model;
+
+  const durationMs = event.duration_ms ?? event.payload?.duration_ms;
+  if (durationMs !== undefined && durationMs !== null) {
+    summary.duration_ms = durationMs;
+  }
+
+  return Object.keys(summary).length > 0 ? JSON.stringify(summary) : '';
+}
+
+function getToolCallOutput(event: SSEEvent): string {
+  return (
+    (typeof event.output === 'string' && event.output) ||
+    (typeof event.payload?.output === 'string' && event.payload.output) ||
+    (typeof event.message === 'string' && event.message) ||
+    ''
+  );
+}
+
+function isToolResultEvent(type: string): boolean {
+  return type === 'tool_call_result' || type === 'tool_result' || type === 'tool_call';
+}
+
+function formatToolCallStartDetail(event: SSEEvent): string {
+  const summary: Record<string, unknown> = {};
+
+  const tool = typeof event.tool === 'string' ? event.tool : event.payload?.tool;
+  if (tool) summary.tool = tool;
+
+  const iteration = event.iteration ?? event.payload?.iteration;
+  if (iteration !== undefined && iteration !== null) {
+    summary.iteration = iteration;
+  }
+
+  const model = typeof event.model === 'string' ? event.model : event.payload?.model;
+  if (model) summary.model = model;
+
+  const channel = typeof event.channel === 'string' ? event.channel : event.payload?.channel;
+  if (channel) summary.channel = channel;
+
+  return Object.keys(summary).length > 0 ? JSON.stringify(summary) : '';
+}
+
 function formatTimestamp(ts?: string): string {
   if (!ts) return new Date().toLocaleTimeString();
   return new Date(ts).toLocaleTimeString();
@@ -25,6 +107,7 @@ function eventTypeBadgeColor(type: string): string {
     case 'tool_call':
     case 'tool_result':
     case 'tool_call_start':
+    case 'tool_call_result':
       return 'bg-purple-900/50 text-purple-400 border-purple-700/50';
     case 'message':
     case 'chat':
@@ -262,6 +345,7 @@ export default function MissionControl() {
               'timestamp',
               'raw_response',
               'arguments',
+              'output',
               'error_traceback',
               'full_response',
             ]);
@@ -273,7 +357,12 @@ export default function MissionControl() {
               return Object.fromEntries(
                 Object.entries(obj)
                   .filter(([k]) => !verboseFields.has(k))
-                  .map(([k, v]) => [k, cleanData(v)])
+                  .map(([k, v]) => [
+                    k,
+                    k === 'provider'
+                      ? normalizeProviderForDisplay(cleanData(v))
+                      : cleanData(v),
+                  ])
               );
             };
 
@@ -285,6 +374,12 @@ export default function MissionControl() {
               detail = `Auth failure on ${event.channel} (signature: ${event.signature}, bearer: ${event.bearer})`;
             } else if (event.type === 'heartbeat_tick') {
               detail = 'Runtime heartbeat';
+            } else if (event.type === 'tool_call_start') {
+              detail = formatToolCallStartDetail(event) || JSON.stringify(cleanData(event));
+            } else if (event.type === 'tool_call_result' || event.type === 'tool_result') {
+              detail = formatToolCallResultSummary(event);
+            } else if (event.type === 'tool_call') {
+              detail = formatToolCallResultSummary(event);
             } else {
               detail =
                 event.message ??
@@ -325,6 +420,7 @@ export default function MissionControl() {
         const { event } = selectedEntry;
         const metadata: Record<string, unknown> = {};
         const payload: Record<string, unknown> = {};
+        const toolOutput = isToolResultEvent(event.type) ? getToolCallOutput(event) : '';
 
         // Separate metadata from payload
         for (const [key, value] of Object.entries(event)) {
@@ -337,6 +433,14 @@ export default function MissionControl() {
             payload[key] = value;
           }
         }
+
+        if (toolOutput) {
+          delete payload.output;
+        }
+
+        const payloadEntries = Object.entries(
+          normalizeEventForDisplay(payload) as Record<string, unknown>,
+        ).filter(([key]) => key !== 'output');
 
         return (
           <div
@@ -378,21 +482,34 @@ export default function MissionControl() {
                   </div>
                 </div>
 
+                {toolOutput && (
+                  <div>
+                    <p className="text-xs text-gray-500 uppercase tracking-wide mb-2 font-semibold">Output</p>
+                    <pre className="bg-gray-800 border border-gray-700 rounded p-4 text-xs text-gray-300 overflow-auto max-h-64 w-full whitespace-pre-wrap break-all">
+                      {toolOutput}
+                    </pre>
+                  </div>
+                )}
+
                 {/* Payload Fields (if any) */}
-                {Object.keys(payload).length > 0 && (
+                {payloadEntries.length > 0 && (
                   <div>
                     <p className="text-xs text-gray-500 uppercase tracking-wide mb-3 font-semibold">Payload Data</p>
                     <div className="bg-gray-800 border border-gray-700 rounded p-4 space-y-4">
-                      {Object.entries(payload).map(([key, value]) => (
+                      {payloadEntries.map(([key, value]) => (
                         <div key={key}>
                           <p className="text-xs text-gray-600 mb-2 capitalize font-medium">{key}</p>
                           {typeof value === 'object' && value !== null ? (
-                            <pre className="bg-gray-900 border border-gray-600 rounded p-3 text-xs text-gray-300 overflow-x-auto">
+                            <pre className="bg-gray-900 border border-gray-600 rounded p-3 text-xs text-gray-300 overflow-auto max-h-64">
                               {JSON.stringify(value, null, 2)}
                             </pre>
                           ) : (
                             <p className="text-sm text-gray-300 font-mono bg-gray-900 border border-gray-600 rounded px-3 py-2 inline-block">
-                              {typeof value === 'boolean' ? (value ? 'true' : 'false') : typeof value === 'number' ? value : `"${String(value)}"`}
+                              {typeof value === 'boolean'
+                                ? (value ? 'true' : 'false')
+                                : typeof value === 'number'
+                                  ? value
+                                  : `"${String(key === 'provider' ? normalizeProviderForDisplay(value) : value)}"`}
                             </p>
                           )}
                         </div>
@@ -404,8 +521,8 @@ export default function MissionControl() {
                 {/* Full Event JSON */}
                 <div>
                   <p className="text-xs text-gray-500 uppercase tracking-wide mb-2 font-semibold">Complete Event (JSON)</p>
-                  <pre className="bg-gray-800 border border-gray-700 rounded p-4 text-xs text-gray-300 overflow-x-auto max-h-96 w-full">
-                    {JSON.stringify(event, null, 2)}
+                  <pre className="bg-gray-800 border border-gray-700 rounded p-4 text-xs text-gray-300 overflow-auto max-h-64 w-full">
+                    {JSON.stringify(normalizeEventForDisplay(event), null, 2)}
                   </pre>
                 </div>
               </div>

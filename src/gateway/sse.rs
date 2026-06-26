@@ -43,6 +43,15 @@ fn evaluate_sse_auth(
     None
 }
 
+/// Flatten common tool-event payload fields onto the SSE JSON object for display.
+fn flatten_tool_event_fields(obj: &mut serde_json::Value, payload: &serde_json::Value) {
+    for key in ["tool", "arguments", "output", "duration_ms", "iteration"] {
+        if let Some(value) = payload.get(key) {
+            obj[key] = value.clone();
+        }
+    }
+}
+
 /// Convert a `RuntimeTraceEvent` to the same JSON shape that `BroadcastObserver` emits.
 /// Returns `None` for event types that are not broadcast over SSE.
 fn runtime_trace_event_to_sse_json(event: &RuntimeTraceEvent) -> Option<serde_json::Value> {
@@ -71,7 +80,13 @@ fn runtime_trace_event_to_sse_json(event: &RuntimeTraceEvent) -> Option<serde_js
     }
 
     // Add entire payload object
-    if !event.payload.is_null() && !event.payload.as_object().map(|o| o.is_empty()).unwrap_or(true) {
+    if !event.payload.is_null()
+        && !event
+            .payload
+            .as_object()
+            .map(|o| o.is_empty())
+            .unwrap_or(true)
+    {
         obj["payload"] = event.payload.clone();
     }
 
@@ -80,6 +95,7 @@ fn runtime_trace_event_to_sse_json(event: &RuntimeTraceEvent) -> Option<serde_js
         "llm_request"
         | "tool_call"
         | "tool_call_start"
+        | "tool_call_result"
         | "error"
         | "agent_start"
         | "agent_end"
@@ -87,7 +103,15 @@ fn runtime_trace_event_to_sse_json(event: &RuntimeTraceEvent) -> Option<serde_js
         | "turn_complete"
         | "channel_message"
         | "webhook_auth_failure"
-        | "heartbeat_tick" => Some(obj),
+        | "heartbeat_tick" => {
+            if matches!(
+                event_type,
+                "tool_call" | "tool_call_start" | "tool_call_result"
+            ) {
+                flatten_tool_event_fields(&mut obj, &event.payload);
+            }
+            Some(obj)
+        }
         _ => None,
     }
 }
@@ -255,13 +279,20 @@ impl crate::observability::Observer for BroadcastObserver {
                 tool,
                 duration,
                 success,
-            } => serde_json::json!({
-                "type": "tool_call",
-                "tool": tool,
-                "duration_ms": duration.as_millis(),
-                "success": success,
-                "timestamp": chrono::Utc::now().to_rfc3339(),
-            }),
+                output,
+            } => {
+                let mut json = serde_json::json!({
+                    "type": "tool_call_result",
+                    "tool": tool,
+                    "duration_ms": duration.as_millis(),
+                    "success": success,
+                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                });
+                if let Some(output) = output {
+                    json["output"] = serde_json::Value::String(output.clone());
+                }
+                json
+            }
             crate::observability::ObserverEvent::ToolCallStart { tool } => serde_json::json!({
                 "type": "tool_call_start",
                 "tool": tool,
@@ -418,6 +449,7 @@ mod tests {
             "llm_response",
             "tool_call",
             "tool_call_start",
+            "tool_call_result",
             "error",
             "agent_start",
             "agent_end",
@@ -449,6 +481,23 @@ mod tests {
         assert_eq!(json["payload"]["tool"], "shell");
         assert_eq!(json["payload"]["duration_ms"], 42);
         assert_eq!(json["success"], true);
+        assert_eq!(json["tool"], "shell");
+        assert_eq!(json["duration_ms"], 42);
+    }
+
+    #[test]
+    fn backfill_conversion_extracts_tool_call_result_output() {
+        let mut event = make_trace_event("tool_call_result");
+        event.payload = serde_json::json!({
+            "tool": "shell",
+            "duration_ms": 99,
+            "output": "hello world",
+        });
+        let json = runtime_trace_event_to_sse_json(&event).unwrap();
+        assert_eq!(json["type"], "tool_call_result");
+        assert_eq!(json["tool"], "shell");
+        assert_eq!(json["duration_ms"], 99);
+        assert_eq!(json["output"], "hello world");
     }
 
     #[test]

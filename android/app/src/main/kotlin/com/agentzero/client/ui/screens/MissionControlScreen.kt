@@ -8,11 +8,14 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Pause
@@ -44,14 +47,22 @@ import com.agentzero.client.AppContainer
 import com.agentzero.client.data.model.LogEntry
 import com.agentzero.client.data.model.ServerConfig
 import com.agentzero.client.data.model.SseEvent
+import com.agentzero.client.ui.util.formatIsoDateTime
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 import java.util.UUID
 
 private const val MAX_LOG_ENTRIES = 500
@@ -205,7 +216,7 @@ fun MissionControlScreen(config: ServerConfig, container: AppContainer) {
                         verticalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
                         Text(
-                            formatTimestamp(entry.event.timestamp),
+                            formatIsoDateTime(entry.event.timestamp),
                             style = MaterialTheme.typography.labelSmall,
                             fontFamily = FontFamily.Monospace,
                         )
@@ -248,14 +259,40 @@ fun MissionControlScreen(config: ServerConfig, container: AppContainer) {
             },
             title = { Text("Event Details") },
             text = {
+                val toolOutput = if (isToolResultEvent(entry.event.type)) {
+                    getToolCallOutput(entry.event)
+                } else {
+                    ""
+                }
                 LazyColumn {
                     item {
                         Text("Type: ${entry.event.type}")
-                        Text("Timestamp: ${formatTimestamp(entry.event.timestamp)}")
+                        Text("Timestamp: ${formatIsoDateTime(entry.event.timestamp)}")
+                        if (toolOutput.isNotBlank()) {
+                            Text(
+                                "Output",
+                                style = MaterialTheme.typography.labelMedium,
+                                modifier = Modifier.padding(top = 8.dp, bottom = 4.dp),
+                            )
+                            Text(
+                                toolOutput,
+                                fontFamily = FontFamily.Monospace,
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(max = 240.dp)
+                                    .verticalScroll(rememberScrollState()),
+                            )
+                        }
                         Text(
-                            json.encodeToString(SseEvent.serializer(), entry.event),
+                            formatEventJsonForDisplay(json, entry.event),
                             fontFamily = FontFamily.Monospace,
                             style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier
+                                .padding(top = 8.dp)
+                                .fillMaxWidth()
+                                .heightIn(max = 240.dp)
+                                .verticalScroll(rememberScrollState()),
                         )
                     }
                 }
@@ -264,20 +301,61 @@ fun MissionControlScreen(config: ServerConfig, container: AppContainer) {
     }
 }
 
-private fun formatTimestamp(ts: String?): String {
-    val formatter = SimpleDateFormat.getDateTimeInstance(
-        SimpleDateFormat.SHORT,
-        SimpleDateFormat.MEDIUM,
-        Locale.getDefault(),
-    )
-    if (ts.isNullOrBlank()) {
-        return formatter.format(Date())
-    }
-    return runCatching {
-        val instant = java.time.Instant.parse(ts)
-        formatter.format(Date.from(instant))
-    }.getOrElse { ts }
+private fun formatToolCallStartDetail(event: SseEvent): String {
+    val tool = event.tool ?: event.payload?.get("tool")?.jsonPrimitive?.contentOrNull
+    return tool.orEmpty()
 }
+
+private fun normalizeProvider(value: String?): String? =
+    if (value != null && value.startsWith("custom:", ignoreCase = true)) "custom" else value
+
+private fun normalizeEventJson(element: JsonElement): JsonElement = when (element) {
+    is JsonObject -> JsonObject(
+        element.mapValues { (key, value) ->
+            if (key == "provider" && value is JsonPrimitive && value.isString) {
+                JsonPrimitive(normalizeProvider(value.content) ?: value.content)
+            } else {
+                normalizeEventJson(value)
+            }
+        },
+    )
+    is JsonArray -> JsonArray(element.map { normalizeEventJson(it) })
+    else -> element
+}
+
+private fun formatEventJsonForDisplay(json: Json, event: SseEvent): String {
+    val encoded = json.encodeToJsonElement(SseEvent.serializer(), event)
+    return json.encodeToString(JsonElement.serializer(), normalizeEventJson(encoded))
+}
+
+private fun formatToolCallResultSummary(event: SseEvent): String {
+    val tool = event.tool ?: event.payload?.get("tool")?.jsonPrimitive?.contentOrNull
+    val success = event.success ?: event.payload?.get("success")?.jsonPrimitive?.booleanOrNull
+    val iteration = event.iteration ?: event.payload?.get("iteration")?.jsonPrimitive?.intOrNull
+    val model = event.model ?: event.payload?.get("model")?.jsonPrimitive?.contentOrNull
+    val durationMs = event.durationMs ?: event.payload?.get("duration_ms")?.jsonPrimitive?.longOrNull()
+
+    val summary = buildJsonObject {
+        tool?.let { put("tool", it) }
+        success?.let { put("success", it) }
+        iteration?.let { put("iteration", it) }
+        model?.let { put("model", it) }
+        durationMs?.let { put("duration_ms", it) }
+    }
+
+    return if (summary.isEmpty()) "" else summary.toString()
+}
+
+private fun JsonPrimitive.longOrNull(): Long? = content.toLongOrNull()
+
+private fun getToolCallOutput(event: SseEvent): String =
+    event.output
+        ?: event.payload?.get("output")?.jsonPrimitive?.contentOrNull
+        ?: event.message
+        .orEmpty()
+
+private fun isToolResultEvent(type: String): Boolean =
+    type == "tool_call_result" || type == "tool_result" || type == "tool_call"
 
 private fun formatEventDetail(event: SseEvent): String = when (event.type) {
     "turn_complete" -> "Agent completed turn"
@@ -288,9 +366,25 @@ private fun formatEventDetail(event: SseEvent): String = when (event.type) {
     "webhook_auth_failure" ->
         "Auth failure on ${event.channel} (signature: ${event.signature}, bearer: ${event.bearer})"
     "heartbeat_tick" -> "Runtime heartbeat"
-    else -> listOfNotNull(
-        event.message?.takeIf { it.isNotBlank() },
-        event.content?.takeIf { it.isNotBlank() },
-        event.data?.takeIf { it.isNotBlank() },
-    ).firstOrNull().orEmpty()
+    "tool_call_start" -> formatToolCallStartDetail(event)
+    "tool_call_result", "tool_result", "tool_call" -> formatToolCallResultSummary(event)
+    else -> {
+        val provider = normalizeProvider(
+            event.provider ?: event.payload?.get("provider")?.jsonPrimitive?.contentOrNull,
+        )
+        val model = event.model ?: event.payload?.get("model")?.jsonPrimitive?.contentOrNull
+        val summary = buildJsonObject {
+            provider?.let { put("provider", it) }
+            model?.let { put("model", it) }
+        }
+        if (summary.isNotEmpty()) {
+            summary.toString()
+        } else {
+            listOfNotNull(
+                event.message?.takeIf { it.isNotBlank() },
+                event.content?.takeIf { it.isNotBlank() },
+                event.data?.takeIf { it.isNotBlank() },
+            ).firstOrNull().orEmpty()
+        }
+    }
 }

@@ -61,16 +61,13 @@ impl Tool for FileWriteTool {
     async fn execute(&self, args: serde_json::Value) -> anyhow::Result<ToolResult> {
         let args_str = serde_json::to_string(&args).unwrap_or_else(|_| "(unprintable)".to_string());
 
-        let path = args
-            .get("path")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| {
-                tracing::warn!(
-                    args = %args_str,
-                    "file_write: 'path' parameter is missing or not a string"
-                );
-                anyhow::anyhow!("Missing 'path' parameter")
-            })?;
+        let path = args.get("path").and_then(|v| v.as_str()).ok_or_else(|| {
+            tracing::warn!(
+                args = %args_str,
+                "file_write: 'path' parameter is missing or not a string"
+            );
+            anyhow::anyhow!("Missing 'path' parameter")
+        })?;
 
         let content = match args.get("content") {
             None => {
@@ -301,7 +298,10 @@ mod tests {
         assert!(schema["properties"]["content"].is_object());
         let required = schema["required"].as_array().unwrap();
         assert!(required.contains(&json!("path")));
-        assert!(!required.contains(&json!("content")), "content should be optional");
+        assert!(
+            !required.contains(&json!("content")),
+            "content should be optional"
+        );
     }
 
     #[tokio::test]
@@ -445,7 +445,11 @@ mod tests {
 
         let tool = FileWriteTool::new(test_security(dir.clone()));
         let result = tool.execute(json!({"path": "file.txt"})).await.unwrap();
-        assert!(result.success, "missing content should create empty file: {:?}", result.error);
+        assert!(
+            result.success,
+            "missing content should create empty file: {:?}",
+            result.error
+        );
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
@@ -474,10 +478,7 @@ mod tests {
         tokio::fs::create_dir_all(&dir).await.unwrap();
 
         let tool = FileWriteTool::new(test_security(dir.clone()));
-        let result = tool
-            .execute(json!({"path": "touched.txt"}))
-            .await
-            .unwrap();
+        let result = tool.execute(json!({"path": "touched.txt"})).await.unwrap();
         assert!(result.success, "touch should succeed: {:?}", result.error);
         assert!(result.output.contains("0 bytes"));
         assert!(dir.join("touched.txt").exists(), "file should exist");
@@ -501,7 +502,11 @@ mod tests {
             .execute(json!({"path": "touched.txt", "content": null}))
             .await
             .unwrap();
-        assert!(result.success, "touch with null content should succeed: {:?}", result.error);
+        assert!(
+            result.success,
+            "touch with null content should succeed: {:?}",
+            result.error
+        );
         assert!(result.output.contains("0 bytes"));
 
         let _ = tokio::fs::remove_dir_all(&dir).await;

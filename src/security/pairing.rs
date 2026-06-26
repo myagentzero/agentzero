@@ -366,7 +366,10 @@ impl PairingGuard {
     }
 
     /// Load metadata from file and merge into current state (only for tokens that exist).
-    pub fn load_meta_from_file(&self, meta_map: std::collections::HashMap<String, PairedDeviceMeta>) {
+    pub fn load_meta_from_file(
+        &self,
+        meta_map: std::collections::HashMap<String, PairedDeviceMeta>,
+    ) {
         // Acquire locks in the canonical order (tokens before meta) to avoid
         // deadlocking against the other paths that hold both.
         let tokens = self.paired_tokens.lock();

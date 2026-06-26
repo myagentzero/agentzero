@@ -2,6 +2,7 @@ package com.agentzero.client.ui.screens
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -12,11 +13,14 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -39,10 +43,16 @@ import androidx.compose.ui.unit.dp
 import com.agentzero.client.AppContainer
 import com.agentzero.client.data.model.MemoryEntry
 import com.agentzero.client.data.model.ServerConfig
+import com.agentzero.client.ui.util.formatIsoDateTime
 import kotlinx.coroutines.launch
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
+
+private enum class MemoryCategoryFilter(val label: String, val apiValue: String?) {
+    All("All", null),
+    Conversation("Conversation", "conversation"),
+    Core("Core", "core"),
+    Daily("Daily", "daily"),
+    System("System", "system"),
+}
 
 @Composable
 fun MemoryScreen(config: ServerConfig, container: AppContainer) {
@@ -50,7 +60,8 @@ fun MemoryScreen(config: ServerConfig, container: AppContainer) {
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
     var search by remember { mutableStateOf("") }
-    var categoryFilter by remember { mutableStateOf("") }
+    var categoryFilter by remember { mutableStateOf(MemoryCategoryFilter.All) }
+    var categoryExpanded by remember { mutableStateOf(false) }
     var selected by remember { mutableStateOf<MemoryEntry?>(null) }
     var showAdd by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf<MemoryEntry?>(null) }
@@ -64,7 +75,7 @@ fun MemoryScreen(config: ServerConfig, container: AppContainer) {
                 entries = container.gatewayClient.getMemory(
                     config,
                     query = search.takeIf { it.isNotBlank() },
-                    category = categoryFilter.takeIf { it.isNotBlank() },
+                    category = categoryFilter.apiValue,
                 )
             }.onFailure { error = it.message }
             loading = false
@@ -98,13 +109,37 @@ fun MemoryScreen(config: ServerConfig, container: AppContainer) {
                     Icon(Icons.Default.Search, contentDescription = "Search")
                 }
             }
-            OutlinedTextField(
-                value = categoryFilter,
-                onValueChange = { categoryFilter = it },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("Category filter") },
-                singleLine = true,
-            )
+            Box(modifier = Modifier.fillMaxWidth()) {
+                OutlinedTextField(
+                    value = categoryFilter.label,
+                    onValueChange = {},
+                    readOnly = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Category") },
+                    trailingIcon = {
+                        Icon(Icons.Default.ArrowDropDown, contentDescription = "Select category")
+                    },
+                )
+                Box(
+                    Modifier
+                        .matchParentSize()
+                        .clickable { categoryExpanded = true },
+                )
+                DropdownMenu(
+                    expanded = categoryExpanded,
+                    onDismissRequest = { categoryExpanded = false },
+                ) {
+                    MemoryCategoryFilter.entries.forEach { option ->
+                        DropdownMenuItem(
+                            text = { Text(option.label) },
+                            onClick = {
+                                categoryFilter = option
+                                categoryExpanded = false
+                            },
+                        )
+                    }
+                }
+            }
 
             error?.let {
                 Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 8.dp))
@@ -166,7 +201,7 @@ fun MemoryScreen(config: ServerConfig, container: AppContainer) {
                 ) {
                     item {
                         Text("Category: ${entry.category}")
-                        Text("Created: ${formatDate(entry.timestamp)}")
+                        Text("Created: ${formatIsoDateTime(entry.timestamp)}")
                         Text(entry.content)
                     }
                 }
@@ -243,6 +278,3 @@ fun MemoryScreen(config: ServerConfig, container: AppContainer) {
     }
 }
 
-private fun formatDate(iso: String): String = runCatching {
-    SimpleDateFormat.getDateTimeInstance().format(Date(iso))
-}.getOrElse { iso }

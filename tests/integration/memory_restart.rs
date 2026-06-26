@@ -6,9 +6,9 @@
 //! Tests SqliteMemory deduplication on restart, session scoping, concurrent
 //! message ordering, and recall behavior after re-initialization.
 
-use std::sync::Arc;
 use agentzero::memory::sqlite::SqliteMemory;
 use agentzero::memory::traits::{Memory, MemoryCategory};
+use std::sync::Arc;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Deduplication: same key overwrites instead of duplicating (#430)
