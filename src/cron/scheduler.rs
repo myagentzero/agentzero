@@ -255,7 +255,12 @@ async fn persist_job_result(
     if is_one_shot_auto_delete(job) {
         if success {
             if let Err(e) = remove_job(config, &job.id) {
-                tracing::warn!("Failed to remove one-shot cron job after success: {e}");
+                let msg = e.to_string();
+                if msg.contains("not found") {
+                    tracing::debug!("One-shot cron job already removed: {}", job.id);
+                } else {
+                    tracing::warn!("Failed to remove one-shot cron job after success: {e}");
+                }
             }
         } else {
             let _ = record_last_run(config, &job.id, finished_at, false, output);

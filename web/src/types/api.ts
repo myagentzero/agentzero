@@ -121,6 +121,7 @@ export interface PairedDevice {
   token_fingerprint: string;
   created_at: string | null;
   paired_by: string | null;
+  device_name: string | null;
 }
 
 export interface CostSummary {

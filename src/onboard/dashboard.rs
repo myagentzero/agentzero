@@ -2359,6 +2359,7 @@ async fn pair_with_gateway(base_url: &str, code: &str) -> Result<String> {
     let resp = client
         .post(format!("{base_url}/pair"))
         .header("X-Pairing-Code", code)
+        .header("X-Device-Name", "TUI")
         .send()
         .await?;
     anyhow::ensure!(

@@ -823,8 +823,12 @@ async fn handle_pair(
         .get("X-Pairing-Code")
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
+    let device_name = headers
+        .get("X-Device-Name")
+        .and_then(|v| v.to_str().ok())
+        .and_then(crate::security::pairing::normalize_device_name);
 
-    match state.pairing.try_pair(code, &rate_key).await {
+    match state.pairing.try_pair(code, &rate_key, device_name).await {
         Ok(Some(token)) => {
             tracing::info!("🔐 New client paired successfully");
             if let Err(err) = persist_pairing_tokens(state.config.clone(), &state.pairing).await {
@@ -2463,7 +2467,11 @@ mod tests {
 
         let guard = PairingGuard::new(true, &[], None);
         let code = guard.pairing_code().unwrap();
-        let token = guard.try_pair(&code, "test_client").await.unwrap().unwrap();
+        let token = guard
+            .try_pair(&code, "test_client", None)
+            .await
+            .unwrap()
+            .unwrap();
         assert!(guard.is_authenticated(&token));
 
         let shared_config = Arc::new(Mutex::new(config));

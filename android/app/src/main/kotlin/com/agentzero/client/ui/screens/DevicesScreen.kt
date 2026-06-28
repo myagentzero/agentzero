@@ -117,6 +117,10 @@ fun DevicesScreen(config: ServerConfig, container: AppContainer) {
                 items(devices, key = { it.id }) { device ->
                     Card(Modifier.fillMaxWidth()) {
                         Column(Modifier.padding(12.dp)) {
+                            Text(
+                                device.deviceName ?: "Unknown",
+                                style = MaterialTheme.typography.titleSmall,
+                            )
                             Text(device.tokenFingerprint, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
                             Text("Paired by: ${device.pairedBy ?: "Unknown"}", style = MaterialTheme.typography.labelSmall)
                             Text("Created: ${formatIsoDateTime(device.createdAt)}", style = MaterialTheme.typography.labelSmall)
@@ -134,7 +138,7 @@ fun DevicesScreen(config: ServerConfig, container: AppContainer) {
         AlertDialog(
             onDismissRequest = { pendingRevoke = null },
             title = { Text("Revoke device?") },
-            text = { Text("Revoke ${device.tokenFingerprint}?") },
+            text = { Text("Revoke ${device.deviceName ?: device.tokenFingerprint}?") },
             confirmButton = {
                 TextButton(onClick = {
                     scope.launch {

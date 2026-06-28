@@ -84,7 +84,10 @@ function unwrapField<T>(value: T | Record<string, T>, key: string): T {
 export async function pair(code: string): Promise<{ token: string }> {
   const response = await fetch('/pair', {
     method: 'POST',
-    headers: { 'X-Pairing-Code': code },
+    headers: {
+      'X-Pairing-Code': code,
+      'X-Device-Name': 'Web',
+    },
   });
 
   if (!response.ok) {

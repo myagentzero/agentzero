@@ -138,6 +138,9 @@ export default function Devices() {
             <thead>
               <tr className="border-b border-gray-800">
                 <th className="px-4 py-3 text-left font-medium text-gray-400">
+                  Device Name
+                </th>
+                <th className="px-4 py-3 text-left font-medium text-gray-400">
                   Device ID
                 </th>
                 <th className="px-4 py-3 text-left font-medium text-gray-400">
@@ -157,6 +160,9 @@ export default function Devices() {
                   key={device.id}
                   className="border-b border-gray-800/50 transition-colors hover:bg-gray-800/30"
                 >
+                  <td className="px-4 py-3 text-gray-300">
+                    {device.device_name ?? 'Unknown'}
+                  </td>
                   <td className="px-4 py-3 font-mono text-xs text-white">
                     {device.token_fingerprint}
                   </td>

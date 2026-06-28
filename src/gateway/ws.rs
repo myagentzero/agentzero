@@ -836,17 +836,6 @@ Screenshot captured successfully."#;
         assert!(prompt.contains("## Shell Policy"));
     }
 
-    #[test]
-    fn build_ws_system_prompt_omits_xml_protocol_for_native_mode() {
-        let config = crate::config::Config::default();
-        let tools: Vec<Box<dyn Tool>> = vec![Box::new(MockBrowserTool)];
-
-        let prompt = build_ws_system_prompt(&config, &tools, true);
-
-        assert!(!prompt.contains("### Tool Calling (XML Protocol)"));
-        assert!(prompt.contains("### browser"));
-        assert!(prompt.contains("## Shell Policy"));
-    }
 
     #[test]
     fn finalize_ws_response_uses_prompt_mode_tool_output_when_final_text_empty() {

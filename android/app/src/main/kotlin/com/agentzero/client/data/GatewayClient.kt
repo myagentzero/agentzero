@@ -51,6 +51,7 @@ class GatewayClient(
             .url("${config.baseUrl}/pair")
             .post("".toRequestBody("application/json".toMediaType()))
             .header("X-Pairing-Code", code.trim())
+            .header("X-Device-Name", "Android")
             .build()
 
         val body = execute(request)

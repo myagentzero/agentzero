@@ -56,19 +56,16 @@ impl Tool for CronAddTool {
     }
 
     fn description(&self) -> &str {
-        "Schedule shell commands or agent prompts. Agent jobs: job_type=agent + prompt; \
-one-shot use schedule.kind=at with RFC3339 at (e.g. 2026-06-29T09:00:00Z); \
-recurring agent jobs need recurring_confirmed=true."
+        "Schedule shell commands or agent prompts."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {
         json!({
             "type": "object",
-            "description": "Shell jobs need command; agent jobs need prompt (or job_type='agent').",
             "properties": {
                 "name": {
                     "type": "string",
-                    "description": "Optional stable job name."
+                    "description": "Short readable job name."
                 },
                 "schedule": {
                     "type": "object",

@@ -77,6 +77,7 @@ data class PairedDevice(
     @SerialName("token_fingerprint") val tokenFingerprint: String,
     @SerialName("created_at") val createdAt: String? = null,
     @SerialName("paired_by") val pairedBy: String? = null,
+    @SerialName("device_name") val deviceName: String? = null,
 )
 
 @Serializable

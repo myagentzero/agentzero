@@ -330,8 +330,8 @@ impl Tool for ServiceNowTool {
     }
 
     fn description(&self) -> &str {
-        "ServiceNow Table API: list_records, get_record, create_record, update_record. \
-         Common tables: incident, change_request, problem, sc_request, task, cmdb_ci."
+        "ServiceNow Table API. \
+         Common records: incident (INC), change (CHG), problem (PRB), vulnerability (VUL), sc_request (REQ), task (TASK), cmdb_ci (CI)."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {
@@ -345,7 +345,7 @@ impl Tool for ServiceNowTool {
                 },
                 "table": {
                     "type": "string",
-                    "description": "ServiceNow table name (e.g. incident, change_request, problem, sc_request, task)"
+                    "description": "ServiceNow table name (e.g. incident, change_request, problem, sn_vul_vulnerable_item, sc_request, task, cmdb_ci)"
                 },
                 "sys_id": {
                     "type": "string",

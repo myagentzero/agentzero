@@ -20,7 +20,7 @@ dependencies = [
 
 [[package]]
 name = "agentzero"
-version = "0.2.45"
+version = "0.2.47"
 dependencies = [
  "aho-corasick",
  "anyhow",

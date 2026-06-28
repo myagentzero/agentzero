@@ -26,6 +26,8 @@ const FAILED_ATTEMPT_RETENTION_SECS: u64 = 900; // 15 min
 const FAILED_ATTEMPT_SWEEP_INTERVAL_SECS: u64 = 300; // 5 min
 /// Display length for stable paired-device IDs derived from token hash prefix.
 const DEVICE_ID_PREFIX_LEN: usize = 16;
+/// Maximum length for client-supplied device names (via `X-Device-Name` on `/pair`).
+const MAX_DEVICE_NAME_LEN: usize = 64;
 
 /// Per-client failed attempt state with optional absolute lockout deadline.
 #[derive(Debug, Clone, Copy)]
@@ -39,6 +41,8 @@ struct FailedAttemptState {
 pub struct PairedDeviceMeta {
     created_at: Option<String>,
     paired_by: Option<String>,
+    #[serde(default)]
+    device_name: Option<String>,
 }
 
 impl PairedDeviceMeta {
@@ -46,13 +50,15 @@ impl PairedDeviceMeta {
         Self {
             created_at: None,
             paired_by: None,
+            device_name: None,
         }
     }
 
-    fn fresh(paired_by: Option<String>) -> Self {
+    fn fresh(paired_by: Option<String>, device_name: Option<String>) -> Self {
         Self {
             created_at: Some(now_rfc3339()),
             paired_by,
+            device_name,
         }
     }
 }
@@ -63,6 +69,7 @@ pub struct PairedDevice {
     pub token_fingerprint: String,
     pub created_at: Option<String>,
     pub paired_by: Option<String>,
+    pub device_name: Option<String>,
 }
 
 /// Manages pairing state for the gateway.
@@ -140,7 +147,12 @@ impl PairingGuard {
         self.require_pairing
     }
 
-    fn try_pair_blocking(&self, code: &str, client_id: &str) -> Result<Option<String>, u64> {
+    fn try_pair_blocking(
+        &self,
+        code: &str,
+        client_id: &str,
+        device_name: Option<String>,
+    ) -> Result<Option<String>, u64> {
         let client_id = normalize_client_key(client_id);
         let now = Instant::now();
 
@@ -186,7 +198,7 @@ impl PairingGuard {
                     let mut metadata = self.paired_device_meta.lock();
                     metadata.insert(
                         hashed_token,
-                        PairedDeviceMeta::fresh(Some(client_id.clone())),
+                        PairedDeviceMeta::fresh(Some(client_id.clone()), device_name),
                     );
 
                     // Consume the pairing code so it cannot be reused
@@ -237,12 +249,19 @@ impl PairingGuard {
     /// Attempt to pair with the given code. Returns a bearer token on success.
     /// Returns `Err(lockout_seconds)` if locked out due to brute force.
     /// `client_id` identifies the client for per-client lockout accounting.
-    pub async fn try_pair(&self, code: &str, client_id: &str) -> Result<Option<String>, u64> {
+    pub async fn try_pair(
+        &self,
+        code: &str,
+        client_id: &str,
+        device_name: Option<String>,
+    ) -> Result<Option<String>, u64> {
         let this = self.clone();
         let code = code.to_string();
         let client_id = client_id.to_string();
         // TODO: make this function the main one without spawning a task
-        let handle = tokio::task::spawn_blocking(move || this.try_pair_blocking(&code, &client_id));
+        let handle = tokio::task::spawn_blocking(move || {
+            this.try_pair_blocking(&code, &client_id, device_name)
+        });
 
         match handle.await {
             Ok(result) => result,
@@ -296,6 +315,7 @@ impl PairingGuard {
                     token_fingerprint: id,
                     created_at: meta.created_at,
                     paired_by: meta.paired_by,
+                    device_name: meta.device_name,
                 }
             })
             .collect();
@@ -385,6 +405,21 @@ impl PairingGuard {
     /// Get a snapshot of all current device metadata for persistence.
     pub fn device_meta_snapshot(&self) -> std::collections::HashMap<String, PairedDeviceMeta> {
         self.paired_device_meta.lock().clone()
+    }
+}
+
+/// Normalize a client-supplied device name from the `X-Device-Name` header.
+pub(crate) fn normalize_device_name(name: &str) -> Option<String> {
+    let trimmed: String = name
+        .trim()
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(MAX_DEVICE_NAME_LEN)
+        .collect();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed)
     }
 }
 
@@ -522,7 +557,7 @@ mod tests {
     async fn try_pair_correct_code() {
         let guard = PairingGuard::new(true, &[], None);
         let code = guard.pairing_code().unwrap().to_string();
-        let token = guard.try_pair(&code, "test_client").await.unwrap();
+        let token = guard.try_pair(&code, "test_client", None).await.unwrap();
         assert!(token.is_some());
         assert!(token.unwrap().starts_with("zc_"));
         assert!(guard.is_paired());
@@ -531,7 +566,7 @@ mod tests {
     #[test]
     async fn try_pair_wrong_code() {
         let guard = PairingGuard::new(true, &[], None);
-        let result = guard.try_pair("000000", "test_client").await.unwrap();
+        let result = guard.try_pair("000000", "test_client", None).await.unwrap();
         // Might succeed if code happens to be 000000, but extremely unlikely
         // Just check it returns Ok(None) normally
         let _ = result;
@@ -540,7 +575,13 @@ mod tests {
     #[test]
     async fn try_pair_empty_code() {
         let guard = PairingGuard::new(true, &[], None);
-        assert!(guard.try_pair("", "test_client").await.unwrap().is_none());
+        assert!(
+            guard
+                .try_pair("", "test_client", None)
+                .await
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]
@@ -588,7 +629,11 @@ mod tests {
     async fn pair_then_authenticate() {
         let guard = PairingGuard::new(true, &[], None);
         let code = guard.pairing_code().unwrap().to_string();
-        let token = guard.try_pair(&code, "test_client").await.unwrap().unwrap();
+        let token = guard
+            .try_pair(&code, "test_client", None)
+            .await
+            .unwrap()
+            .unwrap();
         assert!(guard.is_authenticated(&token));
         assert!(!guard.is_authenticated("wrong"));
     }
@@ -597,7 +642,11 @@ mod tests {
     async fn paired_devices_and_revoke_device_roundtrip() {
         let guard = PairingGuard::new(true, &[], None);
         let code = guard.pairing_code().unwrap().to_string();
-        let token = guard.try_pair(&code, "test_client").await.unwrap().unwrap();
+        let token = guard
+            .try_pair(&code, "test_client", None)
+            .await
+            .unwrap()
+            .unwrap();
         assert!(guard.is_authenticated(&token));
 
         let devices = guard.paired_devices();
@@ -612,6 +661,35 @@ mod tests {
         assert!(
             guard.pairing_code().is_some(),
             "revoke of final device should regenerate one-time pairing code"
+        );
+    }
+
+    #[test]
+    async fn pair_stores_device_name_in_metadata() {
+        let guard = PairingGuard::new(true, &[], None);
+        let code = guard.pairing_code().unwrap().to_string();
+        let token = guard
+            .try_pair(&code, "test_client", Some("Web".to_string()))
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(guard.is_authenticated(&token));
+
+        let devices = guard.paired_devices();
+        assert_eq!(devices.len(), 1);
+        assert_eq!(devices[0].device_name.as_deref(), Some("Web"));
+    }
+
+    #[test]
+    async fn normalize_device_name_trims_and_limits_length() {
+        assert_eq!(
+            normalize_device_name("  Android  "),
+            Some("Android".to_string())
+        );
+        assert_eq!(normalize_device_name(""), None);
+        assert_eq!(
+            normalize_device_name(&"x".repeat(MAX_DEVICE_NAME_LEN + 10)).map(|s| s.len()),
+            Some(MAX_DEVICE_NAME_LEN)
         );
     }
 
@@ -724,11 +802,11 @@ mod tests {
         let client = "attacker_client";
         // Exhaust all attempts with wrong codes
         for i in 0..MAX_PAIR_ATTEMPTS {
-            let result = guard.try_pair(&format!("wrong_{i}"), client).await;
+            let result = guard.try_pair(&format!("wrong_{i}"), client, None).await;
             assert!(result.is_ok(), "Attempt {i} should not be locked out yet");
         }
         // Next attempt should be locked out
-        let result = guard.try_pair("another_wrong", client).await;
+        let result = guard.try_pair("another_wrong", client, None).await;
         assert!(
             result.is_err(),
             "Should be locked out after {MAX_PAIR_ATTEMPTS} attempts"
@@ -748,10 +826,10 @@ mod tests {
         let client = "test_client";
         // Fail a few times
         for _ in 0..3 {
-            let _ = guard.try_pair("wrong", client).await;
+            let _ = guard.try_pair("wrong", client, None).await;
         }
         // Correct code should still work (under MAX_PAIR_ATTEMPTS)
-        let result = guard.try_pair(&code, client).await.unwrap();
+        let result = guard.try_pair(&code, client, None).await.unwrap();
         assert!(result.is_some(), "Correct code should work before lockout");
     }
 
@@ -760,9 +838,9 @@ mod tests {
         let guard = PairingGuard::new(true, &[], None);
         let client = "test_client";
         for _ in 0..MAX_PAIR_ATTEMPTS {
-            let _ = guard.try_pair("wrong", client).await;
+            let _ = guard.try_pair("wrong", client, None).await;
         }
-        let err = guard.try_pair("wrong", client).await.unwrap_err();
+        let err = guard.try_pair("wrong", client, None).await.unwrap_err();
         // Should be close to PAIR_LOCKOUT_SECS (within a second)
         assert!(
             err >= PAIR_LOCKOUT_SECS - 1,
@@ -779,12 +857,12 @@ mod tests {
 
         // Both clients fail a few times
         for _ in 0..3 {
-            let _ = guard.try_pair("wrong", client_a).await;
-            let _ = guard.try_pair("wrong", client_b).await;
+            let _ = guard.try_pair("wrong", client_a, None).await;
+            let _ = guard.try_pair("wrong", client_b, None).await;
         }
 
         // client_a pairs successfully — only its state should reset
-        let result = guard.try_pair(&code, client_a).await.unwrap();
+        let result = guard.try_pair(&code, client_a, None).await.unwrap();
         assert!(result.is_some(), "client_a should pair successfully");
 
         // client_b's failed count should still be intact (3 failures recorded)
@@ -829,7 +907,7 @@ mod tests {
         }
 
         // A new client triggers an attempt — should prune stale entries and fit
-        let result = guard.try_pair("wrong", "new_client").await;
+        let result = guard.try_pair("wrong", "new_client", None).await;
         assert!(result.is_ok(), "New client should not be blocked");
 
         let state = guard.failed_attempts.lock();
@@ -873,7 +951,7 @@ mod tests {
         }
 
         // Any attempt triggers sweep
-        let _ = guard.try_pair("wrong", "fresh_client").await;
+        let _ = guard.try_pair("wrong", "fresh_client", None).await;
 
         let state = guard.failed_attempts.lock();
         assert!(
@@ -894,13 +972,13 @@ mod tests {
 
         // Attacker exhausts attempts
         for i in 0..MAX_PAIR_ATTEMPTS {
-            let _ = guard.try_pair(&format!("wrong_{i}"), attacker).await;
+            let _ = guard.try_pair(&format!("wrong_{i}"), attacker, None).await;
         }
         // Attacker is locked out
-        assert!(guard.try_pair("wrong", attacker).await.is_err());
+        assert!(guard.try_pair("wrong", attacker, None).await.is_err());
 
         // Legitimate client is NOT locked out
-        let result = guard.try_pair("wrong", legitimate).await;
+        let result = guard.try_pair("wrong", legitimate, None).await;
         assert!(
             result.is_ok(),
             "Legitimate client should not be locked out by attacker"
@@ -929,11 +1007,19 @@ mod tests {
     async fn generate_paircode_allows_second_device_to_pair() {
         let guard = PairingGuard::new(true, &[], None);
         let code1 = guard.pairing_code().unwrap().to_string();
-        let token1 = guard.try_pair(&code1, "device1").await.unwrap().unwrap();
+        let token1 = guard
+            .try_pair(&code1, "device1", None)
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(guard.paired_devices().len(), 1);
 
         let code2 = guard.generate_paircode();
-        let token2 = guard.try_pair(&code2, "device2").await.unwrap().unwrap();
+        let token2 = guard
+            .try_pair(&code2, "device2", None)
+            .await
+            .unwrap()
+            .unwrap();
 
         assert!(
             guard.is_authenticated(&token1),
@@ -962,7 +1048,7 @@ mod tests {
         let guard = PairingGuard::new(true, &["zc_old".into()], None);
         guard.reset_pairing("111222".to_string());
 
-        let token = guard.try_pair("111222", "test_client").await.unwrap();
+        let token = guard.try_pair("111222", "test_client", None).await.unwrap();
         assert!(token.is_some(), "pairing with new code should succeed");
         assert!(guard.is_paired());
     }
