@@ -335,7 +335,7 @@ fn group_tool_specs_by_category(
 ) -> Vec<(crate::tools::ToolCategory, Vec<&crate::tools::ToolSpec>)> {
     use crate::tools::ToolCategory;
 
-    const CATEGORY_ORDER: [ToolCategory; 11] = [
+    const CATEGORY_ORDER: [ToolCategory; 12] = [
         ToolCategory::FileTools,
         ToolCategory::DeveloperTools,
         ToolCategory::WebTools,
@@ -343,6 +343,7 @@ fn group_tool_specs_by_category(
         ToolCategory::MemoryTools,
         ToolCategory::OrchestrationTools,
         ToolCategory::IntegrationTools,
+        ToolCategory::McpTools,
         ToolCategory::CommunicationTools,
         ToolCategory::HardwareTools,
         ToolCategory::UtilityTools,

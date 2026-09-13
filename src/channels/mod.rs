@@ -47,7 +47,7 @@ use crate::providers::{self, ChatMessage, Provider};
 use crate::runtime;
 use crate::security::pairing::PairingGuard;
 use crate::security::{LeakDetector, LeakResult, SecurityPolicy};
-use crate::tools::Tool;
+use crate::tools::{McpRegistry, Tool};
 use crate::util::truncate_with_ellipsis;
 use anyhow::{Context, Result};
 use serde::Deserialize;
@@ -5102,11 +5102,20 @@ pub async fn doctor_channels(config: Config) -> Result<()> {
 }
 
 /// Start all configured channels and route messages to the agent
-#[allow(clippy::too_many_lines)]
 pub async fn start_channels(
     config: Config,
     gateway_pairing: Option<Arc<PairingGuard>>,
     event_tx: Option<tokio::sync::broadcast::Sender<serde_json::Value>>,
+) -> Result<()> {
+    start_channels_with_mcp(config, gateway_pairing, event_tx, None).await
+}
+
+#[allow(clippy::too_many_lines)]
+pub(crate) async fn start_channels_with_mcp(
+    config: Config,
+    gateway_pairing: Option<Arc<PairingGuard>>,
+    event_tx: Option<tokio::sync::broadcast::Sender<serde_json::Value>>,
+    shared_mcp_registry: Option<Arc<McpRegistry>>,
 ) -> Result<()> {
     // Ensure stale channel handles are never reused across restarts.
     clear_live_channels();
@@ -5213,12 +5222,13 @@ pub async fn start_channels(
         config.api_key.as_deref(),
     )?);
     // Build system prompt from workspace identity files + skills
-    let built_tools = crate::agent::tools_registry::build_tools_registry(
+    let built_tools = crate::agent::tools_registry::build_tools_registry_with_mcp(
         &config,
         &security,
         runtime,
         Arc::clone(&mem),
         crate::agent::tools_registry::ToolsRegistryOptions::CHANNEL,
+        shared_mcp_registry,
     )
     .await?;
     let tools_registry = Arc::new(built_tools);

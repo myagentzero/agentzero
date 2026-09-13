@@ -27,6 +27,8 @@ pub enum ToolCategory {
     OrchestrationTools,
     /// Third-party service integrations (Jira, Notion, GitHub API, etc).
     IntegrationTools,
+    /// Tools discovered from configured Model Context Protocol servers.
+    McpTools,
     /// User interaction and messaging.
     CommunicationTools,
     /// Hardware peripherals and embedded boards.
@@ -48,6 +50,7 @@ impl fmt::Display for ToolCategory {
             Self::MemoryTools => "Memory Tools",
             Self::OrchestrationTools => "Orchestration Tools",
             Self::IntegrationTools => "Integration Tools",
+            Self::McpTools => "MCP Tools",
             Self::CommunicationTools => "Communication Tools",
             Self::HardwareTools => "Hardware Tools",
             Self::UtilityTools => "Utility Tools",
@@ -145,6 +148,11 @@ mod tests {
         assert_eq!(spec.description, "A deterministic test tool");
         assert_eq!(spec.parameters["type"], "object");
         assert_eq!(spec.parameters["properties"]["value"]["type"], "string");
+    }
+
+    #[test]
+    fn mcp_category_has_distinct_display_name() {
+        assert_eq!(ToolCategory::McpTools.to_string(), "MCP Tools");
     }
 
     #[tokio::test]

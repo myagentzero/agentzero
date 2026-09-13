@@ -82,7 +82,12 @@ pub fn filter_primary_agent_tools_or_fail(
     Ok(filtered_tools)
 }
 
-async fn append_mcp_tools(config: &Config, tools_registry: &mut Vec<Box<dyn Tool>>) {
+/// Connect the configured MCP servers once for reuse across tool registries.
+pub(crate) async fn connect_mcp_registry(config: &Config) -> Option<Arc<McpRegistry>> {
+    if !config.mcp.enabled || config.mcp.servers.is_empty() {
+        return None;
+    }
+
     tracing::info!(
         "Initializing MCP client — {} server(s) configured",
         config.mcp.servers.len()
@@ -90,23 +95,25 @@ async fn append_mcp_tools(config: &Config, tools_registry: &mut Vec<Box<dyn Tool
     match McpRegistry::connect_all(&config.mcp.servers).await {
         Ok(registry) => {
             let registry = Arc::new(registry);
-            let names = registry.tool_names();
-            let mut registered = 0usize;
-            for name in names {
-                if let Some(def) = registry.get_tool_def(&name).await {
-                    let wrapper = McpToolWrapper::new(name, def, Arc::clone(&registry));
-                    tools_registry.push(Box::new(wrapper));
-                    registered += 1;
-                }
-            }
             tracing::info!(
-                "MCP: {} tool(s) registered from {} server(s)",
-                registered,
+                "MCP registry ready — {} tool(s) from {} server(s)",
+                registry.tool_count(),
                 registry.server_count()
             );
+            Some(registry)
         }
         Err(e) => {
             tracing::error!("MCP registry failed to initialize: {e:#}");
+            None
+        }
+    }
+}
+
+async fn append_mcp_tools(registry: Arc<McpRegistry>, tools_registry: &mut Vec<Box<dyn Tool>>) {
+    for name in registry.tool_names() {
+        if let Some(def) = registry.get_tool_def(&name).await {
+            let wrapper = McpToolWrapper::new(name, def, Arc::clone(&registry));
+            tools_registry.push(Box::new(wrapper));
         }
     }
 }
@@ -118,6 +125,18 @@ pub async fn build_tools_registry(
     runtime: Arc<dyn RuntimeAdapter>,
     memory: Arc<dyn Memory>,
     options: ToolsRegistryOptions,
+) -> Result<Vec<Box<dyn Tool>>> {
+    build_tools_registry_with_mcp(config, security, runtime, memory, options, None).await
+}
+
+/// Build a tool registry, reusing an existing MCP connection when supplied.
+pub(crate) async fn build_tools_registry_with_mcp(
+    config: &Config,
+    security: &Arc<SecurityPolicy>,
+    runtime: Arc<dyn RuntimeAdapter>,
+    memory: Arc<dyn Memory>,
+    options: ToolsRegistryOptions,
+    shared_mcp_registry: Option<Arc<McpRegistry>>,
 ) -> Result<Vec<Box<dyn Tool>>> {
     let (composio_key, composio_entity_id) = if config.composio.enabled {
         (
@@ -154,7 +173,13 @@ pub async fn build_tools_registry(
     }
 
     if options.include_mcp && config.mcp.enabled && !config.mcp.servers.is_empty() {
-        append_mcp_tools(config, &mut tools_registry).await;
+        let registry = match shared_mcp_registry {
+            Some(registry) => Some(registry),
+            None => connect_mcp_registry(config).await,
+        };
+        if let Some(registry) = registry {
+            append_mcp_tools(registry, &mut tools_registry).await;
+        }
     }
 
     if options.apply_agent_tool_filters {
@@ -182,6 +207,14 @@ mod tests {
     }
 
     async fn build_for(config: &Config, options: ToolsRegistryOptions) -> Vec<Box<dyn Tool>> {
+        build_for_with_mcp(config, options, None).await
+    }
+
+    async fn build_for_with_mcp(
+        config: &Config,
+        options: ToolsRegistryOptions,
+        shared_mcp_registry: Option<Arc<McpRegistry>>,
+    ) -> Vec<Box<dyn Tool>> {
         let runtime: Arc<dyn RuntimeAdapter> =
             Arc::from(crate::runtime::create_runtime(&config.runtime).unwrap());
         let security = Arc::new(SecurityPolicy::from_config(
@@ -197,9 +230,16 @@ mod tests {
             )
             .unwrap(),
         );
-        build_tools_registry(config, &security, runtime, mem, options)
-            .await
-            .unwrap()
+        build_tools_registry_with_mcp(
+            config,
+            &security,
+            runtime,
+            mem,
+            options,
+            shared_mcp_registry,
+        )
+        .await
+        .unwrap()
     }
 
     fn mock_mcp_server_script(dir: &Path) -> std::path::PathBuf {
@@ -294,6 +334,47 @@ done
                 .map(|t| t.name().to_string())
                 .collect::<Vec<_>>()
         );
+        assert_eq!(
+            tools
+                .iter()
+                .find(|tool| tool.name() == "mock__ping")
+                .expect("MCP tool")
+                .category(),
+            crate::tools::ToolCategory::McpTools
+        );
+    }
+
+    #[tokio::test]
+    async fn shared_mcp_registry_is_reused_by_multiple_tool_registries() {
+        let tmp = TempDir::new().unwrap();
+        let script = mock_mcp_server_script(tmp.path());
+        let mut config = test_config(&tmp);
+        config.mcp.enabled = true;
+        config.mcp.servers = vec![mock_server_config(&script)];
+
+        let shared = connect_mcp_registry(&config)
+            .await
+            .expect("MCP registry should connect");
+        let initial_refs = Arc::strong_count(&shared);
+
+        let gateway_tools = build_for_with_mcp(
+            &config,
+            ToolsRegistryOptions::GATEWAY,
+            Some(Arc::clone(&shared)),
+        )
+        .await;
+        let gateway_refs = Arc::strong_count(&shared);
+        let channel_tools = build_for_with_mcp(
+            &config,
+            ToolsRegistryOptions::CHANNEL,
+            Some(Arc::clone(&shared)),
+        )
+        .await;
+
+        assert!(gateway_tools.iter().any(|tool| tool.name() == "mock__ping"));
+        assert!(channel_tools.iter().any(|tool| tool.name() == "mock__ping"));
+        assert!(gateway_refs > initial_refs);
+        assert!(Arc::strong_count(&shared) > gateway_refs);
     }
 
     #[tokio::test]

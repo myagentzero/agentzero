@@ -131,6 +131,10 @@ pub async fn run(config: Config, host: String, port: u16) -> Result<()> {
     // publish events to the same stream visible in Live Logs.
     let (event_tx, _) = tokio::sync::broadcast::channel::<serde_json::Value>(256);
 
+    // MCP transports are process-level resources. Reuse one registry across
+    // gateway and channel tool registries so stdio servers are spawned once.
+    let shared_mcp_registry = crate::agent::tools_registry::connect_mcp_registry(&config).await;
+
     let mut handles: Vec<JoinHandle<()>> = vec![spawn_state_writer(config.clone())];
 
     {
@@ -138,6 +142,7 @@ pub async fn run(config: Config, host: String, port: u16) -> Result<()> {
         let gateway_host = host.clone();
         let pairing = Arc::clone(&shared_pairing);
         let tx = event_tx.clone();
+        let mcp_registry = shared_mcp_registry.clone();
         handles.push(spawn_component_supervisor(
             "gateway",
             initial_backoff,
@@ -147,8 +152,17 @@ pub async fn run(config: Config, host: String, port: u16) -> Result<()> {
                 let host = gateway_host.clone();
                 let p = Arc::clone(&pairing);
                 let tx = tx.clone();
+                let mcp_registry = mcp_registry.clone();
                 async move {
-                    crate::gateway::run_gateway(&host, port, cfg, Some(p), Some(tx)).await
+                    crate::gateway::run_gateway_with_mcp(
+                        &host,
+                        port,
+                        cfg,
+                        Some(p),
+                        Some(tx),
+                        mcp_registry,
+                    )
+                    .await
                 }
             },
         ));
@@ -159,6 +173,7 @@ pub async fn run(config: Config, host: String, port: u16) -> Result<()> {
             let channels_cfg = config.clone();
             let pairing = Arc::clone(&shared_pairing);
             let tx = event_tx.clone();
+            let mcp_registry = shared_mcp_registry.clone();
             handles.push(spawn_component_supervisor(
                 "channels",
                 initial_backoff,
@@ -167,8 +182,15 @@ pub async fn run(config: Config, host: String, port: u16) -> Result<()> {
                     let cfg = channels_cfg.clone();
                     let p = Arc::clone(&pairing);
                     let tx = tx.clone();
+                    let mcp_registry = mcp_registry.clone();
                     async move {
-                        Box::pin(crate::channels::start_channels(cfg, Some(p), Some(tx))).await
+                        Box::pin(crate::channels::start_channels_with_mcp(
+                            cfg,
+                            Some(p),
+                            Some(tx),
+                            mcp_registry,
+                        ))
+                        .await
                     }
                 },
             ));

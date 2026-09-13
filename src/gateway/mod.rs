@@ -21,8 +21,8 @@ use crate::providers::{self, ChatMessage, ChatRequest, Provider, RoutedChatRespo
 use crate::runtime;
 use crate::security::SecurityPolicy;
 use crate::security::pairing::{PairingGuard, constant_time_eq, is_public_bind};
-use crate::tools::Tool;
 use crate::tools::traits::ToolSpec;
+use crate::tools::{McpRegistry, Tool};
 use anyhow::{Context, Result};
 use axum::{
     Router,
@@ -346,13 +346,32 @@ pub struct AppState {
 }
 
 /// Run the HTTP gateway using axum with proper HTTP/1.1 compliance.
-#[allow(clippy::too_many_lines)]
 pub async fn run_gateway(
     host: &str,
     port: u16,
     config: Config,
     external_pairing: Option<Arc<PairingGuard>>,
     external_event_tx: Option<tokio::sync::broadcast::Sender<serde_json::Value>>,
+) -> Result<()> {
+    run_gateway_with_mcp(
+        host,
+        port,
+        config,
+        external_pairing,
+        external_event_tx,
+        None,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_lines)]
+pub(crate) async fn run_gateway_with_mcp(
+    host: &str,
+    port: u16,
+    config: Config,
+    external_pairing: Option<Arc<PairingGuard>>,
+    external_event_tx: Option<tokio::sync::broadcast::Sender<serde_json::Value>>,
+    shared_mcp_registry: Option<Arc<McpRegistry>>,
 ) -> Result<()> {
     // ── Security: refuse public bind without tunnel or explicit opt-in ──
     if is_public_bind(host) && config.tunnel.provider == "none" && !config.gateway.allow_public_bind
@@ -414,12 +433,13 @@ pub async fn run_gateway(
     ));
 
     let tools_registry_exec: Arc<Vec<Box<dyn Tool>>> = Arc::new(
-        crate::agent::tools_registry::build_tools_registry(
+        crate::agent::tools_registry::build_tools_registry_with_mcp(
             &config,
             &security,
             runtime,
             Arc::clone(&mem),
             crate::agent::tools_registry::ToolsRegistryOptions::GATEWAY,
+            shared_mcp_registry,
         )
         .await?,
     );

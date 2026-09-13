@@ -44,7 +44,7 @@ impl Tool for McpToolWrapper {
     }
 
     fn category(&self) -> ToolCategory {
-        ToolCategory::IntegrationTools
+        ToolCategory::McpTools
     }
 
     fn description(&self) -> &str {

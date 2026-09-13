@@ -51,6 +51,8 @@ url = "https://mcp.example.com/sse"
 | `tool_timeout_secs` | Integer | Per-call timeout for tools from this server. |
 
 Failed server connections are logged and skipped; remaining servers still register.
+Daemon mode creates one MCP registry and shares its connections between the
+gateway and channel runtimes, so each configured stdio server is spawned once.
 
 ## Security and Auto-Approval
 

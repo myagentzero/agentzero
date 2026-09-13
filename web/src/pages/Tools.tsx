@@ -25,6 +25,7 @@ const CATEGORY_ORDER = [
   'Memory Tools',
   'Orchestration Tools',
   'Integration Tools',
+  'MCP Tools',
   'Communication Tools',
   'Hardware Tools',
   'Utility Tools',
