@@ -12,7 +12,7 @@ use crate::observability::{self, Observer, ObserverEvent};
 use crate::providers::{self, ChatMessage, ChatRequest, ConversationMessage, Provider};
 use crate::runtime;
 use crate::security::SecurityPolicy;
-use crate::tools::{self, Tool, ToolSpec};
+use crate::tools::{Tool, ToolSpec};
 use anyhow::Result;
 use std::collections::HashMap;
 use std::io::Write as IoWrite;
@@ -310,7 +310,7 @@ impl Agent {
         self.history.clear();
     }
 
-    pub fn from_config(config: &Config) -> Result<Self> {
+    pub async fn from_config(config: &Config) -> Result<Self> {
         let cost_tracker = if config.cost.enabled {
             match CostTracker::new(config.cost.clone(), &config.workspace_dir) {
                 Ok(ct) => Some(Arc::new(ct)),
@@ -343,34 +343,14 @@ impl Agent {
             config.api_key.as_deref(),
         )?);
 
-        let composio_key = if config.composio.enabled {
-            config.composio.api_key.as_deref()
-        } else {
-            None
-        };
-        let composio_entity_id = if config.composio.enabled {
-            Some(config.composio.entity_id.as_str())
-        } else {
-            None
-        };
-
-        let tools = tools::all_tools_with_runtime(
-            Arc::new(config.clone()),
+        let tools = crate::agent::tools_registry::build_tools_registry(
+            config,
             &security,
             runtime,
             memory.clone(),
-            composio_key,
-            composio_entity_id,
-            &config.browser,
-            &config.http_request,
-            &config.web_fetch,
-            &config.workspace_dir,
-            &config.agents,
-            config.api_key.as_deref(),
-            config,
-        );
-        let tools =
-            crate::agent::tools_registry::filter_primary_agent_tools_or_fail(config, tools)?;
+            crate::agent::tools_registry::ToolsRegistryOptions::AGENT_LOOP,
+        )
+        .await?;
 
         let provider_name = config.default_provider.as_deref().unwrap_or("openrouter");
 
@@ -1159,7 +1139,7 @@ mod tests {
         let mut config = base_from_config_for_tool_filter_tests();
         config.agent.allowed_tools = vec!["shell".to_string()];
 
-        let agent = Agent::from_config(&config).expect("agent should build");
+        let agent = from_config_blocking(&config).expect("agent should build");
         let names: Vec<&str> = agent.tools.iter().map(|tool| tool.name()).collect();
         assert_eq!(names, vec!["shell"]);
     }
@@ -1169,7 +1149,7 @@ mod tests {
         let _guard = crate::test_locks::PLUGIN_RUNTIME_LOCK.lock();
         let config = base_from_config_for_tool_filter_tests();
 
-        let agent = Agent::from_config(&config).expect("agent should build");
+        let agent = from_config_blocking(&config).expect("agent should build");
         let names: Vec<&str> = agent.tools.iter().map(|tool| tool.name()).collect();
         assert!(names.contains(&"shell"));
         assert!(names.contains(&"file_read"));
@@ -1181,7 +1161,7 @@ mod tests {
         let mut config = base_from_config_for_tool_filter_tests();
         config.agent.denied_tools = vec!["shell".to_string()];
 
-        let agent = Agent::from_config(&config).expect("agent should build");
+        let agent = from_config_blocking(&config).expect("agent should build");
         let names: Vec<&str> = agent.tools.iter().map(|tool| tool.name()).collect();
         assert!(!names.contains(&"shell"));
     }
@@ -1192,7 +1172,7 @@ mod tests {
         let mut config = base_from_config_for_tool_filter_tests();
         config.agent.allowed_tools = vec!["missing_tool".to_string()];
 
-        let agent = Agent::from_config(&config).expect("agent should build with empty toolset");
+        let agent = from_config_blocking(&config).expect("agent should build with empty toolset");
         assert!(agent.tools.is_empty());
     }
 
@@ -1203,7 +1183,7 @@ mod tests {
         config.agent.allowed_tools = vec!["shell".to_string()];
         config.agent.denied_tools = vec!["shell".to_string()];
 
-        let err = Agent::from_config(&config)
+        let err = from_config_blocking(&config)
             .err()
             .expect("expected filter conflict");
         assert!(
@@ -1211,5 +1191,13 @@ mod tests {
                 "agent.allowed_tools and agent.denied_tools removed all executable tools"
             )
         );
+    }
+
+    fn from_config_blocking(config: &Config) -> Result<Agent> {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime")
+            .block_on(Agent::from_config(config))
     }
 }

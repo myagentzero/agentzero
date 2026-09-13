@@ -419,7 +419,7 @@ pub async fn run_gateway(
             &security,
             runtime,
             Arc::clone(&mem),
-            crate::agent::tools_registry::ToolsRegistryOptions::MINIMAL,
+            crate::agent::tools_registry::ToolsRegistryOptions::GATEWAY,
         )
         .await?,
     );

@@ -295,6 +295,26 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn execute_one_tool_resolves_prefixed_mcp_style_name() {
+        let tools_registry: Vec<Box<dyn Tool>> =
+            vec![Box::new(EchoTool::new("filesystem__read_file"))];
+        let observer = NoopObserver;
+
+        let outcome = execute_one_tool(
+            "filesystem__read_file",
+            serde_json::json!({}),
+            &tools_registry,
+            &observer,
+            None,
+        )
+        .await
+        .expect("prefixed tool name should resolve");
+
+        assert!(outcome.success);
+        assert_eq!(outcome.output, "ok");
+    }
+
+    #[tokio::test]
     async fn execute_one_tool_soft_refuses_network_tool_on_network_kill() {
         let guard = test_support::reset_and_get();
         guard.engage(EstopLevel::NetworkKill).unwrap();

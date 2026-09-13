@@ -183,12 +183,12 @@ impl ApprovalManager {
         }
 
         // always_ask overrides everything.
-        if self.always_ask.read().contains(tool_name) {
+        if tool_name_matches_any(&self.always_ask.read(), tool_name) {
             return true;
         }
 
         // auto_approve skips the prompt.
-        if self.auto_approve.read().contains(tool_name) {
+        if tool_name_matches_any(&self.auto_approve.read(), tool_name) {
             return false;
         }
 
@@ -884,6 +884,12 @@ fn truncate_for_summary(input: &str, max_chars: usize) -> String {
     }
 }
 
+fn tool_name_matches_any(entries: &HashSet<String>, tool_name: &str) -> bool {
+    entries
+        .iter()
+        .any(|entry| crate::tools::tool_name_matches_rule(entry, tool_name))
+}
+
 fn is_pending_request_expired(req: &PendingNonCliApprovalRequest) -> bool {
     chrono::DateTime::parse_from_rfc3339(&req.expires_at)
         .map(|dt| dt.with_timezone(&Utc) <= Utc::now())
@@ -945,6 +951,18 @@ mod tests {
         let mgr = ApprovalManager::from_config(&supervised_config());
         assert!(!mgr.needs_approval("file_read"));
         assert!(!mgr.needs_approval("memory_recall"));
+    }
+
+    #[test]
+    fn auto_approve_prefix_wildcard_skips_mcp_tools() {
+        let mgr = ApprovalManager::from_config(&AutonomyConfig {
+            level: AutonomyLevel::Supervised,
+            auto_approve: vec!["my_local_tool__*".into()],
+            always_ask: vec![],
+            ..AutonomyConfig::default()
+        });
+        assert!(!mgr.needs_approval("my_local_tool__read_file"));
+        assert!(mgr.needs_approval("other_server__read_file"));
     }
 
     #[test]

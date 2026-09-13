@@ -2,6 +2,13 @@
 
 AgentZero supports the **Model Context Protocol (MCP)**, allowing you to extend the agent's capabilities with external tools and context providers. This guide explains how to register and configure MCP servers.
 
+When `[mcp] enabled = true` and at least one server is configured, AgentZero connects those servers while building the tool registry. Discovered tools are registered as prefixed names (`<server>__<tool>`) and dispatched through the existing agent tool loop on:
+
+- CLI / interactive agent loop
+- `Agent::turn()` (`Agent::from_config`)
+- Channel listeners (Telegram, Discord, Slack, and others)
+- Gateway / webhook agent loop
+
 ## Overview
 
 MCP servers can be connected via three transport types:
@@ -16,7 +23,6 @@ MCP servers are configured in the `[mcp]` section of your `config.toml`.
 ```toml
 [mcp]
 enabled = true
-deferred_loading = true # Recommended: only load tool schemas when needed
 
 [[mcp.servers]]
 name = "my_local_tool"
@@ -44,21 +50,20 @@ url = "https://mcp.example.com/sse"
 | `headers` | Map | (sse/http only) Custom HTTP headers (e.g., for auth). |
 | `tool_timeout_secs` | Integer | Per-call timeout for tools from this server. |
 
+Failed server connections are logged and skipped; remaining servers still register.
+
 ## Security and Auto-Approval
 
 By default, any tool execution from an MCP server requires manual approval unless your autonomy level is set to `full`.
 
-To automatically approve tools from a specific MCP server, add its prefix to the `auto_approve` list in the `[autonomy]` section:
+To automatically approve tools from a specific MCP server, add exact prefixed names or a single `*` wildcard to the `auto_approve` list in the `[autonomy]` section:
 
 ```toml
 [autonomy]
 auto_approve = [
-  "my_local_tool__read_file", # Allow specific tool from 'my_local_tool'
-  "my_remote_tool__get_weather" # Allow specific tool from 'my_remote_tool'
+  "my_local_tool__read_file", # Allow a specific tool from 'my_local_tool'
+  "my_remote_tool__*",        # Allow every tool from 'my_remote_tool'
 ]
 ```
 
-## Tips
-
-- **Tool Filtering**: You can limit which MCP tools are exposed to the LLM using `tool_filter_groups` in your project configuration.
-- **Deferred Loading**: Keeping `deferred_loading = true` reduces the initial token overhead by only sending tool names to the LLM. The agent will fetch the full schema only when it decides to use the tool.
+Primary-agent visibility uses the same wildcard rules in `[agent] allowed_tools` / `denied_tools` (for example `denied_tools = ["untrusted__*"]`).

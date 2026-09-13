@@ -192,8 +192,34 @@ pub struct PrimaryAgentToolFilterReport {
     pub allowlist_match_count: usize,
 }
 
+/// Match a tool name against an allow/deny/`auto_approve` rule.
+///
+/// Supports exact (case-insensitive) names, a full `*` wildcard, and a single
+/// `*` as prefix, suffix, or infix (e.g. `filesystem__*`).
+pub fn tool_name_matches_rule(rule: &str, tool_name: &str) -> bool {
+    let rule = rule.trim();
+    if rule.is_empty() {
+        return false;
+    }
+    if rule == "*" || rule.eq_ignore_ascii_case(tool_name) {
+        return true;
+    }
+    let Some((prefix, suffix)) = rule.split_once('*') else {
+        return false;
+    };
+    if prefix.contains('*') || suffix.contains('*') {
+        return false;
+    }
+    let name = tool_name.to_ascii_lowercase();
+    let prefix = prefix.to_ascii_lowercase();
+    let suffix = suffix.to_ascii_lowercase();
+    name.starts_with(&prefix)
+        && name.ends_with(&suffix)
+        && name.len() >= prefix.len() + suffix.len()
+}
+
 fn matches_tool_rule(rule: &str, tool_name: &str) -> bool {
-    rule == "*" || rule.eq_ignore_ascii_case(tool_name)
+    tool_name_matches_rule(rule, tool_name)
 }
 
 /// Filter the primary-agent tool registry based on `[agent]` allow/deny settings.
@@ -885,6 +911,42 @@ mod tests {
         assert_eq!(names(&filtered), vec!["shell", "file_read"]);
         assert_eq!(report.allowlist_match_count, 3);
         assert!(report.unmatched_allowed_tools.is_empty());
+    }
+
+    #[test]
+    fn filter_primary_agent_tools_supports_prefix_wildcard() {
+        let tools: Vec<Box<dyn Tool>> = vec![
+            Box::new(DummyTool {
+                name: "filesystem__read_file",
+            }),
+            Box::new(DummyTool {
+                name: "filesystem__write_file",
+            }),
+            Box::new(DummyTool { name: "shell" }),
+        ];
+        let allow = vec!["filesystem__*".to_string()];
+        let (filtered, report) = filter_primary_agent_tools(tools, &allow, &[]);
+        assert_eq!(
+            names(&filtered),
+            vec!["filesystem__read_file", "filesystem__write_file"]
+        );
+        assert_eq!(report.allowlist_match_count, 2);
+        assert!(report.unmatched_allowed_tools.is_empty());
+    }
+
+    #[test]
+    fn tool_name_matches_rule_prefix_suffix_and_infix() {
+        assert!(tool_name_matches_rule(
+            "filesystem__*",
+            "filesystem__read_file"
+        ));
+        assert!(tool_name_matches_rule(
+            "*__read_file",
+            "filesystem__read_file"
+        ));
+        assert!(tool_name_matches_rule("file*read", "file_read"));
+        assert!(!tool_name_matches_rule("filesystem__*", "shell"));
+        assert!(!tool_name_matches_rule("a*b*c", "abc"));
     }
 
     #[test]

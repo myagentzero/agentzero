@@ -17,11 +17,18 @@ pub struct ToolsRegistryOptions {
 impl ToolsRegistryOptions {
     pub const AGENT_LOOP: Self = Self {
         include_peripherals: true,
-        include_mcp: false,
+        include_mcp: true,
         apply_agent_tool_filters: true,
     };
 
     pub const CHANNEL: Self = Self {
+        include_peripherals: false,
+        include_mcp: true,
+        apply_agent_tool_filters: false,
+    };
+
+    /// Gateway/webhook agent loop: MCP tools, no hardware peripherals.
+    pub const GATEWAY: Self = Self {
         include_peripherals: false,
         include_mcp: true,
         apply_agent_tool_filters: false,
@@ -155,4 +162,149 @@ pub async fn build_tools_registry(
     }
 
     Ok(tools_registry)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::schema::{McpServerConfig, McpTransport};
+    use crate::memory::Memory;
+    use std::path::Path;
+    use tempfile::TempDir;
+
+    fn test_config(tmp: &TempDir) -> Config {
+        let mut config = Config::default();
+        config.workspace_dir = tmp.path().join("workspace");
+        config.config_path = tmp.path().join("config.toml");
+        config.memory.backend = "none".to_string();
+        std::fs::create_dir_all(&config.workspace_dir).unwrap();
+        config
+    }
+
+    async fn build_for(config: &Config, options: ToolsRegistryOptions) -> Vec<Box<dyn Tool>> {
+        let runtime: Arc<dyn RuntimeAdapter> =
+            Arc::from(crate::runtime::create_runtime(&config.runtime).unwrap());
+        let security = Arc::new(SecurityPolicy::from_config(
+            &config.autonomy,
+            &config.workspace_dir,
+        ));
+        let mem: Arc<dyn Memory> = Arc::from(
+            crate::memory::create_memory_with_storage(
+                &config.memory,
+                Some(&config.storage.provider.config),
+                &config.workspace_dir,
+                None,
+            )
+            .unwrap(),
+        );
+        build_tools_registry(config, &security, runtime, mem, options)
+            .await
+            .unwrap()
+    }
+
+    fn mock_mcp_server_script(dir: &Path) -> std::path::PathBuf {
+        let path = dir.join("mock_mcp_server.sh");
+        std::fs::write(
+            &path,
+            r#"#!/usr/bin/env bash
+set -euo pipefail
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
+  method=$(printf '%s' "$line" | sed -n 's/.*"method":"\([^"]*\)".*/\1/p')
+  case "$method" in
+    initialize)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":"2024-11-05","capabilities":{},"serverInfo":{"name":"mock"}}}\n' "$id"
+      ;;
+    tools/list)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"tools":[{"name":"ping","description":"Ping","inputSchema":{"type":"object","properties":{}}}]}}\n' "$id"
+      ;;
+    tools/call)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"content":[{"type":"text","text":"pong"}]}}\n' "$id"
+      ;;
+  esac
+done
+"#,
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        path
+    }
+
+    fn mock_server_config(script: &Path) -> McpServerConfig {
+        McpServerConfig {
+            name: "mock".to_string(),
+            transport: McpTransport::Stdio,
+            command: script.to_string_lossy().into_owned(),
+            args: vec![],
+            env: std::collections::HashMap::new(),
+            tool_timeout_secs: Some(10),
+            url: None,
+            headers: std::collections::HashMap::new(),
+        }
+    }
+
+    #[test]
+    fn agent_loop_options_include_mcp() {
+        assert!(ToolsRegistryOptions::AGENT_LOOP.include_mcp);
+        assert!(ToolsRegistryOptions::GATEWAY.include_mcp);
+        assert!(!ToolsRegistryOptions::MINIMAL.include_mcp);
+    }
+
+    #[tokio::test]
+    async fn skips_mcp_when_disabled() {
+        let tmp = TempDir::new().unwrap();
+        let script = mock_mcp_server_script(tmp.path());
+        let mut config = test_config(&tmp);
+        config.mcp.enabled = false;
+        config.mcp.servers = vec![mock_server_config(&script)];
+
+        let tools = build_for(&config, ToolsRegistryOptions::AGENT_LOOP).await;
+        assert!(!tools.iter().any(|tool| tool.name() == "mock__ping"));
+    }
+
+    #[tokio::test]
+    async fn skips_mcp_when_server_list_empty() {
+        let tmp = TempDir::new().unwrap();
+        let mut config = test_config(&tmp);
+        config.mcp.enabled = true;
+        config.mcp.servers.clear();
+
+        let tools = build_for(&config, ToolsRegistryOptions::AGENT_LOOP).await;
+        assert!(!tools.iter().any(|tool| tool.name() == "mock__ping"));
+    }
+
+    #[tokio::test]
+    async fn agent_loop_registers_mcp_tools_from_stdio_server() {
+        let tmp = TempDir::new().unwrap();
+        let script = mock_mcp_server_script(tmp.path());
+        let mut config = test_config(&tmp);
+        config.mcp.enabled = true;
+        config.mcp.servers = vec![mock_server_config(&script)];
+
+        let tools = build_for(&config, ToolsRegistryOptions::AGENT_LOOP).await;
+        assert!(
+            tools.iter().any(|tool| tool.name() == "mock__ping"),
+            "expected mock__ping in registry, got {:?}",
+            tools
+                .iter()
+                .map(|t| t.name().to_string())
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[tokio::test]
+    async fn minimal_registry_skips_mcp_even_when_configured() {
+        let tmp = TempDir::new().unwrap();
+        let script = mock_mcp_server_script(tmp.path());
+        let mut config = test_config(&tmp);
+        config.mcp.enabled = true;
+        config.mcp.servers = vec![mock_server_config(&script)];
+
+        let tools = build_for(&config, ToolsRegistryOptions::MINIMAL).await;
+        assert!(!tools.iter().any(|tool| tool.name() == "mock__ping"));
+    }
 }
