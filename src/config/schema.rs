@@ -5461,12 +5461,16 @@ impl Default for ServiceNowConfig {
 // -- Notion --
 
 /// Notion integration configuration (`[notion]`).
+///
+/// `enabled` + API key registers the Notion API tool. Set `database_id` to also
+/// start the database poller channel; leave it empty for tool-only use.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct NotionConfig {
     #[serde(default)]
     pub enabled: bool,
     #[serde(default)]
     pub api_key: String,
+    /// When set (with `enabled`), starts the Notion database poller channel.
     #[serde(default)]
     pub database_id: String,
     #[serde(default = "default_notion_poll_interval")]
@@ -7527,11 +7531,9 @@ impl Config {
             anyhow::bail!("agent.subagents.queue_poll_ms must be greater than 0");
         }
 
-        // Notion
-        if self.notion.enabled {
-            if self.notion.database_id.trim().is_empty() {
-                anyhow::bail!("notion.database_id must not be empty when notion.enabled = true");
-            }
+        // Notion — `enabled` registers the API tool; a non-empty `database_id`
+        // additionally starts the database poller channel.
+        if self.notion.enabled && !self.notion.database_id.trim().is_empty() {
             if self.notion.poll_interval_secs == 0 {
                 anyhow::bail!("notion.poll_interval_secs must be greater than 0");
             }
@@ -10721,6 +10723,47 @@ provider_api = "not-a-real-mode"
         assert!(error.to_string().contains(
             "default_model uses ':cloud' with provider 'ollama', but api_url is local or unset"
         ));
+    }
+
+    #[test]
+    async fn validate_notion_tool_only_allows_empty_database_id() {
+        let config = Config {
+            notion: NotionConfig {
+                enabled: true,
+                api_key: "secret_test".into(),
+                database_id: String::new(),
+                ..NotionConfig::default()
+            },
+            ..Config::default()
+        };
+
+        config
+            .validate()
+            .expect("tool-only Notion (enabled, empty database_id) should validate");
+    }
+
+    #[test]
+    async fn validate_notion_channel_requires_poller_fields() {
+        let config = Config {
+            notion: NotionConfig {
+                enabled: true,
+                api_key: "secret_test".into(),
+                database_id: "db-123".into(),
+                status_property: String::new(),
+                ..NotionConfig::default()
+            },
+            ..Config::default()
+        };
+
+        let error = config
+            .validate()
+            .expect_err("channel Notion with empty status_property should fail");
+        assert!(
+            error
+                .to_string()
+                .contains("notion.status_property must not be empty"),
+            "unexpected error: {error}"
+        );
     }
 
     #[test]

@@ -584,7 +584,9 @@ pub async fn handle_api_integrations_credentials_put(
                     config.notion.database_id = database_id.to_string();
                 }
             }
-            if !config.notion.api_key.is_empty() && !config.notion.database_id.is_empty() {
+            // API key alone enables the Notion tool; database_id is optional
+            // and only starts the poller channel when present.
+            if !config.notion.api_key.is_empty() {
                 config.notion.enabled = true;
             }
         }
@@ -871,7 +873,8 @@ fn integration_settings_fields(
         "Notion" => {
             let has_key = !config.notion.api_key.is_empty();
             let has_db = !config.notion.database_id.is_empty();
-            let configured = has_key && has_db;
+            // Tool-only needs an API key; database_id is optional (channel poller).
+            let configured = has_key;
             let fields = vec![
                 serde_json::json!({
                     "key": "api_key",
@@ -885,7 +888,7 @@ fn integration_settings_fields(
                 serde_json::json!({
                     "key": "database_id",
                     "label": "Database ID",
-                    "required": true,
+                    "required": false,
                     "has_value": has_db,
                     "input_type": "text",
                     "options": [],
