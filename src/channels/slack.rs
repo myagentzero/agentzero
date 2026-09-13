@@ -51,7 +51,7 @@ const SLACK_ATTACHMENT_TEXT_INLINE_MAX_CHARS: usize = 12_000;
 const SLACK_MARKDOWN_BLOCK_MAX_CHARS: usize = 12_000;
 const SLACK_ATTACHMENT_FILENAME_MAX_CHARS: usize = 128;
 const SLACK_USER_CACHE_MAX_ENTRIES: usize = 1000;
-const SLACK_ATTACHMENT_SAVE_SUBDIR: &str = "slack_files";
+const SLACK_ATTACHMENT_SAVE_SUBDIR: &str = "downloads";
 const SLACK_ATTACHMENT_MAX_FILES_PER_MESSAGE: usize = 8;
 const SLACK_AUDIO_EXTENSIONS: &[&str] = &[
     "flac", "mp3", "mpeg", "mpga", "mp4", "m4a", "ogg", "oga", "opus", "wav", "webm",
@@ -4273,7 +4273,7 @@ mod tests {
 
         let root = tokio::fs::canonicalize(workspace.path()).await.unwrap();
         assert!(output.starts_with(&root));
-        assert!(output.to_string_lossy().contains("slack_files"));
+        assert!(output.to_string_lossy().contains("downloads"));
     }
 
     #[tokio::test]
