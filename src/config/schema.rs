@@ -5309,6 +5309,9 @@ pub struct AtlassianConfig {
     pub confluence_enabled: bool,
     #[serde(default = "default_atlassian_jira_allowed_actions")]
     pub jira_allowed_actions: Vec<String>,
+    /// Default Jira project key used by `create_story` when no project is passed.
+    #[serde(default)]
+    pub jira_default_project: String,
     #[serde(default = "default_atlassian_confluence_allowed_actions")]
     pub confluence_allowed_actions: Vec<String>,
     #[serde(default = "default_atlassian_timeout")]
@@ -5336,6 +5339,7 @@ impl Default for AtlassianConfig {
             jira_enabled: false,
             confluence_enabled: false,
             jira_allowed_actions: default_atlassian_jira_allowed_actions(),
+            jira_default_project: String::new(),
             confluence_allowed_actions: default_atlassian_confluence_allowed_actions(),
             timeout_secs: default_atlassian_timeout(),
         }

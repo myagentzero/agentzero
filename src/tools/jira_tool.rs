@@ -21,10 +21,11 @@ enum LevelOfDetails {
 
 /// Tool for interacting with the Jira REST API v3.
 ///
-/// Supports seven actions gated by `[jira].allowed_actions` in config:
+/// Supports eight actions gated by `[atlassian].jira_allowed_actions` in config:
 /// - `get_ticket`      — always in the default allowlist; read-only.
 /// - `search_tickets`  — requires explicit opt-in; read-only.
 /// - `comment_ticket`  — requires explicit opt-in; mutating (Act policy).
+/// - `create_story`    — requires explicit opt-in; mutating (Act policy).
 /// - `watch_ticket`    — requires explicit opt-in; mutating (Act policy).
 /// - `unwatch_ticket`  — requires explicit opt-in; mutating (Act policy).
 /// - `list_projects`   — requires explicit opt-in; read-only.
@@ -34,6 +35,7 @@ pub struct JiraTool {
     email: String,
     api_token: String,
     allowed_actions: Vec<String>,
+    default_project: String,
     http: Client,
     security: Arc<SecurityPolicy>,
     timeout_secs: u64,
@@ -45,6 +47,7 @@ impl JiraTool {
         email: String,
         api_token: String,
         allowed_actions: Vec<String>,
+        default_project: String,
         security: Arc<SecurityPolicy>,
         timeout_secs: u64,
     ) -> Self {
@@ -53,6 +56,7 @@ impl JiraTool {
             email,
             api_token,
             allowed_actions,
+            default_project: default_project.trim().to_string(),
             http: Client::new(),
             security,
             timeout_secs,
@@ -250,6 +254,64 @@ impl JiraTool {
             .map_err(|e| anyhow::anyhow!("Failed to parse Jira comment response: {e}"))?;
 
         let shaped = shape_comment_response(&response);
+        Ok(ToolResult {
+            success: true,
+            output: serde_json::to_string_pretty(&shaped).unwrap_or_else(|_| shaped.to_string()),
+            error: None,
+        })
+    }
+
+    async fn create_story(
+        &self,
+        project_key: &str,
+        summary: &str,
+        description: Option<&str>,
+    ) -> anyhow::Result<ToolResult> {
+        validate_project_key(project_key)?;
+
+        let mut fields = json!({
+            "project": { "key": project_key },
+            "summary": summary,
+            "issuetype": { "name": "Story" },
+        });
+
+        if let Some(text) = description.filter(|t| !t.trim().is_empty()) {
+            let emails = extract_emails(text);
+            let mut mentions: HashMap<String, (String, String)> = HashMap::new();
+            for email in emails {
+                if let Some(info) = self.resolve_email(&email).await {
+                    mentions.insert(email, info);
+                }
+            }
+            fields["description"] = build_adf(text, &mentions);
+        }
+
+        let url = format!("{}/rest/api/3/issue", self.base_url);
+        let resp = self
+            .http
+            .post(&url)
+            .basic_auth(&self.email, Some(&self.api_token))
+            .json(&json!({ "fields": fields }))
+            .timeout(std::time::Duration::from_secs(self.timeout_secs))
+            .send()
+            .await
+            .map_err(|e| anyhow::anyhow!("Jira create_story request failed: {e}"))?;
+
+        let status = resp.status();
+        if !status.is_success() {
+            let text = resp.text().await.unwrap_or_default();
+            anyhow::bail!(
+                "Jira create_story failed ({status}): {}",
+                crate::util::truncate_with_ellipsis(&text, MAX_ERROR_BODY_CHARS)
+            );
+        }
+
+        let response: Value = resp
+            .json()
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to parse Jira create_story response: {e}"))?;
+
+        let shaped = shape_create_story_response(&response);
         Ok(ToolResult {
             success: true,
             output: serde_json::to_string_pretty(&shaped).unwrap_or_else(|_| shaped.to_string()),
@@ -558,7 +620,7 @@ impl Tool for JiraTool {
     }
 
     fn description(&self) -> &str {
-        "Jira: get ticket details, search with JQL, list projects, add comments, watch/unwatch."
+        "Jira: get ticket details, search with JQL, list projects, create stories, add comments, watch/unwatch."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {
@@ -567,8 +629,8 @@ impl Tool for JiraTool {
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["get_ticket", "search_tickets", "comment_ticket", "watch_ticket", "unwatch_ticket", "list_projects", "myself"],
-                    "description": "Jira action (get_ticket, search_tickets, comment_ticket, watch_ticket, unwatch_ticket, myself)"
+                    "enum": ["get_ticket", "search_tickets", "comment_ticket", "create_story", "watch_ticket", "unwatch_ticket", "list_projects", "myself"],
+                    "description": "Jira action (get_ticket, search_tickets, comment_ticket, create_story, watch_ticket, unwatch_ticket, list_projects, myself)"
                 },
                 "issue_key": {
                     "type": "string",
@@ -591,6 +653,18 @@ impl Tool for JiraTool {
                 "comment": {
                     "type": "string",
                     "description": "Comment body. Supports: @user@domain.com for mentions, **bold**, - for bullets, newlines for breaks"
+                },
+                "project_key": {
+                    "type": "string",
+                    "description": "Jira project key for create_story (e.g. PROJ). Falls back to jira_default_project in config when omitted."
+                },
+                "summary": {
+                    "type": "string",
+                    "description": "Story summary/title. Required for create_story."
+                },
+                "description": {
+                    "type": "string",
+                    "description": "Optional story description for create_story. Supports: @user@domain.com for mentions, **bold**, - for bullets, newlines for breaks"
                 }
             },
             "required": ["action"]
@@ -616,6 +690,7 @@ impl Tool for JiraTool {
             "get_ticket"
                 | "search_tickets"
                 | "comment_ticket"
+                | "create_story"
                 | "watch_ticket"
                 | "unwatch_ticket"
                 | "list_projects"
@@ -625,7 +700,7 @@ impl Tool for JiraTool {
                 success: false,
                 output: String::new(),
                 error: Some(format!(
-                    "Unknown action: '{action}'. Valid actions: get_ticket, search_tickets, comment_ticket, watch_ticket, unwatch_ticket, list_projects, myself"
+                    "Unknown action: '{action}'. Valid actions: get_ticket, search_tickets, comment_ticket, create_story, watch_ticket, unwatch_ticket, list_projects, myself"
                 )),
             });
         }
@@ -635,7 +710,7 @@ impl Tool for JiraTool {
                 success: false,
                 output: String::new(),
                 error: Some(format!(
-                    "Action '{action}' is not enabled. Add it to jira.allowed_actions in config.toml. \
+                    "Action '{action}' is not enabled. Add it to atlassian.jira_allowed_actions in config.toml. \
                      Currently allowed: {}",
                     self.allowed_actions.join(", ")
                 )),
@@ -644,7 +719,9 @@ impl Tool for JiraTool {
 
         let operation = match action {
             "get_ticket" | "search_tickets" | "list_projects" | "myself" => ToolOperation::Read,
-            "comment_ticket" | "watch_ticket" | "unwatch_ticket" => ToolOperation::Act,
+            "comment_ticket" | "create_story" | "watch_ticket" | "unwatch_ticket" => {
+                ToolOperation::Act
+            }
             _ => unreachable!(),
         };
 
@@ -695,6 +772,38 @@ impl Tool for JiraTool {
             }
             "myself" => self.get_myself().await,
             "list_projects" => self.list_projects().await,
+            "create_story" => {
+                let summary = match args.get("summary").and_then(|v| v.as_str()) {
+                    Some(s) if !s.trim().is_empty() => s.trim(),
+                    _ => {
+                        return Ok(ToolResult {
+                            success: false,
+                            output: String::new(),
+                            error: Some(
+                                "create_story requires a non-empty summary parameter".into(),
+                            ),
+                        });
+                    }
+                };
+                let project_key = args
+                    .get("project_key")
+                    .and_then(|v| v.as_str())
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or(self.default_project.as_str());
+                if project_key.is_empty() {
+                    return Ok(ToolResult {
+                        success: false,
+                        output: String::new(),
+                        error: Some(
+                            "create_story requires project_key, or set atlassian.jira_default_project in config"
+                                .into(),
+                        ),
+                    });
+                }
+                let description = args.get("description").and_then(|v| v.as_str());
+                self.create_story(project_key, summary, description).await
+            }
             "comment_ticket" => {
                 let issue_key = match args.get("issue_key").and_then(|v| v.as_str()) {
                     Some(k) => k,
@@ -768,6 +877,18 @@ fn validate_issue_key(key: &str) -> anyhow::Result<()> {
     } else {
         anyhow::bail!(
             "Invalid issue key '{key}'. Expected format: PROJECT-123 (e.g. PROJ-42, proj-42)"
+        )
+    }
+}
+
+/// Validates that `project_key` is a non-empty alphanumeric Jira project key.
+fn validate_project_key(key: &str) -> anyhow::Result<()> {
+    let valid = !key.is_empty() && key.chars().all(|c| c.is_ascii_alphanumeric());
+    if valid {
+        Ok(())
+    } else {
+        anyhow::bail!(
+            "Invalid project key '{key}'. Expected alphanumeric project key (e.g. PROJ, proj)"
         )
     }
 }
@@ -875,6 +996,14 @@ fn shape_comment_response(raw: &Value) -> Value {
         "id":      raw["id"],
         "author":  raw["author"]["displayName"],
         "created": date_prefix(raw["created"].as_str().unwrap_or("")),
+    })
+}
+
+/// Returns only the created issue key and id.
+fn shape_create_story_response(raw: &Value) -> Value {
+    json!({
+        "id":  raw["id"],
+        "key": raw["key"],
     })
 }
 
@@ -1081,6 +1210,13 @@ mod tests {
     use crate::security::policy::AutonomyLevel;
 
     fn test_tool(allowed_actions: Vec<&str>) -> JiraTool {
+        test_tool_with_default_project(allowed_actions, "")
+    }
+
+    fn test_tool_with_default_project(
+        allowed_actions: Vec<&str>,
+        default_project: &str,
+    ) -> JiraTool {
         let security = Arc::new(SecurityPolicy {
             autonomy: AutonomyLevel::Supervised,
             ..SecurityPolicy::default()
@@ -1090,6 +1226,7 @@ mod tests {
             "test@example.com".into(),
             "test-token".into(),
             allowed_actions.into_iter().map(String::from).collect(),
+            default_project.into(),
             security,
             30,
         )
@@ -1115,6 +1252,7 @@ mod tests {
         assert!(action_strs.contains(&"get_ticket"));
         assert!(action_strs.contains(&"search_tickets"));
         assert!(action_strs.contains(&"comment_ticket"));
+        assert!(action_strs.contains(&"create_story"));
     }
 
     #[tokio::test]
@@ -1210,6 +1348,7 @@ mod tests {
             "test@example.com".into(),
             "token".into(),
             vec!["get_ticket".into(), "comment_ticket".into()],
+            "".into(),
             security,
             30,
         );
@@ -1261,6 +1400,7 @@ mod tests {
             "test@example.com".into(),
             "token".into(),
             vec!["myself".into()],
+            "".into(),
             security,
             30,
         );
@@ -1530,6 +1670,7 @@ mod tests {
             "test@example.com".into(),
             "token".into(),
             vec!["list_projects".into()],
+            "".into(),
             security,
             30,
         );
@@ -1710,6 +1851,7 @@ mod tests {
             "test@example.com".into(),
             "token".into(),
             vec!["watch_ticket".into()],
+            "".into(),
             security,
             30,
         );
@@ -1732,6 +1874,7 @@ mod tests {
             "test@example.com".into(),
             "token".into(),
             vec!["unwatch_ticket".into()],
+            "".into(),
             security,
             30,
         );
@@ -1741,5 +1884,135 @@ mod tests {
             .unwrap();
         assert!(!result.success);
         assert!(result.error.as_deref().unwrap().contains("read-only"));
+    }
+
+    // ── create_story action ─────────────────────────────────────────────────
+
+    #[test]
+    fn parameters_schema_includes_create_story_action() {
+        let schema = test_tool(vec!["create_story"]).parameters_schema();
+        let actions = schema["properties"]["action"]["enum"].as_array().unwrap();
+        let action_strs: Vec<&str> = actions.iter().filter_map(|v| v.as_str()).collect();
+        assert!(action_strs.contains(&"create_story"));
+        assert!(schema["properties"].get("summary").is_some());
+        assert!(schema["properties"].get("project_key").is_some());
+        assert!(schema["properties"].get("description").is_some());
+    }
+
+    #[tokio::test]
+    async fn execute_create_story_disallowed_returns_error() {
+        let result = test_tool(vec!["get_ticket"])
+            .execute(json!({
+                "action": "create_story",
+                "project_key": "PROJ",
+                "summary": "New story"
+            }))
+            .await
+            .unwrap();
+        assert!(!result.success);
+        let err = result.error.unwrap();
+        assert!(err.contains("not enabled"));
+        assert!(err.contains("jira_allowed_actions"));
+    }
+
+    #[tokio::test]
+    async fn execute_create_story_missing_summary_returns_error() {
+        let result = test_tool(vec!["create_story"])
+            .execute(json!({
+                "action": "create_story",
+                "project_key": "PROJ"
+            }))
+            .await
+            .unwrap();
+        assert!(!result.success);
+        assert!(result.error.as_deref().unwrap().contains("summary"));
+    }
+
+    #[tokio::test]
+    async fn execute_create_story_missing_project_returns_error() {
+        let result = test_tool(vec!["create_story"])
+            .execute(json!({
+                "action": "create_story",
+                "summary": "New story"
+            }))
+            .await
+            .unwrap();
+        assert!(!result.success);
+        assert!(
+            result
+                .error
+                .as_deref()
+                .unwrap()
+                .contains("jira_default_project")
+        );
+    }
+
+    #[tokio::test]
+    async fn execute_create_story_uses_default_project_when_omitted() {
+        // Will fail at HTTP (no server), but must not fail on missing project_key.
+        let result = test_tool_with_default_project(vec!["create_story"], "PROJ")
+            .execute(json!({
+                "action": "create_story",
+                "summary": "New story"
+            }))
+            .await
+            .unwrap();
+        assert!(!result.success);
+        let err = result.error.unwrap();
+        assert!(!err.contains("jira_default_project"));
+        assert!(!err.contains("project_key"));
+    }
+
+    #[tokio::test]
+    async fn execute_create_story_blocked_in_readonly_mode() {
+        let security = Arc::new(SecurityPolicy {
+            autonomy: AutonomyLevel::ReadOnly,
+            ..SecurityPolicy::default()
+        });
+        let tool = JiraTool::new(
+            "https://test.atlassian.net".into(),
+            "test@example.com".into(),
+            "token".into(),
+            vec!["create_story".into()],
+            "PROJ".into(),
+            security,
+            30,
+        );
+        let result = tool
+            .execute(json!({
+                "action": "create_story",
+                "summary": "New story"
+            }))
+            .await
+            .unwrap();
+        assert!(!result.success);
+        assert!(result.error.as_deref().unwrap().contains("read-only"));
+    }
+
+    #[test]
+    fn validate_project_key_accepts_valid_keys() {
+        assert!(validate_project_key("PROJ").is_ok());
+        assert!(validate_project_key("proj").is_ok());
+        assert!(validate_project_key("AB12").is_ok());
+    }
+
+    #[test]
+    fn validate_project_key_rejects_invalid() {
+        assert!(validate_project_key("").is_err());
+        assert!(validate_project_key("PRO-J").is_err());
+        assert!(validate_project_key("../x").is_err());
+    }
+
+    #[test]
+    fn shape_create_story_response_extracts_id_and_key() {
+        let raw = json!({
+            "id": "10001",
+            "key": "PROJ-42",
+            "self": "https://internal.url/rest/api/3/issue/10001"
+        });
+        let shaped = shape_create_story_response(&raw);
+        assert_eq!(shaped["id"], "10001");
+        assert_eq!(shaped["key"], "PROJ-42");
+        assert!(shaped.get("self").is_none());
     }
 }

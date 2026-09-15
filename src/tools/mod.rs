@@ -555,6 +555,7 @@ pub fn all_tools_with_runtime(
                 email.to_string(),
                 token.clone(),
                 root_config.atlassian.jira_allowed_actions.clone(),
+                root_config.atlassian.jira_default_project.clone(),
                 security.clone(),
                 root_config.atlassian.timeout_secs,
             )));
