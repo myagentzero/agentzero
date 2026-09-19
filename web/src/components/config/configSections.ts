@@ -988,7 +988,7 @@ export const CONFIG_SECTIONS: SectionDef[] = [
     icon: UserCircle,
     defaultCollapsed: true,
     fields: [
-      { key: 'format', label: 'Format', type: 'text', defaultValue: 'openclaw', description: 'e.g. openclaw, aieos' },
+      { key: 'format', label: 'Format', type: 'text', defaultValue: 'markdown', description: 'e.g. markdown, aieos' },
       { key: 'aieos_path', label: 'AIEOS Path', type: 'text', description: 'e.g. ./identity.aieos' },
       { key: 'aieos_inline', label: 'AIEOS Inline', type: 'text', description: 'Inline AIEOS identity string' },
     ],

@@ -8,8 +8,8 @@
 //! - Header sanitization (handled by axum/hyper)
 
 pub mod api;
+mod chat_compat;
 mod openai_compat;
-mod openclaw_compat;
 pub mod sse;
 pub mod static_files;
 pub mod ws;
@@ -620,13 +620,13 @@ pub(crate) async fn run_gateway_with_mcp(
     // They get their own nested router with a separate body limit layer.
     //
     // NOTE: The /v1/chat/completions handler routes through the full agent loop
-    // (run_gateway_chat_with_tools) via openclaw_compat, giving OpenClaw callers
+    // (run_gateway_chat_with_tools) via chat_compat, giving callers
     // tools + memory support. The original simple-chat handler is preserved in
     // openai_compat.rs for reference.
     let openai_compat_routes = Router::new()
         .route(
             "/v1/chat/completions",
-            post(openclaw_compat::handle_v1_chat_completions_with_tools),
+            post(chat_compat::handle_v1_chat_completions_with_tools),
         )
         .layer(RequestBodyLimitLayer::new(
             openai_compat::CHAT_COMPLETIONS_MAX_BODY_SIZE,
@@ -640,8 +640,8 @@ pub(crate) async fn run_gateway_with_mcp(
         .route("/pair", post(handle_pair))
         .route("/admin/paircode/new", post(handle_admin_paircode_new))
         .route("/webhook", get(handle_webhook_usage).post(handle_webhook))
-        // ── OpenClaw migration: tools-enabled chat endpoint ──
-        .route("/api/chat", post(openclaw_compat::handle_api_chat))
+        // ── Tools-enabled chat endpoint ──
+        .route("/api/chat", post(chat_compat::handle_api_chat))
         // ── OpenAI-compatible endpoints ──
         .route("/v1/models", get(openai_compat::handle_v1_models))
         .merge(openai_compat_routes)

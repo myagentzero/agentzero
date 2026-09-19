@@ -1,6 +1,6 @@
-//! OpenClaw migration compatibility layer.
+//! Agent-loop chat compatibility layer.
 //!
-//! Provides two endpoints for callers migrating from OpenClaw to AgentZero:
+//! Provides two endpoints:
 //!
 //! 1. **`POST /api/chat`** (recommended) — AgentZero-native endpoint that invokes the
 //!    full agent loop (`process_message`) with tools, memory recall, and context
@@ -8,16 +8,15 @@
 //!
 //! 2. **`POST /v1/chat/completions`** override — OpenAI-compatible shim that accepts
 //!    standard `messages[]` arrays, extracts the last user message plus recent history,
-//!    and routes through the full agent loop. Drop-in replacement for OpenClaw callers.
+//!    and routes through the full agent loop.
 //!
 //! ## Why this exists
 //!
-//! OpenClaw exposed `/v1/chat/completions` as an OpenAI-compatible API server.
 //! AgentZero's existing `/v1/chat/completions` (in `openai_compat.rs`) uses the
 //! simpler `provider.chat_with_history()` path — no tools, no memory, no agent loop.
 //!
-//! This module bridges the gap so callers coming from OpenClaw get the full agent
-//! experience without code changes on their side.
+//! This module routes those callers through the full agent loop without requiring
+//! changes on their side.
 //!
 //! ## Migration path
 //!
@@ -361,7 +360,7 @@ struct OaiDelta {
 /// `POST /v1/chat/completions` — OpenAI-compatible shim over AgentZero's agent loop.
 ///
 /// This replaces the simple `provider.chat_with_history()` path from `openai_compat.rs`
-/// with the full `run_gateway_chat_with_tools()` agent loop, giving OpenClaw callers
+/// with the full `run_gateway_chat_with_tools()` agent loop, giving callers
 /// the same tools + memory experience as native AgentZero channels.
 pub async fn handle_v1_chat_completions_with_tools(
     State(state): State<AppState>,

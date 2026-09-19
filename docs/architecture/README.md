@@ -32,7 +32,7 @@ graph TD
     Q -->|Yes| S["Load AIEOS Identity"]
     Q -->|No| T["load_bootstrap_files()"]
 
-    S --> U["Convert to system prompt<br/>or fallback to OpenClaw"]
+    S --> U["Convert to system prompt<br/>or fallback to Markdown"]
     T --> U
     U --> V["Add Project Context<br/>- AGENTS.md, USER.md, etc"]
     V --> R
@@ -68,7 +68,7 @@ graph TD
 4. **Post-processing** — Tool and shell policy instructions appended if applicable
 5. **History Management** — Final prompt stored as system message in conversation history
 
-The prompt is modular and respects configuration options (AIEOS vs OpenClaw, native tools, skills mode, etc.).
+The prompt is modular and respects configuration options (AIEOS vs Markdown, native tools, skills mode, etc.).
 
 ## Source Code References
 

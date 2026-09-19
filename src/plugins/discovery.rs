@@ -1,7 +1,7 @@
 //! Plugin discovery — scans directories for plugin manifests.
 //!
-//! Mirrors OpenClaw's `discovery.ts`: scans bundled, global, and workspace
-//! extension directories for subdirectories containing `agentzero.plugin.toml`.
+//! Scans bundled, global, and workspace extension directories for
+//! subdirectories containing `agentzero.plugin.toml`.
 
 use std::path::{Path, PathBuf};
 
@@ -76,7 +76,7 @@ fn scan_dir(dir: &Path, origin: PluginOrigin) -> (Vec<DiscoveredPlugin>, Vec<Plu
 
 /// Discover plugins from all standard locations.
 ///
-/// Search order (later wins on ID conflict, matching OpenClaw's precedence):
+/// Search order (later wins on ID conflict):
 /// 1. Bundled: `<binary_dir>/extensions/`
 /// 2. Global: `~/.agentzero/extensions/`
 /// 3. Workspace: `<workspace>/.agentzero/extensions/`

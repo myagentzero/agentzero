@@ -134,7 +134,7 @@ Sandboxing: `bubblewrap.rs`, `firejail.rs`, `landlock.rs`, `docker.rs`, `detect.
 
 | Module | Key Files | Role |
 |---|---|---|
-| `gateway/` | `mod.rs`, `api.rs`, `sse.rs`, `ws.rs`, `openai_compat.rs`, `openclaw_compat.rs`, `static_files.rs` | **Axum HTTP server.** REST API, SSE streaming, WebSocket support, OpenAI-compatible endpoint, webhook receiver. Rate limiting, idempotency keys, 64KB body limit, 30s timeout. Bearer token & pairing auth. |
+| `gateway/` | `mod.rs`, `api.rs`, `sse.rs`, `ws.rs`, `openai_compat.rs`, `chat_compat.rs`, `static_files.rs` | **Axum HTTP server.** REST API, SSE streaming, WebSocket support, OpenAI-compatible endpoint, webhook receiver. Rate limiting, idempotency keys, 64KB body limit, 30s timeout. Bearer token & pairing auth. |
 
 ### Hardware & Peripherals
 
@@ -187,7 +187,7 @@ Sandboxing: `bubblewrap.rs`, `firejail.rs`, `landlock.rs`, `docker.rs`, `detect.
 | `integrations/` | `registry.rs`, `mod.rs` | **Integration registry.** Catalog of third-party integrations. |
 | `identity.rs` | (1.5k) | **Agent identity.** Name, description, persona for the agent instance. |
 | `multimodal.rs` | — | **Multimodal support.** Image/vision handling config. |
-| `migration.rs` | — | **Data migration.** Import from OpenClaw workspaces. |
+| `migration.rs` | — | **Data migration.** Import from existing workspaces. |
 | `util.rs` | — | **Shared utilities.** |
 
 ---
@@ -247,7 +247,7 @@ agentzero
 ├── doctor                                # Diagnostics
 ├── status                                # System overview
 ├── estop [--level] [status|resume]       # Emergency stop
-├── migrate openclaw                      # Data migration
+├── migrate                               # Data migration
 ├── pair                                  # Device pairing
 ├── auth-profiles                         # Credential management
 ├── version / completions                 # Meta

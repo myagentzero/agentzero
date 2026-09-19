@@ -1,4 +1,4 @@
-//! Identity system supporting OpenClaw (markdown) and AIEOS (JSON) formats.
+//! Identity system supporting Markdown workspace files and AIEOS (JSON) formats.
 //!
 //! AIEOS (AI Entity Object Specification) is a standardization framework for
 //! portable AI identity. This module handles loading and converting AIEOS v1.1
@@ -20,8 +20,8 @@ pub struct IdentityBackendProfile {
 
 const IDENTITY_BACKENDS: [IdentityBackendProfile; 2] = [
     IdentityBackendProfile {
-        key: "openclaw",
-        label: "OpenClaw (Markdown workspace identity files)",
+        key: "markdown",
+        label: "Markdown (workspace identity files)",
         description: "Classic layout with IDENTITY.md, SOUL.md, USER.md, and friends.",
     },
     IdentityBackendProfile {
@@ -1335,9 +1335,9 @@ mod tests {
     }
 
     #[test]
-    fn is_aieos_configured_false_openclaw_format() {
+    fn is_aieos_configured_false_markdown_format() {
         let config = IdentityConfig {
-            format: "openclaw".into(),
+            format: "markdown".into(),
             extra_files: Vec::new(),
             aieos_path: Some("identity.json".into()),
             aieos_inline: None,
@@ -1575,9 +1575,9 @@ mod tests {
     }
 
     #[test]
-    fn selectable_identity_backends_contains_openclaw_and_aieos() {
+    fn selectable_identity_backends_contains_markdown_and_aieos() {
         let profiles = selectable_identity_backends();
-        assert!(profiles.iter().any(|profile| profile.key == "openclaw"));
+        assert!(profiles.iter().any(|profile| profile.key == "markdown"));
         assert!(profiles.iter().any(|profile| profile.key == "aieos"));
     }
 

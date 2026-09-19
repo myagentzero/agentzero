@@ -1,7 +1,5 @@
 //! Plugin system for AgentZero.
 //!
-//! Modeled after OpenClaw's plugin architecture, adapted for Rust:
-//!
 //! - **Manifest**: each plugin has a `agentzero.plugin.toml` descriptor
 //! - **Discovery**: scans bundled, global (`~/.agentzero/extensions/`), and
 //!   workspace (`.agentzero/extensions/`) directories

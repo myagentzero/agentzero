@@ -1,8 +1,8 @@
 //! Plugin loader — takes discovered plugins, runs registration, builds the registry.
 //!
-//! Mirrors OpenClaw's `loader.ts`: iterates discovered plugins, resolves
-//! enable/disable state from config, calls `Plugin::register()` with a
-//! `PluginApi`, and collects tools/hooks/diagnostics into a `PluginRegistry`.
+//! Iterates discovered plugins, resolves enable/disable state from config,
+//! calls `Plugin::register()` with a `PluginApi`, and collects tools, hooks,
+//! and diagnostics into a `PluginRegistry`.
 
 use std::collections::HashSet;
 use std::panic::AssertUnwindSafe;
@@ -41,7 +41,7 @@ fn resolve_enable(id: &str, cfg: &PluginsConfig) -> Result<(), String> {
 /// Run `plugin.register(api)` with panic isolation.
 ///
 /// Returns `Ok(api)` on success, `Err(message)` if the plugin panicked or
-/// returned an error — matching OpenClaw's try/catch isolation pattern.
+/// returned an error. Panics are caught so one plugin cannot crash the host.
 fn run_register(
     plugin: &dyn Plugin,
     plugin_id: &str,
@@ -66,8 +66,8 @@ fn run_register(
 
 /// Load all plugins: discover → filter → register → collect into registry.
 ///
-/// `builtin_plugins` are compiled-in plugins (like OpenClaw's bundled extensions).
-/// They are registered first, then discovered plugins from disk.
+/// `builtin_plugins` are compiled-in plugins. They are registered first, then
+/// discovered plugins from disk.
 pub fn load_plugins(
     cfg: &PluginsConfig,
     workspace_dir: Option<&std::path::Path>,

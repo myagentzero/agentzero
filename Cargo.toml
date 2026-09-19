@@ -6,7 +6,7 @@ resolver = "2"
 
 [package]
 name = "agentzero"
-version = "0.3.3"
+version = "0.3.5"
 edition = "2024"
 build = "build.rs"
 authors = ["myagentzero"]

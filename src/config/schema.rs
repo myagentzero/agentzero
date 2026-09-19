@@ -316,7 +316,7 @@ pub struct Config {
     #[serde(default)]
     pub proxy: ProxyConfig,
 
-    /// Identity format configuration: OpenClaw or AIEOS (`[identity]`).
+    /// Identity format configuration: Markdown or AIEOS (`[identity]`).
     #[serde(default)]
     pub identity: IdentityConfig,
 
@@ -1437,15 +1437,15 @@ impl Default for HistoryPrunerConfig {
     }
 }
 
-// ── Identity (AIEOS / OpenClaw format) ──────────────────────────
+// ── Identity (AIEOS / Markdown format) ──────────────────────────
 
 /// Identity format configuration (`[identity]` section).
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct IdentityConfig {
-    /// Identity format: "openclaw" (default) or "aieos"
+    /// Identity format: "markdown" (default) or "aieos"
     #[serde(default = "default_identity_format")]
     pub format: String,
-    /// Additional workspace files injected for the OpenClaw identity format.
+    /// Additional workspace files injected for the Markdown identity format.
     #[serde(default)]
     pub extra_files: Vec<String>,
     /// Path to AIEOS JSON file (relative to workspace)
@@ -1457,7 +1457,7 @@ pub struct IdentityConfig {
 }
 
 fn default_identity_format() -> String {
-    "openclaw".into()
+    "markdown".into()
 }
 
 impl Default for IdentityConfig {

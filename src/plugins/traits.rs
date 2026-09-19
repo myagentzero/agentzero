@@ -1,6 +1,5 @@
 //! Plugin trait and API surface.
 //!
-//! Mirrors OpenClaw's `OpenClawPluginDefinition` + `OpenClawPluginApi`:
 //! - `Plugin` is the trait every plugin crate implements
 //! - `PluginApi` is the handle passed into `register()` so plugins can
 //!   register tools, hooks, and services without coupling to host internals
@@ -22,8 +21,8 @@ pub enum PluginCapability {
 
 /// Context passed to a plugin during registration.
 ///
-/// Analogous to OpenClaw's `OpenClawPluginApi`. Plugins call methods on this
-/// to register their contributions (tools, hooks) with the host.
+/// Plugins call methods on this to register their contributions (tools, hooks)
+/// with the host.
 pub struct PluginApi {
     pub(crate) plugin_id: String,
     pub(crate) tools: Vec<Box<dyn Tool>>,
@@ -59,7 +58,7 @@ impl PluginApi {
     }
 }
 
-/// Simple logger interface for plugins (mirrors OpenClaw's `PluginLogger`).
+/// Simple logger interface for plugins.
 #[derive(Clone)]
 pub struct PluginLogger {
     prefix: String,
@@ -91,9 +90,8 @@ impl PluginLogger {
 
 /// Trait that every AgentZero plugin must implement.
 ///
-/// Analogous to OpenClaw's `OpenClawPluginDefinition`. The host calls
-/// `register()` once during startup, passing a `PluginApi` the plugin uses
-/// to contribute tools, hooks, and services.
+/// The host calls `register()` once during startup, passing a `PluginApi` the
+/// plugin uses to contribute tools, hooks, and services.
 pub trait Plugin: Send + Sync {
     /// Manifest metadata (id, name, version, etc.).
     fn manifest(&self) -> &PluginManifest;

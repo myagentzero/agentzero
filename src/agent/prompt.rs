@@ -474,7 +474,7 @@ pub fn build_system_prompt_with_mode(
                 );
             }
             Err(e) => {
-                eprintln!("Warning: Failed to load AIEOS identity: {e}. Using OpenClaw format.");
+                eprintln!("Warning: Failed to load AIEOS identity: {e}. Using default format.");
                 load_bootstrap_files(
                     &mut prompt,
                     &config.workspace_dir,

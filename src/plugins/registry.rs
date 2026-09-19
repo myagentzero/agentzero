@@ -1,6 +1,4 @@
 //! Plugin registry — collects loaded plugins, their tools, hooks, and diagnostics.
-//!
-//! Mirrors OpenClaw's `PluginRegistry` / `createPluginRegistry()`.
 
 use std::collections::{HashMap, HashSet};
 
@@ -72,8 +70,6 @@ pub struct PluginHookRegistration {
 }
 
 /// The plugin registry — the central collection of everything plugins contribute.
-///
-/// Analogous to OpenClaw's `PluginRegistry` returned by `loadPlugins()`.
 pub struct PluginRegistry {
     pub plugins: Vec<PluginRecord>,
     pub tools: Vec<PluginToolRegistration>,

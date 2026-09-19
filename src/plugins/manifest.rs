@@ -1,7 +1,4 @@
 //! Plugin manifest — the `agentzero.plugin.toml` descriptor.
-//!
-//! Mirrors OpenClaw's `openclaw.plugin.json` but uses TOML to match
-//! AgentZero's existing config format.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

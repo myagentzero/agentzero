@@ -4133,10 +4133,10 @@ fn setup_identity_backend() -> Result<IdentityConfig> {
         println!(
             "  {} Identity: {}",
             style("✓").green().bold(),
-            style("openclaw").green()
+            style("markdown").green()
         );
         IdentityConfig {
-            format: "openclaw".into(),
+            format: "markdown".into(),
             extra_files: Vec::new(),
             aieos_path: None,
             aieos_inline: None,
