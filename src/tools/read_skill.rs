@@ -6,11 +6,15 @@ use std::path::PathBuf;
 /// Compact-mode helper for loading a skill's source file on demand.
 pub struct ReadSkillTool {
     workspace_dir: PathBuf,
+    allow_scripts: bool,
 }
 
 impl ReadSkillTool {
-    pub fn new(workspace_dir: PathBuf) -> Self {
-        Self { workspace_dir }
+    pub fn new(workspace_dir: PathBuf, allow_scripts: bool) -> Self {
+        Self {
+            workspace_dir,
+            allow_scripts,
+        }
     }
 }
 
@@ -49,7 +53,10 @@ impl Tool for ReadSkillTool {
             .filter(|value| !value.is_empty())
             .ok_or_else(|| anyhow::anyhow!("Missing 'name' parameter"))?;
 
-        let skills = crate::skills::load_skills(&self.workspace_dir);
+        let skills = crate::skills::load_skills_from_directory(
+            &crate::skills::skills_dir(&self.workspace_dir),
+            self.allow_scripts,
+        );
 
         let Some(skill) = skills
             .iter()
@@ -112,7 +119,29 @@ mod tests {
     use tempfile::TempDir;
 
     fn make_tool(tmp: &TempDir) -> ReadSkillTool {
-        ReadSkillTool::new(tmp.path().join("workspace"))
+        ReadSkillTool::new(tmp.path().join("workspace"), false)
+    }
+
+    #[tokio::test]
+    async fn reads_skill_with_scripts_only_when_allowed() {
+        let tmp = TempDir::new().unwrap();
+        let skill_dir = tmp.path().join("workspace/skills/setup");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        std::fs::write(skill_dir.join("SKILL.md"), "# Setup\n").unwrap();
+        std::fs::write(skill_dir.join("install.sh"), "echo hi\n").unwrap();
+
+        let blocked = make_tool(&tmp)
+            .execute(json!({ "name": "setup" }))
+            .await
+            .unwrap();
+        assert!(!blocked.success);
+
+        let allowed = ReadSkillTool::new(tmp.path().join("workspace"), true)
+            .execute(json!({ "name": "setup" }))
+            .await
+            .unwrap();
+        assert!(allowed.success);
+        assert!(allowed.output.contains("# Setup"));
     }
 
     #[tokio::test]

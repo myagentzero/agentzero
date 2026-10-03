@@ -141,17 +141,11 @@ fn load_bootstrap_files(
     max_chars_per_file: usize,
     identity_config: Option<&crate::config::IdentityConfig>,
 ) {
-    prompt.push_str("Files read from the workspace define behavior and context.\n\n");
+    let mut files = String::new();
 
-    let bootstrap_files = ["AGENTS.md", "USER.md"];
-
-    for filename in &bootstrap_files {
-        inject_workspace_file(prompt, workspace_dir, filename, max_chars_per_file);
-    }
-
-    for filename in ["BOOTSTRAP.md", "MEMORY.md"] {
+    for filename in ["AGENTS.md", "USER.md", "BOOTSTRAP.md", "MEMORY.md"] {
         if workspace_dir.join(filename).exists() {
-            inject_workspace_file(prompt, workspace_dir, filename, max_chars_per_file);
+            inject_workspace_file(&mut files, workspace_dir, filename, max_chars_per_file);
         }
     }
 
@@ -159,7 +153,7 @@ fn load_bootstrap_files(
     for file in extra_files {
         match normalize_identity_extra_file(file) {
             Some(safe_relative) => {
-                inject_workspace_file(prompt, workspace_dir, safe_relative, max_chars_per_file);
+                inject_workspace_file(&mut files, workspace_dir, safe_relative, max_chars_per_file);
             }
             None => {
                 tracing::warn!(
@@ -168,6 +162,13 @@ fn load_bootstrap_files(
                 );
             }
         }
+    }
+
+    if !files.is_empty() {
+        prompt.push_str(
+            "## Project Context\n\nFiles read from the workspace define behavior and context.\n\n",
+        );
+        prompt.push_str(&files);
     }
 }
 
@@ -219,7 +220,7 @@ fn build_shell_policy_instructions(autonomy: &crate::config::AutonomyConfig) -> 
     use std::collections::BTreeSet;
 
     let mut instructions = String::new();
-    instructions.push_str("## Shell Policy\n\n");
+    instructions.push_str("### Shell Policy\n\n");
 
     let autonomy_label = match autonomy.level {
         crate::security::AutonomyLevel::ReadOnly => "read_only",
@@ -289,18 +290,12 @@ pub(crate) fn build_tool_instructions(
          Never fabricate or guess tool results. Empty → \"No results found.\"; failed → report the error; uncertain → ask the user.\n\n",
     );
 
-    let grouped = group_tool_specs_by_category(tool_specs);
-
     if native_tools {
-        instructions.push_str("Available tools:\n\n");
-        for (category, specs) in &grouped {
-            let _ = writeln!(instructions, "#### {category}\n");
-            for tool in specs {
-                let _ = writeln!(instructions, "- **{}**: {}", tool.name, tool.description);
-            }
-            instructions.push('\n');
-        }
+        instructions.push_str(
+            "Tools are provided through the native function-calling interface, which defines each tool's name, description, and parameters.\n",
+        );
     } else {
+        let grouped = group_tool_specs_by_category(tool_specs);
         instructions.push_str("### Tool Calling (XML Protocol)\n\n");
         instructions.push_str("Format:\n");
         instructions.push_str(
@@ -418,10 +413,7 @@ pub fn build_system_prompt_with_mode(
         append_hardware_prompt(&mut prompt, tool_specs);
     }
 
-    // ── 4. Shell Policy ─────────────────────────────────────────
-    prompt.push_str(&build_shell_policy_instructions(&config.autonomy));
-
-    // ── 5. Skills ───────────────────────────────────────────────
+    // ── 4. Skills ───────────────────────────────────────────────
     if !skills.is_empty() {
         tracing::info!(
             caller = %caller,
@@ -429,15 +421,6 @@ pub fn build_system_prompt_with_mode(
             "📚 Skills loaded"
         );
 
-        prompt.push_str("## Skills\n\n");
-        prompt.push_str("Authorized: ");
-        for (i, skill) in skills.iter().enumerate() {
-            if i > 0 {
-                prompt.push_str(", ");
-            }
-            prompt.push_str(&skill.name);
-        }
-        prompt.push_str(". Use directly; don't refuse or invent restrictions.\n\n");
         prompt.push_str(&crate::skills::skills_to_prompt_with_mode(
             &skills,
             &config.workspace_dir,
@@ -446,21 +429,23 @@ pub fn build_system_prompt_with_mode(
         prompt.push_str("\n\n");
     }
 
-    // ── 6. Safety ───────────────────────────────────────────────
+    // ── 5. Security (paths, SECURITY.md, shell) ─────────────────
     let security =
         crate::security::SecurityPolicy::from_config(&config.autonomy, &config.workspace_dir);
     prompt.push_str("## Active Security Policy\n\n");
     prompt.push_str(&security.security_prompt_summary());
+    prompt.push('\n');
+    prompt.push_str(&build_shell_policy_instructions(&config.autonomy));
+    prompt.push('\n');
 
-    // ── 7. Bootstrap files (injected into context) ──────────────
-    prompt.push_str("## Project Context\n\n");
-
+    // ── 6. Bootstrap files (injected into context) ──────────────
     if crate::identity::is_aieos_configured(&config.identity) {
         // Load AIEOS identity
         match crate::identity::load_aieos_identity(&config.identity, &config.workspace_dir) {
             Ok(Some(aieos_identity)) => {
                 let aieos_prompt = crate::identity::aieos_to_system_prompt(&aieos_identity);
                 if !aieos_prompt.is_empty() {
+                    prompt.push_str("## Project Context\n\n");
                     prompt.push_str(&aieos_prompt);
                     prompt.push_str("\n\n");
                 }
@@ -492,7 +477,7 @@ pub fn build_system_prompt_with_mode(
         );
     }
 
-    // ── 8. Response Instructions ────────────────────────────────
+    // ── 7. Response Instructions ────────────────────────────────
     prompt.push_str("## Response Instructions\n\n");
     prompt.push_str("- Reply with final content only; output is delivered as-is to the current chat or channel.\n");
     prompt.push_str("- Media: `[Voice] <text>`, `[IMAGE:<path>]`, `[Document: <name>] <path>`\n");
@@ -502,7 +487,7 @@ pub fn build_system_prompt_with_mode(
         prompt.push_str("- Tools: use XML tags (defined above). Make multiple calls per response if needed.\n\n");
     }
 
-    // ── 9. Date & Time ─────────────────────────────────────────
+    // ── 8. Date & Time ─────────────────────────────────────────
     prompt.push_str("## Date & Time\n\n");
     let datetime_str = format_datetime(config.local_context.timezone.as_deref());
     let _ = writeln!(prompt, "{DATETIME_HEADER} {datetime_str}\n");
@@ -646,7 +631,7 @@ mod tests {
 
         let instructions = build_shell_policy_instructions(&autonomy);
 
-        assert!(instructions.contains("## Shell Policy"));
+        assert!(instructions.contains("### Shell Policy"));
         assert!(instructions.contains("Level: `supervised`"));
         assert!(instructions.contains("`cat`"));
         assert!(instructions.contains("`grep`"));
@@ -665,7 +650,7 @@ mod tests {
     }
 
     #[test]
-    fn build_tool_instructions_native_tools_omits_parameter_schemas() {
+    fn build_tool_instructions_native_tools_omits_tool_list() {
         let specs = vec![crate::tools::ToolSpec {
             name: "read_skill".into(),
             description: "Read a skill by name.".into(),
@@ -681,9 +666,10 @@ mod tests {
 
         let instructions = build_tool_instructions(&specs, true);
 
-        assert!(instructions.contains("Available tools:"));
-        assert!(instructions.contains("- **read_skill**"));
-        assert!(instructions.contains("Read a skill by name."));
+        // Native providers receive tool schemas via the API; the prompt must not repeat them.
+        assert!(instructions.contains("native function-calling interface"));
+        assert!(!instructions.contains("read_skill"));
+        assert!(!instructions.contains("Read a skill by name."));
         assert!(!instructions.contains("Parameters:"));
         assert!(!instructions.contains("\"required\""));
         assert!(!instructions.contains("Tool Calling (XML Protocol)"));

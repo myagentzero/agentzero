@@ -833,7 +833,7 @@ Screenshot captured successfully."#;
 
         assert!(prompt.contains("### Tool Calling (XML Protocol)"));
         assert!(prompt.contains("### browser"));
-        assert!(prompt.contains("## Shell Policy"));
+        assert!(prompt.contains("### Shell Policy"));
     }
 
     #[test]

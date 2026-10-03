@@ -60,10 +60,16 @@ impl SkillCreator {
             return Ok(None);
         }
 
+        // Never write into an existing skill directory: a SKILL.toml would shadow a
+        // hand-written SKILL.md and mark the directory for LRU eviction.
+        let skill_dir = self.skills_dir().join(&slug);
+        if tokio::fs::try_exists(&skill_dir).await? {
+            return Ok(None);
+        }
+
         // Enforce LRU limit before writing a new skill.
         self.enforce_lru_limit().await?;
 
-        let skill_dir = self.skills_dir().join(&slug);
         tokio::fs::create_dir_all(&skill_dir)
             .await
             .with_context(|| {
@@ -772,6 +778,42 @@ tags = ["auto-generated"]
             .unwrap();
         assert!(toml_content.contains("build-and-test"));
         assert!(toml_content.contains("agentzero-auto"));
+    }
+
+    #[tokio::test]
+    async fn create_from_execution_skips_existing_skill_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = SkillCreationConfig {
+            enabled: true,
+            max_skills: 500,
+            similarity_threshold: 0.85,
+        };
+
+        let skill_dir = dir.path().join("skills").join("weather");
+        tokio::fs::create_dir_all(&skill_dir).await.unwrap();
+        tokio::fs::write(skill_dir.join("SKILL.md"), "# Weather\nHand-written.\n")
+            .await
+            .unwrap();
+
+        let creator = SkillCreator::new(dir.path().to_path_buf(), config);
+        let calls = vec![
+            ToolCallRecord {
+                name: "shell".into(),
+                args: serde_json::json!({"command": "curl wttr.in"}),
+            },
+            ToolCallRecord {
+                name: "shell".into(),
+                args: serde_json::json!({"command": "date"}),
+            },
+        ];
+        let result = creator
+            .create_from_execution("Weather", &calls, None)
+            .await
+            .unwrap();
+
+        assert!(result.is_none());
+        assert!(!skill_dir.join("SKILL.toml").exists());
+        assert!(skill_dir.join("SKILL.md").exists());
     }
 
     #[tokio::test]

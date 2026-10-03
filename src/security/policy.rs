@@ -2117,12 +2117,16 @@ impl SecurityPolicy {
             let _ = writeln!(
                 out,
                 "**Forbidden paths**: {}. \
-                 Any read/write/exec targeting these paths will be blocked.",
+                 Read/write/exec targeting these paths is blocked, except inside the workspace \
+                 or an additional allowed path.",
                 paths.join(", ")
             );
         }
 
-        let _ = writeln!(out, "**Safety**: {}\n", self.custom_security_prompt);
+        let custom = self.custom_security_prompt.trim();
+        if !custom.is_empty() {
+            let _ = writeln!(out, "\n{custom}");
+        }
 
         out
     }
@@ -3437,9 +3441,17 @@ mod tests {
     #[test]
     fn prompt_summary_contains_custom_security_prompt() {
         let mut policy = default_policy();
-        policy.custom_security_prompt = "Test security guidance".to_string();
+        policy.custom_security_prompt = "### SECURITY.md\nTest security guidance\n".to_string();
         let summary = policy.security_prompt_summary();
-        assert!(summary.contains("Test security guidance"));
+        assert!(summary.contains("\n### SECURITY.md\nTest security guidance"));
+        assert!(!summary.contains("**Safety**"));
+    }
+
+    #[test]
+    fn prompt_summary_forbidden_paths_note_workspace_exception() {
+        let policy = default_policy();
+        let summary = policy.security_prompt_summary();
+        assert!(summary.contains("except inside the workspace"));
     }
 
     // ══════════════════════════════════════════════════════════

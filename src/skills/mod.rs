@@ -321,7 +321,7 @@ pub fn skills_to_prompt(skills: &[Skill], workspace_dir: &Path) -> String {
     )
 }
 
-/// Build the "Available Skills" system prompt section with configurable verbosity.
+/// Build the "Skills" system prompt section with configurable verbosity.
 pub fn skills_to_prompt_with_mode(
     skills: &[Skill],
     workspace_dir: &Path,
@@ -333,21 +333,24 @@ pub fn skills_to_prompt_with_mode(
         return String::new();
     }
 
-    let mut prompt = match mode {
-        crate::config::SkillsPromptInjectionMode::Full => String::from(
-            "## Available Skills\n\n\
-             Skill instructions and tool metadata are preloaded below.\n\
-             Follow these instructions directly; do not read skill files at runtime unless the user asks.\n\n\
-             <available_skills>\n",
-        ),
-        crate::config::SkillsPromptInjectionMode::Compact => String::from(
-            "## Available Skills\n\n\
-             Skill summaries are preloaded below to keep context compact.\n\
-             Skill instructions are loaded on demand: call `read_skill(name)` with the skill's `<name>` when you need the full skill file.\n\
-             The `location` field is included for reference.\n\n\
-             <available_skills>\n",
-        ),
-    };
+    let mut prompt = String::from(
+        "## Skills\n\n\
+         Use these skills directly when relevant; don't refuse or invent restrictions.\n",
+    );
+    prompt.push_str(match mode {
+        crate::config::SkillsPromptInjectionMode::Full => {
+            "Skill instructions are preloaded below. Follow them directly; do not read skill files at runtime unless the user asks.\n"
+        }
+        crate::config::SkillsPromptInjectionMode::Compact => {
+            "Only skill summaries are listed below. Call `read_skill(name)` with the skill's `<name>` to load its full instructions before using it.\n"
+        }
+    });
+    if skills.iter().any(|skill| !skill.tools.is_empty()) {
+        prompt.push_str(
+            "Skill `<tools>` are not callable by name. Run a tool's `<command>` yourself with the `shell` tool (kind `shell`/`script`) or the `http_request` tool (kind `http`), replacing each `{{arg}}` placeholder.\n",
+        );
+    }
+    prompt.push_str("\n<available_skills>\n");
 
     for skill in skills {
         let _ = writeln!(prompt, "  <skill>");
@@ -374,50 +377,25 @@ pub fn skills_to_prompt_with_mode(
         }
 
         if !skill.tools.is_empty() {
-            // Tools with known kinds (shell, script, http) are registered as
-            // callable tool specs and can be invoked directly via function calling.
-            // We note them here for context but mark them as callable.
-            let registered: Vec<_> = skill
-                .tools
-                .iter()
-                .filter(|t| matches!(t.kind.as_str(), "shell" | "script" | "http"))
-                .collect();
-            let unregistered: Vec<_> = skill
-                .tools
-                .iter()
-                .filter(|t| !matches!(t.kind.as_str(), "shell" | "script" | "http"))
-                .collect();
-
-            if !registered.is_empty() {
-                let _ = writeln!(
-                    prompt,
-                    "    <callable_tools hint=\"These are registered as callable tool specs. Invoke them directly by name ({{}}.{{}}) instead of using shell.\">"
-                );
-                for tool in &registered {
-                    let _ = writeln!(prompt, "      <tool>");
-                    write_xml_text_element(
-                        &mut prompt,
-                        8,
-                        "name",
-                        &format!("{}.{}", skill.name, tool.name),
-                    );
-                    write_xml_text_element(&mut prompt, 8, "description", &tool.description);
-                    let _ = writeln!(prompt, "      </tool>");
+            let _ = writeln!(prompt, "    <tools>");
+            for tool in &skill.tools {
+                let _ = writeln!(prompt, "      <tool>");
+                write_xml_text_element(&mut prompt, 8, "name", &tool.name);
+                write_xml_text_element(&mut prompt, 8, "description", &tool.description);
+                write_xml_text_element(&mut prompt, 8, "kind", &tool.kind);
+                write_xml_text_element(&mut prompt, 8, "command", &tool.command);
+                let mut args: Vec<_> = tool.args.iter().collect();
+                args.sort();
+                for (name, description) in args {
+                    prompt.push_str("        <arg name=\"");
+                    append_xml_escaped(&mut prompt, name);
+                    prompt.push_str("\">");
+                    append_xml_escaped(&mut prompt, description);
+                    prompt.push_str("</arg>\n");
                 }
-                let _ = writeln!(prompt, "    </callable_tools>");
+                let _ = writeln!(prompt, "      </tool>");
             }
-
-            if !unregistered.is_empty() {
-                let _ = writeln!(prompt, "    <tools>");
-                for tool in &unregistered {
-                    let _ = writeln!(prompt, "      <tool>");
-                    write_xml_text_element(&mut prompt, 8, "name", &tool.name);
-                    write_xml_text_element(&mut prompt, 8, "description", &tool.description);
-                    write_xml_text_element(&mut prompt, 8, "kind", &tool.kind);
-                    let _ = writeln!(prompt, "      </tool>");
-                }
-                let _ = writeln!(prompt, "    </tools>");
-            }
+            let _ = writeln!(prompt, "    </tools>");
         }
 
         let _ = writeln!(prompt, "  </skill>");
@@ -978,14 +956,13 @@ command = "echo hello"
         assert!(prompt.contains("<available_skills>"));
         assert!(prompt.contains("<name>test</name>"));
         assert!(prompt.contains("<location>skills/test/SKILL.md</location>"));
-        assert!(prompt.contains("loaded on demand"));
         assert!(prompt.contains("read_skill(name)"));
         assert!(!prompt.contains("<instructions>"));
         assert!(!prompt.contains("<instruction>Do the thing.</instruction>"));
         // Compact mode should still include tools so the LLM knows about them.
-        // Registered tools (shell/script/http) appear under <callable_tools>.
-        assert!(prompt.contains("<callable_tools"));
-        assert!(prompt.contains("<name>test.run</name>"));
+        assert!(prompt.contains("<tools>"));
+        assert!(prompt.contains("<name>run</name>"));
+        assert!(prompt.contains("<command>echo hi</command>"));
     }
 
     #[test]
@@ -1159,19 +1136,23 @@ description = "Bare minimum"
                 name: "get_weather".to_string(),
                 description: "Fetch forecast".to_string(),
                 kind: "shell".to_string(),
-                command: "curl wttr.in".to_string(),
-                args: HashMap::new(),
+                command: "curl wttr.in/{{city}}".to_string(),
+                args: HashMap::from([("city".to_string(), "City name".to_string())]),
             }],
             prompts: vec![],
             location: None,
         }];
         let prompt = skills_to_prompt(&skills, Path::new("/tmp"));
         assert!(prompt.contains("weather"));
-        // Registered tools (shell kind) now appear under <callable_tools> with
-        // prefixed names (skill_name.tool_name).
-        assert!(prompt.contains("<callable_tools"));
-        assert!(prompt.contains("<name>weather.get_weather</name>"));
+        // Skill tools are not registered as callable tools, so the prompt must
+        // not present them as such and must give the model the command to run.
+        assert!(!prompt.contains("<callable_tools"));
+        assert!(prompt.contains("not callable by name"));
+        assert!(prompt.contains("<name>get_weather</name>"));
         assert!(prompt.contains("<description>Fetch forecast</description>"));
+        assert!(prompt.contains("<kind>shell</kind>"));
+        assert!(prompt.contains("<command>curl wttr.in/{{city}}</command>"));
+        assert!(prompt.contains("<arg name=\"city\">City name</arg>"));
     }
 
     #[test]

@@ -443,7 +443,7 @@ impl Agent {
 
     fn build_system_prompt(&self) -> Result<String> {
         let tool_specs: Vec<crate::tools::ToolSpec> = self.tools.iter().map(|t| t.spec()).collect();
-        let native_tools = self.provider.supports_native_tools();
+        let native_tools = self.tool_dispatcher.should_send_tool_specs();
         let result = crate::agent::prompt::build_system_prompt_with_mode(
             &self.full_config,
             &tool_specs,

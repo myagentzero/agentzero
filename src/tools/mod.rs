@@ -453,7 +453,10 @@ pub fn all_tools_with_runtime(
         root_config.skills.prompt_injection_mode,
         crate::config::SkillsPromptInjectionMode::Compact
     ) {
-        tool_arcs.push(Arc::new(ReadSkillTool::new(workspace_dir.to_path_buf())));
+        tool_arcs.push(Arc::new(ReadSkillTool::new(
+            workspace_dir.to_path_buf(),
+            root_config.skills.allow_scripts,
+        )));
     }
 
     if browser_config.enabled {

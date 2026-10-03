@@ -644,25 +644,28 @@ fn build_channel_system_prompt(
     let mut prompt = base_prompt.to_string();
     crate::agent::prompt::refresh_prompt_datetime(&mut prompt, timezone_override);
 
+    let mut channel_lines = Vec::new();
+    if !reply_target.is_empty() {
+        channel_lines.push(format!(
+            "- Replying on {channel_name} to {reply_target}. For cron_create, use delivery={{\"mode\":\"announce\",\"channel\":\"{channel_name}\",\"to\":\"{reply_target}\"}}"
+        ));
+    }
     if channel_name != "cli" {
         let visibility_instruction = if expose_internal_tool_details {
-            "Show tool details (commands, traces, args) when relevant. Redact credentials."
+            "- Show tool details (commands, traces, args) when relevant. Redact credentials."
         } else {
-            "Hide tool internals (names, calls, args, commands, traces) unless explicitly asked."
+            "- Hide tool internals (names, calls, args, commands, traces) unless explicitly asked."
         };
-
-        if prompt.is_empty() {
-            prompt = visibility_instruction.to_string();
-        } else {
-            prompt = format!("{prompt}\n\n{visibility_instruction}");
-        }
+        channel_lines.push(visibility_instruction.to_string());
     }
 
-    if !reply_target.is_empty() {
-        let context = format!(
-            "\n\nChannel: {channel_name} → {reply_target}. For cron_create, use delivery={{\"mode\":\"announce\",\"channel\":\"{channel_name}\",\"to\":\"{reply_target}\"}}"
-        );
-        prompt.push_str(&context);
+    if !channel_lines.is_empty() {
+        let section = format!("## Channel\n\n{}\n", channel_lines.join("\n"));
+        if prompt.is_empty() {
+            prompt = section;
+        } else {
+            prompt = format!("{}\n\n{section}", prompt.trim_end());
+        }
     }
 
     prompt

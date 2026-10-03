@@ -3,7 +3,7 @@
 use agentzero::agent::agent::Agent;
 use agentzero::agent::dispatcher::{NativeToolDispatcher, XmlToolDispatcher};
 use agentzero::agent::memory_loader::MemoryLoader;
-use agentzero::config::MemoryConfig;
+use agentzero::config::{Config, MemoryConfig};
 use agentzero::memory;
 use agentzero::memory::Memory;
 use agentzero::observability::{NoopObserver, Observer};
@@ -20,6 +20,17 @@ pub fn make_memory() -> Arc<dyn Memory> {
         ..MemoryConfig::default()
     };
     Arc::from(memory::create_memory(&cfg, &std::env::temp_dir(), None).unwrap())
+}
+
+/// Config whose workspace is the checked-in fixture (contains the required
+/// `SECURITY.md`), so system prompt construction never reads the user's real
+/// `~/.agentzero/workspace`.
+pub fn make_config() -> Arc<Config> {
+    Arc::new(Config {
+        workspace_dir: std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/workspace"),
+        ..Config::default()
+    })
 }
 
 /// Create a `NoopObserver` for tests.
@@ -62,6 +73,7 @@ pub fn build_agent(provider: Box<dyn Provider>, tools: Vec<Box<dyn Tool>>) -> Ag
         .observer(make_observer())
         .tool_dispatcher(Box::new(NativeToolDispatcher))
         .workspace_dir(std::env::temp_dir())
+        .full_config(make_config())
         .build()
         .unwrap()
 }
@@ -75,6 +87,7 @@ pub fn build_agent_xml(provider: Box<dyn Provider>, tools: Vec<Box<dyn Tool>>) -
         .observer(make_observer())
         .tool_dispatcher(Box::new(XmlToolDispatcher))
         .workspace_dir(std::env::temp_dir())
+        .full_config(make_config())
         .build()
         .unwrap()
 }
@@ -91,7 +104,8 @@ pub fn build_recording_agent(
         .memory(make_memory())
         .observer(make_observer())
         .tool_dispatcher(Box::new(NativeToolDispatcher))
-        .workspace_dir(std::env::temp_dir());
+        .workspace_dir(std::env::temp_dir())
+        .full_config(make_config());
 
     if let Some(loader) = memory_loader {
         builder = builder.memory_loader(loader);
@@ -118,6 +132,7 @@ pub fn build_agent_with_sqlite_memory(
         .observer(make_observer())
         .tool_dispatcher(Box::new(NativeToolDispatcher))
         .workspace_dir(std::env::temp_dir())
+        .full_config(make_config())
         .build()
         .unwrap()
 }
