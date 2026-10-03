@@ -6,21 +6,11 @@ use std::path::PathBuf;
 /// Compact-mode helper for loading a skill's source file on demand.
 pub struct ReadSkillTool {
     workspace_dir: PathBuf,
-    open_skills_enabled: bool,
-    open_skills_dir: Option<String>,
 }
 
 impl ReadSkillTool {
-    pub fn new(
-        workspace_dir: PathBuf,
-        open_skills_enabled: bool,
-        open_skills_dir: Option<String>,
-    ) -> Self {
-        Self {
-            workspace_dir,
-            open_skills_enabled,
-            open_skills_dir,
-        }
+    pub fn new(workspace_dir: PathBuf) -> Self {
+        Self { workspace_dir }
     }
 }
 
@@ -59,11 +49,7 @@ impl Tool for ReadSkillTool {
             .filter(|value| !value.is_empty())
             .ok_or_else(|| anyhow::anyhow!("Missing 'name' parameter"))?;
 
-        let skills = crate::skills::load_skills_with_open_skills_settings(
-            &self.workspace_dir,
-            self.open_skills_enabled,
-            self.open_skills_dir.as_deref(),
-        );
+        let skills = crate::skills::load_skills(&self.workspace_dir);
 
         let Some(skill) = skills
             .iter()
@@ -126,7 +112,7 @@ mod tests {
     use tempfile::TempDir;
 
     fn make_tool(tmp: &TempDir) -> ReadSkillTool {
-        ReadSkillTool::new(tmp.path().join("workspace"), false, None)
+        ReadSkillTool::new(tmp.path().join("workspace"))
     }
 
     #[tokio::test]

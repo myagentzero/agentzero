@@ -484,8 +484,6 @@ export const CONFIG_SECTIONS: SectionDef[] = [
     description: 'Skill loading, security, and prompt injection',
     icon: Sparkles,
     fields: [
-      { key: 'open_skills_enabled', label: 'Open Skills Enabled', type: 'toggle', defaultValue: false, description: 'Enable community open-skills repository' },
-      { key: 'open_skills_dir', label: 'Open Skills Directory', type: 'text', description: 'e.g. ./skills or /opt/agentzero/skills' },
       { key: 'trusted_skill_roots', label: 'Trusted Skill Roots', type: 'tag-list', tagPlaceholder: 'e.g. /home/user/skills, /opt/shared-skills', description: 'Allowlist of canonical directory roots for workspace skill symlink targets' },
       { key: 'allow_scripts', label: 'Allow Scripts', type: 'toggle', defaultValue: false, description: 'Allow .sh/.bash/.zsh/.ps1/.bat/.cmd files in skill packages' },
       {

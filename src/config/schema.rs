@@ -1140,12 +1140,6 @@ fn parse_skills_prompt_injection_mode(raw: &str) -> Option<SkillsPromptInjection
 /// Skills loading configuration (`[skills]` section).
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 pub struct SkillsConfig {
-    /// Enable loading and syncing the community open-skills repository.
-    #[serde(default)]
-    pub open_skills_enabled: bool,
-    /// Optional path to a local open-skills repository.
-    #[serde(default)]
-    pub open_skills_dir: Option<String>,
     /// Optional allowlist of canonical directory roots for workspace skill symlink targets.
     #[serde(default)]
     pub trusted_skill_roots: Vec<String>,
@@ -7674,27 +7668,6 @@ impl Config {
             }
         }
 
-        // Open-skills opt-in flag: AGENTZERO_OPEN_SKILLS_ENABLED
-        if let Ok(flag) = std::env::var("AGENTZERO_OPEN_SKILLS_ENABLED") {
-            if !flag.trim().is_empty() {
-                match flag.trim().to_ascii_lowercase().as_str() {
-                    "1" | "true" | "yes" | "on" => self.skills.open_skills_enabled = true,
-                    "0" | "false" | "no" | "off" => self.skills.open_skills_enabled = false,
-                    _ => tracing::warn!(
-                        "Ignoring invalid AGENTZERO_OPEN_SKILLS_ENABLED (valid: 1|0|true|false|yes|no|on|off)"
-                    ),
-                }
-            }
-        }
-
-        // Open-skills directory override: AGENTZERO_OPEN_SKILLS_DIR
-        if let Ok(path) = std::env::var("AGENTZERO_OPEN_SKILLS_DIR") {
-            let trimmed = path.trim();
-            if !trimmed.is_empty() {
-                self.skills.open_skills_dir = Some(trimmed.to_string());
-            }
-        }
-
         // Skills script-file audit override: AGENTZERO_SKILLS_ALLOW_SCRIPTS
         if let Ok(flag) = std::env::var("AGENTZERO_SKILLS_ALLOW_SCRIPTS") {
             if !flag.trim().is_empty() {
@@ -8370,7 +8343,6 @@ mod tests {
         assert!(c.default_model.as_deref().unwrap().contains("claude"));
         assert!((c.default_temperature - 0.7).abs() < f64::EPSILON);
         assert!(c.api_key.is_none());
-        assert!(!c.skills.open_skills_enabled);
         assert!(!c.skills.allow_scripts);
         assert_eq!(
             c.skills.prompt_injection_mode,
@@ -10127,60 +10099,45 @@ requires_openai_auth = true
     }
 
     #[test]
-    async fn env_override_open_skills_enabled_and_dir() {
+    async fn env_override_skills_settings() {
         let _env_guard = env_override_lock().await;
         let mut config = Config::default();
-        assert!(!config.skills.open_skills_enabled);
         assert!(!config.skills.allow_scripts);
-        assert!(config.skills.open_skills_dir.is_none());
         assert_eq!(
             config.skills.prompt_injection_mode,
             SkillsPromptInjectionMode::Compact
         );
 
-        unsafe { std::env::set_var("AGENTZERO_OPEN_SKILLS_ENABLED", "true") };
-        unsafe { std::env::set_var("AGENTZERO_OPEN_SKILLS_DIR", "/tmp/open-skills") };
         unsafe { std::env::set_var("AGENTZERO_SKILLS_ALLOW_SCRIPTS", "yes") };
         unsafe { std::env::set_var("AGENTZERO_SKILLS_PROMPT_MODE", "compact") };
         config.apply_env_overrides();
 
-        assert!(config.skills.open_skills_enabled);
         assert!(config.skills.allow_scripts);
-        assert_eq!(
-            config.skills.open_skills_dir.as_deref(),
-            Some("/tmp/open-skills")
-        );
         assert_eq!(
             config.skills.prompt_injection_mode,
             SkillsPromptInjectionMode::Compact
         );
 
-        unsafe { std::env::remove_var("AGENTZERO_OPEN_SKILLS_ENABLED") };
-        unsafe { std::env::remove_var("AGENTZERO_OPEN_SKILLS_DIR") };
         unsafe { std::env::remove_var("AGENTZERO_SKILLS_ALLOW_SCRIPTS") };
         unsafe { std::env::remove_var("AGENTZERO_SKILLS_PROMPT_MODE") };
     }
 
     #[test]
-    async fn env_override_open_skills_enabled_invalid_value_keeps_existing_value() {
+    async fn env_override_skills_invalid_value_keeps_existing_value() {
         let _env_guard = env_override_lock().await;
         let mut config = Config::default();
-        config.skills.open_skills_enabled = true;
         config.skills.allow_scripts = true;
         config.skills.prompt_injection_mode = SkillsPromptInjectionMode::Compact;
 
-        unsafe { std::env::set_var("AGENTZERO_OPEN_SKILLS_ENABLED", "maybe") };
         unsafe { std::env::set_var("AGENTZERO_SKILLS_ALLOW_SCRIPTS", "maybe") };
         unsafe { std::env::set_var("AGENTZERO_SKILLS_PROMPT_MODE", "invalid") };
         config.apply_env_overrides();
 
-        assert!(config.skills.open_skills_enabled);
         assert!(config.skills.allow_scripts);
         assert_eq!(
             config.skills.prompt_injection_mode,
             SkillsPromptInjectionMode::Compact
         );
-        unsafe { std::env::remove_var("AGENTZERO_OPEN_SKILLS_ENABLED") };
         unsafe { std::env::remove_var("AGENTZERO_SKILLS_ALLOW_SCRIPTS") };
         unsafe { std::env::remove_var("AGENTZERO_SKILLS_PROMPT_MODE") };
     }

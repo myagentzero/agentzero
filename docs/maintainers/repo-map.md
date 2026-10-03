@@ -149,12 +149,11 @@ Sandboxing: `bubblewrap.rs`, `firejail.rs`, `landlock.rs`, `docker.rs`, `detect.
 |---|---|---|
 | `observability/` | `traits.rs`, `mod.rs`, `log.rs`, `prometheus.rs`, `otel.rs`, `verbose.rs`, `noop.rs`, `multi.rs`, `runtime_trace.rs` | **Metrics and tracing.** `Observer` trait: `log_event()`. Composite observer (`multi.rs`) fans out to multiple backends. |
 
-### Skills & SkillForge
+### Skills
 
 | Module | Key Files | Role |
 |---|---|---|
-| `skills/` | `mod.rs` (1.5k), `audit.rs` | **User/community-authored capabilities.** Loaded from `~/.agentzero/workspace/skills/<name>/SKILL.md`. CLI: list, install, audit, remove. Optional community sync from open-skills repo. |
-| `skillforge/` | `scout.rs`, `evaluate.rs`, `integrate.rs`, `mod.rs` | **Skill discovery and evaluation.** Scouts for skills, evaluates quality/fitness, integrates into the runtime. |
+| `skills/` | `mod.rs`, `audit.rs` | **User-authored capabilities.** Loaded from `~/.agentzero/workspace/skills/<name>/SKILL.md`. CLI: list, install, audit, remove. |
 
 ### SOP (Standard Operating Procedures)
 

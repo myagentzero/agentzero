@@ -64,31 +64,6 @@ pub fn audit_skill_directory_with_options(
     Ok(report)
 }
 
-pub fn audit_open_skill_markdown(path: &Path, repo_root: &Path) -> Result<SkillAuditReport> {
-    if !path.exists() {
-        bail!("Open-skill markdown not found: {}", path.display());
-    }
-    let canonical_repo = repo_root
-        .canonicalize()
-        .with_context(|| format!("failed to canonicalize {}", repo_root.display()))?;
-    let canonical_path = path
-        .canonicalize()
-        .with_context(|| format!("failed to canonicalize {}", path.display()))?;
-    if !canonical_path.starts_with(&canonical_repo) {
-        bail!(
-            "Open-skill markdown escapes repository root: {}",
-            path.display()
-        );
-    }
-
-    let mut report = SkillAuditReport {
-        files_scanned: 1,
-        findings: Vec::new(),
-    };
-    audit_markdown_file(&canonical_repo, &canonical_path, &mut report)?;
-    Ok(report)
-}
-
 fn collect_paths_depth_first(root: &Path) -> Result<Vec<PathBuf>> {
     let mut stack = vec![root.to_path_buf()];
     let mut out = Vec::new();
@@ -333,10 +308,8 @@ fn audit_markdown_link_target(
         Err(_) => {
             // Check if this is a cross-skill reference (links outside current skill directory)
             // Cross-skill references are allowed to point to missing files since the referenced
-            // skill may not be installed. This is common in open-skills where skills reference
-            // each other but not all skills are necessarily present.
+            // skill may not be installed.
             if is_cross_skill_reference(stripped) {
-                // Allow missing cross-skill references - this is valid for open-skills
                 return;
             }
             report.findings.push(format!(
@@ -535,7 +508,7 @@ fn looks_like_absolute_path(target: &str) -> bool {
     // Relative paths with parent directory references (e.g., "../other-skill/SKILL.md")
     // are allowed to pass through to the canonicalization check below, which will
     // properly validate that they resolve within the skill root.
-    // This enables cross-skill references in open-skills while still maintaining security.
+    // This enables cross-skill references while still maintaining security.
 
     false
 }

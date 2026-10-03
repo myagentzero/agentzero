@@ -248,18 +248,13 @@ Notes:
 
 | Key | Default | Purpose |
 |---|---|---|
-| `open_skills_enabled` | `false` | Opt-in loading/sync of community `open-skills` repository |
-| `open_skills_dir` | unset | Optional local path for `open-skills` (defaults to `$HOME/open-skills` when enabled) |
 | `prompt_injection_mode` | `full` | Skill prompt verbosity: `full` (inline instructions/tools) or `compact` (name/description/location only) |
 
 Notes:
 
-- Security-first default: AgentZero does **not** clone or sync `open-skills` unless `open_skills_enabled = true`.
+- Skills are loaded only from the workspace skills directory (`<workspace>/skills/<name>/SKILL.md` or `SKILL.toml`).
 - Environment overrides:
-  - `AGENTZERO_OPEN_SKILLS_ENABLED` accepts `1/0`, `true/false`, `yes/no`, `on/off`.
-  - `AGENTZERO_OPEN_SKILLS_DIR` overrides the repository path when non-empty.
   - `AGENTZERO_SKILLS_PROMPT_MODE` accepts `full` or `compact`.
-- Precedence for enable flag: `AGENTZERO_OPEN_SKILLS_ENABLED` → `skills.open_skills_enabled` in `config.toml` → default `false`.
 - `prompt_injection_mode = "compact"` is recommended on low-context local models to reduce startup prompt size while keeping skill files available on demand.
 - Skill loading and `agentzero skills install` both apply a static security audit. Skills that contain symlinks, script-like files, high-risk shell payload snippets, or unsafe markdown link traversal are rejected.
 

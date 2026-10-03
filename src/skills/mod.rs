@@ -2,8 +2,6 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::process::Command;
-use std::time::{Duration, SystemTime};
 
 mod audit;
 #[cfg(feature = "skill-creation")]
@@ -11,10 +9,6 @@ pub mod creator;
 #[cfg(feature = "skill-creation")]
 pub mod improver;
 pub mod usage_tracker;
-
-const OPEN_SKILLS_REPO_URL: &str = "git@github.com:myagentzero/open-skills.git";
-const OPEN_SKILLS_SYNC_MARKER: &str = ".agentzero-open-skills-sync";
-const OPEN_SKILLS_SYNC_INTERVAL_SECS: u64 = 60 * 60 * 24 * 7;
 
 /// A skill is a user-defined or community-built capability.
 /// Skills live in `~/.agentzero/workspace/skills/<name>/SKILL.md`
@@ -103,52 +97,12 @@ fn warn_skipped_skill(path: &Path, summary: &str, allow_scripts: bool) {
 
 /// Load all skills from the workspace skills directory
 pub fn load_skills(workspace_dir: &Path) -> Vec<Skill> {
-    load_skills_with_open_skills_config(workspace_dir, None, None, None)
+    load_workspace_skills(workspace_dir, false)
 }
 
 /// Load skills using runtime config values (preferred at runtime).
 pub fn load_skills_with_config(workspace_dir: &Path, config: &crate::config::Config) -> Vec<Skill> {
-    load_skills_with_open_skills_config(
-        workspace_dir,
-        Some(config.skills.open_skills_enabled),
-        config.skills.open_skills_dir.as_deref(),
-        Some(config.skills.allow_scripts),
-    )
-}
-
-/// Load skills using explicit open-skills settings.
-pub fn load_skills_with_open_skills_settings(
-    workspace_dir: &Path,
-    open_skills_enabled: bool,
-    open_skills_dir: Option<&str>,
-) -> Vec<Skill> {
-    load_skills_with_open_skills_config(
-        workspace_dir,
-        Some(open_skills_enabled),
-        open_skills_dir,
-        None,
-    )
-}
-
-fn load_skills_with_open_skills_config(
-    workspace_dir: &Path,
-    config_open_skills_enabled: Option<bool>,
-    config_open_skills_dir: Option<&str>,
-    config_allow_scripts: Option<bool>,
-) -> Vec<Skill> {
-    let mut skills = Vec::new();
-    let allow_scripts = config_allow_scripts.unwrap_or(false);
-
-    if let Some(open_skills_dir) = ensure_open_skills_repo(
-        config_open_skills_enabled,
-        config_open_skills_dir,
-        workspace_dir,
-    ) {
-        skills.extend(load_open_skills(&open_skills_dir, allow_scripts));
-    }
-
-    skills.extend(load_workspace_skills(workspace_dir, allow_scripts));
-    skills
+    load_workspace_skills(workspace_dir, config.skills.allow_scripts)
 }
 
 fn load_workspace_skills(workspace_dir: &Path, allow_scripts: bool) -> Vec<Skill> {
@@ -157,24 +111,6 @@ fn load_workspace_skills(workspace_dir: &Path, allow_scripts: bool) -> Vec<Skill
 }
 
 pub fn load_skills_from_directory(skills_dir: &Path, allow_scripts: bool) -> Vec<Skill> {
-    load_skills_from_directory_internal(skills_dir, allow_scripts, SkillSource::Workspace)
-}
-
-fn load_open_skills_from_directory(skills_dir: &Path, allow_scripts: bool) -> Vec<Skill> {
-    load_skills_from_directory_internal(skills_dir, allow_scripts, SkillSource::OpenSkills)
-}
-
-#[derive(Clone, Copy)]
-enum SkillSource {
-    Workspace,
-    OpenSkills,
-}
-
-fn load_skills_from_directory_internal(
-    skills_dir: &Path,
-    allow_scripts: bool,
-    source: SkillSource,
-) -> Vec<Skill> {
     if !skills_dir.exists() {
         return Vec::new();
     }
@@ -183,11 +119,6 @@ fn load_skills_from_directory_internal(
 
     let Ok(entries) = std::fs::read_dir(skills_dir) else {
         return skills;
-    };
-
-    let unauditable_label = match source {
-        SkillSource::Workspace => "skill",
-        SkillSource::OpenSkills => "open-skill",
     };
 
     for entry in entries.flatten() {
@@ -208,7 +139,7 @@ fn load_skills_from_directory_internal(
             }
             Err(err) => {
                 tracing::warn!(
-                    "skipping unauditable {unauditable_label} directory {}: {err}",
+                    "skipping unauditable skill directory {}: {err}",
                     path.display()
                 );
                 continue;
@@ -224,262 +155,13 @@ fn load_skills_from_directory_internal(
                 skills.push(skill);
             }
         } else if md_path.exists() {
-            let loaded = match source {
-                SkillSource::Workspace => load_skill_md(&md_path, &path),
-                SkillSource::OpenSkills => load_open_skill_md(&md_path),
-            };
-            if let Ok(skill) = loaded {
+            if let Ok(skill) = load_skill_md(&md_path, &path) {
                 skills.push(skill);
             }
         }
     }
 
     skills
-}
-
-fn load_open_skills(repo_dir: &Path, allow_scripts: bool) -> Vec<Skill> {
-    // Modern open-skills layout stores skill packages in `skills/<name>/SKILL.md`.
-    // Prefer that structure to avoid treating repository docs (e.g. CONTRIBUTING.md)
-    // as executable skills.
-    let nested_skills_dir = repo_dir.join("skills");
-    if nested_skills_dir.is_dir() {
-        return load_open_skills_from_directory(&nested_skills_dir, allow_scripts);
-    }
-
-    let mut skills = Vec::new();
-
-    let Ok(entries) = std::fs::read_dir(repo_dir) else {
-        return skills;
-    };
-
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if !path.is_file() {
-            continue;
-        }
-
-        let is_markdown = path
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .is_some_and(|ext| ext.eq_ignore_ascii_case("md"));
-        if !is_markdown {
-            continue;
-        }
-
-        let should_skip = path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .is_some_and(|name| {
-                name.eq_ignore_ascii_case("README.md")
-                    || name.eq_ignore_ascii_case("SKILL_TEMPLATE.md")
-            });
-        if should_skip {
-            continue;
-        }
-
-        match audit::audit_open_skill_markdown(&path, repo_dir) {
-            Ok(report) if report.is_clean() => {}
-            Ok(report) => {
-                tracing::warn!(
-                    "skipping insecure open-skill file {}: {}",
-                    path.display(),
-                    report.summary()
-                );
-                continue;
-            }
-            Err(err) => {
-                tracing::warn!(
-                    "skipping unauditable open-skill file {}: {err}",
-                    path.display()
-                );
-                continue;
-            }
-        }
-
-        if let Ok(skill) = load_open_skill_md(&path) {
-            skills.push(skill);
-        }
-    }
-
-    skills
-}
-
-fn parse_open_skills_enabled(raw: &str) -> Option<bool> {
-    match raw.trim().to_ascii_lowercase().as_str() {
-        "1" | "true" | "yes" | "on" => Some(true),
-        "0" | "false" | "no" | "off" => Some(false),
-        _ => None,
-    }
-}
-
-fn open_skills_enabled_from_sources(
-    config_open_skills_enabled: Option<bool>,
-    env_override: Option<&str>,
-) -> bool {
-    if let Some(raw) = env_override {
-        if let Some(enabled) = parse_open_skills_enabled(raw) {
-            return enabled;
-        }
-        if !raw.trim().is_empty() {
-            tracing::warn!(
-                "Ignoring invalid AGENTZERO_OPEN_SKILLS_ENABLED (valid: 1|0|true|false|yes|no|on|off)"
-            );
-        }
-    }
-
-    config_open_skills_enabled.unwrap_or(false)
-}
-
-fn open_skills_enabled(config_open_skills_enabled: Option<bool>) -> bool {
-    let env_override = std::env::var("AGENTZERO_OPEN_SKILLS_ENABLED").ok();
-    open_skills_enabled_from_sources(config_open_skills_enabled, env_override.as_deref())
-}
-
-fn resolve_open_skills_dir_from_sources(
-    env_dir: Option<&str>,
-    config_dir: Option<&str>,
-    workspace_dir: Option<&Path>,
-) -> Option<PathBuf> {
-    let parse_dir = |raw: &str| {
-        let trimmed = raw.trim();
-        if trimmed.is_empty() {
-            None
-        } else {
-            Some(PathBuf::from(trimmed))
-        }
-    };
-
-    if let Some(env_dir) = env_dir.and_then(parse_dir) {
-        return Some(env_dir);
-    }
-    if let Some(config_dir) = config_dir.and_then(parse_dir) {
-        return Some(config_dir);
-    }
-    workspace_dir.map(|ws| ws.join("open-skills"))
-}
-
-fn resolve_open_skills_dir(
-    config_open_skills_dir: Option<&str>,
-    workspace_dir: &Path,
-) -> Option<PathBuf> {
-    let env_dir = std::env::var("AGENTZERO_OPEN_SKILLS_DIR").ok();
-    resolve_open_skills_dir_from_sources(
-        env_dir.as_deref(),
-        config_open_skills_dir,
-        Some(workspace_dir),
-    )
-}
-
-fn ensure_open_skills_repo(
-    config_open_skills_enabled: Option<bool>,
-    config_open_skills_dir: Option<&str>,
-    workspace_dir: &Path,
-) -> Option<PathBuf> {
-    if !open_skills_enabled(config_open_skills_enabled) {
-        return None;
-    }
-
-    let repo_dir = resolve_open_skills_dir(config_open_skills_dir, workspace_dir)?;
-
-    if !repo_dir.exists() {
-        if !clone_open_skills_repo(&repo_dir) {
-            return None;
-        }
-        let _ = mark_open_skills_synced(&repo_dir);
-        return Some(repo_dir);
-    }
-
-    if should_sync_open_skills(&repo_dir) {
-        if pull_open_skills_repo(&repo_dir) {
-            let _ = mark_open_skills_synced(&repo_dir);
-        } else {
-            tracing::warn!(
-                "open-skills update failed; using local copy from {}",
-                repo_dir.display()
-            );
-        }
-    }
-
-    Some(repo_dir)
-}
-
-fn clone_open_skills_repo(repo_dir: &Path) -> bool {
-    if let Some(parent) = repo_dir.parent() {
-        if let Err(err) = std::fs::create_dir_all(parent) {
-            tracing::warn!(
-                "failed to create open-skills parent directory {}: {err}",
-                parent.display()
-            );
-            return false;
-        }
-    }
-
-    let output = Command::new("git")
-        .args(["clone", "--depth", "1", OPEN_SKILLS_REPO_URL])
-        .arg(repo_dir)
-        .output();
-
-    match output {
-        Ok(result) if result.status.success() => {
-            tracing::info!("initialized open-skills at {}", repo_dir.display());
-            true
-        }
-        Ok(result) => {
-            let stderr = String::from_utf8_lossy(&result.stderr);
-            tracing::warn!("failed to clone open-skills: {stderr}");
-            false
-        }
-        Err(err) => {
-            tracing::warn!("failed to run git clone for open-skills: {err}");
-            false
-        }
-    }
-}
-
-fn pull_open_skills_repo(repo_dir: &Path) -> bool {
-    // If user points to a non-git directory via env var, keep using it without pulling.
-    if !repo_dir.join(".git").exists() {
-        return true;
-    }
-
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(repo_dir)
-        .args(["pull", "--ff-only"])
-        .output();
-
-    match output {
-        Ok(result) if result.status.success() => true,
-        Ok(result) => {
-            let stderr = String::from_utf8_lossy(&result.stderr);
-            tracing::warn!("failed to pull open-skills updates: {stderr}");
-            false
-        }
-        Err(err) => {
-            tracing::warn!("failed to run git pull for open-skills: {err}");
-            false
-        }
-    }
-}
-
-fn should_sync_open_skills(repo_dir: &Path) -> bool {
-    let marker = repo_dir.join(OPEN_SKILLS_SYNC_MARKER);
-    let Ok(metadata) = std::fs::metadata(marker) else {
-        return true;
-    };
-    let Ok(modified_at) = metadata.modified() else {
-        return true;
-    };
-    let Ok(age) = SystemTime::now().duration_since(modified_at) else {
-        return true;
-    };
-
-    age >= Duration::from_secs(OPEN_SKILLS_SYNC_INTERVAL_SECS)
-}
-
-fn mark_open_skills_synced(repo_dir: &Path) -> Result<()> {
-    std::fs::write(repo_dir.join(OPEN_SKILLS_SYNC_MARKER), b"synced")?;
-    Ok(())
 }
 
 /// Load a skill from a SKILL.toml manifest
@@ -515,40 +197,6 @@ fn load_skill_md(path: &Path, dir: &Path) -> Result<Skill> {
             .filter(|value| !value.trim().is_empty())
             .unwrap_or_else(|| extract_description(&parsed.body)),
         version: parsed.meta.version.unwrap_or_else(default_version),
-        tools: Vec::new(),
-        prompts: vec![parsed.body],
-        location: Some(path.to_path_buf()),
-    })
-}
-
-fn load_open_skill_md(path: &Path) -> Result<Skill> {
-    let content = std::fs::read_to_string(path)?;
-    let parsed = parse_skill_markdown(&content);
-    let file_stem = path
-        .file_stem()
-        .and_then(|n| n.to_str())
-        .unwrap_or("open-skill")
-        .to_string();
-    let name = if file_stem.eq_ignore_ascii_case("skill") {
-        path.parent()
-            .and_then(|dir| dir.file_name())
-            .and_then(|name| name.to_str())
-            .unwrap_or(&file_stem)
-            .to_string()
-    } else {
-        file_stem
-    };
-    Ok(Skill {
-        name: parsed.meta.name.unwrap_or(name),
-        description: parsed
-            .meta
-            .description
-            .filter(|value| !value.trim().is_empty())
-            .unwrap_or_else(|| extract_description(&parsed.body)),
-        version: parsed
-            .meta
-            .version
-            .unwrap_or_else(|| "open-skills".to_string()),
         tools: Vec::new(),
         prompts: vec![parsed.body],
         location: Some(path.to_path_buf()),
@@ -1183,38 +831,6 @@ pub fn handle_command(command: crate::SkillCommands, config: &crate::config::Con
 mod tests {
     use super::*;
     use std::fs;
-    use std::sync::{Mutex, OnceLock};
-
-    fn open_skills_env_lock() -> &'static Mutex<()> {
-        static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        ENV_LOCK.get_or_init(|| Mutex::new(()))
-    }
-
-    struct EnvVarGuard {
-        key: &'static str,
-        original: Option<String>,
-    }
-
-    impl EnvVarGuard {
-        fn unset(key: &'static str) -> Self {
-            let original = std::env::var(key).ok();
-            // SAFETY: test-only, single-threaded test runner.
-            unsafe { std::env::remove_var(key) };
-            Self { key, original }
-        }
-    }
-
-    impl Drop for EnvVarGuard {
-        fn drop(&mut self) {
-            if let Some(value) = &self.original {
-                // SAFETY: test-only, single-threaded test runner.
-                unsafe { std::env::set_var(self.key, value) };
-            } else {
-                // SAFETY: test-only, single-threaded test runner.
-                unsafe { std::env::remove_var(self.key) };
-            }
-        }
-    }
 
     #[test]
     fn load_empty_skills_dir() {
@@ -1651,119 +1267,6 @@ description = "Bare minimum"
         let skills = load_skills(dir.path());
         assert_eq!(skills.len(), 1);
         assert_eq!(skills[0].name, "from-toml"); // TOML takes priority
-    }
-
-    #[test]
-    fn open_skills_enabled_resolution_prefers_env_then_config_then_default_false() {
-        assert!(!open_skills_enabled_from_sources(None, None));
-        assert!(open_skills_enabled_from_sources(Some(true), None));
-        assert!(!open_skills_enabled_from_sources(Some(true), Some("0")));
-        assert!(open_skills_enabled_from_sources(Some(false), Some("yes")));
-        // Invalid env values should fall back to config.
-        assert!(open_skills_enabled_from_sources(
-            Some(true),
-            Some("invalid")
-        ));
-        assert!(!open_skills_enabled_from_sources(
-            Some(false),
-            Some("invalid")
-        ));
-    }
-
-    #[test]
-    fn resolve_open_skills_dir_resolution_prefers_env_then_config_then_workspace() {
-        let workspace = Path::new("/tmp/workspace-dir");
-        assert_eq!(
-            resolve_open_skills_dir_from_sources(
-                Some("/tmp/env-skills"),
-                Some("/tmp/config"),
-                Some(workspace)
-            ),
-            Some(PathBuf::from("/tmp/env-skills"))
-        );
-        assert_eq!(
-            resolve_open_skills_dir_from_sources(
-                Some("   "),
-                Some("/tmp/config-skills"),
-                Some(workspace)
-            ),
-            Some(PathBuf::from("/tmp/config-skills"))
-        );
-        assert_eq!(
-            resolve_open_skills_dir_from_sources(None, None, Some(workspace)),
-            Some(PathBuf::from("/tmp/workspace-dir/open-skills"))
-        );
-        assert_eq!(resolve_open_skills_dir_from_sources(None, None, None), None);
-    }
-
-    #[test]
-    fn load_skills_with_config_reads_open_skills_dir_without_network() {
-        let _env_guard = open_skills_env_lock().lock().unwrap();
-        let _enabled_guard = EnvVarGuard::unset("AGENTZERO_OPEN_SKILLS_ENABLED");
-        let _dir_guard = EnvVarGuard::unset("AGENTZERO_OPEN_SKILLS_DIR");
-
-        let dir = tempfile::tempdir().unwrap();
-        let workspace_dir = dir.path().join("workspace");
-        fs::create_dir_all(workspace_dir.join("skills")).unwrap();
-
-        let open_skills_dir = dir.path().join("open-skills-local");
-        fs::create_dir_all(open_skills_dir.join("skills/http_request")).unwrap();
-        fs::write(open_skills_dir.join("README.md"), "# open skills\n").unwrap();
-        fs::write(
-            open_skills_dir.join("CONTRIBUTING.md"),
-            "# contribution guide\n",
-        )
-        .unwrap();
-        fs::write(
-            open_skills_dir.join("skills/http_request/SKILL.md"),
-            "# HTTP request\nFetch API responses.\n",
-        )
-        .unwrap();
-
-        let mut config = crate::config::Config::default();
-        config.workspace_dir = workspace_dir.clone();
-        config.skills.open_skills_enabled = true;
-        config.skills.open_skills_dir = Some(open_skills_dir.to_string_lossy().to_string());
-
-        let skills = load_skills_with_config(&workspace_dir, &config);
-        assert_eq!(skills.len(), 1);
-        assert_eq!(skills[0].name, "http_request");
-        assert_ne!(skills[0].name, "CONTRIBUTING");
-    }
-
-    #[test]
-    fn load_open_skill_md_frontmatter_uses_metadata_and_strips_block() {
-        let _env_guard = open_skills_env_lock().lock().unwrap();
-        let _enabled_guard = EnvVarGuard::unset("AGENTZERO_OPEN_SKILLS_ENABLED");
-        let _dir_guard = EnvVarGuard::unset("AGENTZERO_OPEN_SKILLS_DIR");
-
-        let dir = tempfile::tempdir().unwrap();
-        let workspace_dir = dir.path().join("workspace");
-        fs::create_dir_all(workspace_dir.join("skills")).unwrap();
-
-        let open_skills_dir = dir.path().join("open-skills-local");
-        fs::create_dir_all(open_skills_dir.join("skills/pdf")).unwrap();
-        fs::write(
-            open_skills_dir.join("skills/pdf/SKILL.md"),
-            "---\nname: pdf\ndescription: Use this skill whenever the user needs PDF help.\nauthor: community\ntags:\n  - parser\n---\n# PDF Guide\nInspect files safely.\n",
-        )
-        .unwrap();
-
-        let mut config = crate::config::Config::default();
-        config.workspace_dir = workspace_dir.clone();
-        config.skills.open_skills_enabled = true;
-        config.skills.open_skills_dir = Some(open_skills_dir.to_string_lossy().to_string());
-
-        let skills = load_skills_with_config(&workspace_dir, &config);
-        assert_eq!(skills.len(), 1);
-        assert_eq!(skills[0].name, "pdf");
-        assert_eq!(
-            skills[0].description,
-            "Use this skill whenever the user needs PDF help."
-        );
-        // Non-standard frontmatter fields (author, tags) are ignored.
-        assert!(skills[0].prompts[0].contains("# PDF Guide"));
-        assert!(!skills[0].prompts[0].contains("description: Use this skill"));
     }
 
     #[test]
