@@ -4113,6 +4113,7 @@ If this input is legitimate, rephrase the request and avoid instruction-override
     );
     let cost_enforcement_context = crate::agent::loop_::create_cost_enforcement_context(
         &runtime_defaults.cost,
+        &runtime_defaults.model_routes,
         ctx.workspace_dir.as_path(),
     );
 

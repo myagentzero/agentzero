@@ -334,6 +334,7 @@ pub(crate) struct SafetyHeartbeatConfig {
 pub(crate) struct CostEnforcementContext {
     tracker: Arc<CostTracker>,
     prices: HashMap<String, ModelPricing>,
+    route_model_by_hint: HashMap<String, String>,
     mode: CostEnforcementMode,
     route_down_model: Option<String>,
     reserve_percent: u8,
@@ -341,6 +342,7 @@ pub(crate) struct CostEnforcementContext {
 
 pub(crate) fn create_cost_enforcement_context(
     cost_config: &crate::config::CostConfig,
+    model_routes: &[crate::config::ModelRouteConfig],
     workspace_dir: &Path,
 ) -> Option<CostEnforcementContext> {
     if !cost_config.enabled {
@@ -362,6 +364,10 @@ pub(crate) fn create_cost_enforcement_context(
     Some(CostEnforcementContext {
         tracker,
         prices: cost_config.prices.clone(),
+        route_model_by_hint: model_routes
+            .iter()
+            .map(|route| (route.hint.trim().to_string(), route.model.clone()))
+            .collect(),
         mode: cost_config.enforcement.mode,
         route_down_model,
         reserve_percent: cost_config.enforcement.reserve_percent.min(100),
@@ -463,6 +469,16 @@ fn lookup_model_pricing(
     (3.0, 15.0)
 }
 
+fn pricing_model_name<'a>(
+    route_model_by_hint: &'a HashMap<String, String>,
+    model: &'a str,
+) -> &'a str {
+    model
+        .strip_prefix("hint:")
+        .and_then(|hint| route_model_by_hint.get(hint.trim()))
+        .map_or(model, String::as_str)
+}
+
 fn estimate_request_cost_usd(
     context: &CostEnforcementContext,
     provider: &str,
@@ -476,6 +492,7 @@ fn estimate_request_cost_usd(
     let input_tokens = ((input_tokens as f64) * reserve_multiplier).ceil() as u64;
     let output_tokens = ((output_tokens as f64) * reserve_multiplier).ceil() as u64;
 
+    let model = pricing_model_name(&context.route_model_by_hint, model);
     let (input_price, output_price) = lookup_model_pricing(&context.prices, provider, model);
     let input_cost = (input_tokens as f64 / 1_000_000.0) * input_price.max(0.0);
     let output_cost = (output_tokens as f64 / 1_000_000.0) * output_price.max(0.0);
@@ -2686,8 +2703,11 @@ pub async fn run(
             .collect();
         let _available_hints: Vec<String> = route_model_by_hint.keys().cloned().collect();
 
-        let cost_enforcement_context =
-            create_cost_enforcement_context(&config.cost, &config.workspace_dir);
+        let cost_enforcement_context = create_cost_enforcement_context(
+            &config.cost,
+            &config.model_routes,
+            &config.workspace_dir,
+        );
 
         observer.record_event(&ObserverEvent::AgentStart {
             provider: provider_name.to_string(),
@@ -2772,8 +2792,11 @@ pub async fn run(
             .collect();
         let _available_hints: Vec<String> = route_model_by_hint.keys().cloned().collect();
 
-        let cost_enforcement_context =
-            create_cost_enforcement_context(&config.cost, &config.workspace_dir);
+        let cost_enforcement_context = create_cost_enforcement_context(
+            &config.cost,
+            &config.model_routes,
+            &config.workspace_dir,
+        );
 
         println!("🦀 AgentZero Interactive Mode");
         println!("Type /help for commands.\n");
@@ -3493,7 +3516,7 @@ pub async fn process_message_with_session(
     );
 
     let cost_enforcement_context =
-        create_cost_enforcement_context(&config.cost, &config.workspace_dir);
+        create_cost_enforcement_context(&config.cost, &config.model_routes, &config.workspace_dir);
 
     let (hardware_rag, board_names) = context::load_peripheral_hardware_state(&config);
 
@@ -3546,6 +3569,33 @@ mod tests {
         let scrubbed = scrub_credentials(input);
         assert!(scrubbed.contains("\"api_key\": \"sk-1*[REDACTED]\""));
         assert!(scrubbed.contains("public"));
+    }
+
+    #[test]
+    fn pricing_model_name_resolves_hints_to_route_models() {
+        let routes = HashMap::from([("fast".to_string(), "gemini-3.8-flash".to_string())]);
+        assert_eq!(pricing_model_name(&routes, "hint:fast"), "gemini-3.8-flash");
+        assert_eq!(
+            pricing_model_name(&routes, "hint: fast "),
+            "gemini-3.8-flash"
+        );
+        assert_eq!(pricing_model_name(&routes, "hint:unknown"), "hint:unknown");
+        assert_eq!(
+            pricing_model_name(&routes, "claude-sonnet-5-5"),
+            "claude-sonnet-5-5"
+        );
+
+        let prices = HashMap::from([(
+            "gemini-3.8-flash".to_string(),
+            ModelPricing {
+                input: 0.5,
+                output: 1.5,
+            },
+        )]);
+        assert_eq!(
+            lookup_model_pricing(&prices, "custom", pricing_model_name(&routes, "hint:fast")),
+            (0.5, 1.5)
+        );
     }
 
     #[test]
