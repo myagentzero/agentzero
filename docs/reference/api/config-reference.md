@@ -516,9 +516,19 @@ allowed_roots = ["~/Desktop/projects", "/opt/shared-repo"]
 Notes:
 
 - Memory context injection ignores legacy `assistant_resp*` auto-save keys to prevent old model-authored summaries from being treated as facts.
-- After retrieval, context ranking applies a 7-day exponential half-life to non-Core scores. Core scores are never time-decayed.
-- Core memories get a **+0.3 ranking boost for the first 7 days** after their RFC3339 timestamp. After that they compete on raw retrieval score (still evergreen). Unparseable timestamps get no boost.
-- `memory_recall` searches and lists stored rows as-is; it does not apply time decay or the Core recency boost.
+- After retrieval, ranking applies exponential time decay per category, `score × 2^(−decayed_days / half_life)`:
+
+  | Category | Half-life | Decay starts |
+  |---|---|---|
+  | `conversation` | `conversation_retention_days / 2` (7 days if retention is `0` or `hygiene_enabled = false`) | after a 7-day grace period at full score |
+  | `daily` | 3 days | immediately |
+  | `system` | 2 days | immediately |
+  | custom categories | 7 days | immediately |
+  | `core` | never decays | — |
+
+  With `conversation_retention_days = 60`, a conversation memory keeps its full score for 7 days, halves by day 37, and still holds about 29% when hygiene prunes it at day 60.
+- Core memories get a **+0.3 ranking boost for the first 7 days** after creation (updating an existing key does not restart it). After that they compete on raw retrieval score (still evergreen). Unparseable timestamps get no boost.
+- The same ranking is used by CLI/daemon context injection, channel (Slack, Discord, etc.) context injection, and `memory_recall` queries. Context injection then drops entries below `min_relevance_score`; `memory_recall` returns re-ranked results without that cutoff. `memory_recall` without a `query` lists rows unranked.
 
 ## `[[model_routes]]` and `[[embedding_routes]]`
 

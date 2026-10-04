@@ -469,11 +469,11 @@ flowchart TB
     class Storage storage
 ```
 
-**Context ranking** (applied in `src/agent/memory_loader.rs` and `src/agent/loop_/context.rs` via `src/memory/decay.rs`):
+**Context ranking** (`ranked_recall` in `src/memory/retrieval.rs`, decay in `src/memory/decay.rs`; used by `src/agent/memory_loader.rs`, `src/agent/loop_/context.rs`, channel context injection in `src/channels/mod.rs`, and `memory_recall` queries):
 
-- Non-Core memories: exponential time decay with a **7-day half-life**.
-- Core memories: scores are never decayed. They receive a **+0.3 ranking boost only for the first 7 days**, then compete on raw retrieval score.
-- Entries below `min_relevance_score` (default `0.4`) are omitted from injected `[Memory context]`. `memory_recall` does not apply this ranking.
+- Non-Core memories: exponential time decay with a per-category half-life. `conversation` uses `conversation_retention_days / 2` after a **7-day grace period** at full score; `daily` uses **3 days**, `system` **2 days**, and custom categories **7 days**.
+- Core memories: scores are never decayed. They receive a **+0.3 ranking boost only for the first 7 days** after creation, then compete on raw retrieval score.
+- Entries below `min_relevance_score` (default `0.4`) are omitted from injected `[Memory context]`. `memory_recall` re-ranks the same way but does not apply the cutoff.
 
 ---
 

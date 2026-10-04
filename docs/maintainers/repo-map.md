@@ -120,7 +120,7 @@ Tool categories:
 
 Backends: `sqlite`, `markdown`, `lucid` (hybrid SQLite + embeddings), `qdrant` (vector DB), `none`
 
-Supporting: `embeddings.rs` (embedding generation), `vector.rs` (vector ops), `chunker.rs` (text splitting), `decay.rs` (7-day half-life scoring; Core recency boost for 7 days), `hygiene.rs` (cleanup), `snapshot.rs` (backup), `response_cache.rs` (caching), `cli.rs` (CLI commands)
+Supporting: `embeddings.rs` (embedding generation), `vector.rs` (vector ops), `chunker.rs` (text splitting), `decay.rs` (per-category half-life scoring with a conversation grace period; Core recency boost for 7 days), `retrieval.rs` (shared ranked recall), `hygiene.rs` (cleanup), `snapshot.rs` (backup), `response_cache.rs` (caching), `cli.rs` (CLI commands)
 
 ### Security
 

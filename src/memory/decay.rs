@@ -12,9 +12,14 @@ const DAILY_HALF_LIFE_DAYS: f64 = 3.0;
 /// Half-life in days for `System` memories, which lose relevance quickly.
 const SYSTEM_HALF_LIFE_DAYS: f64 = 2.0;
 
-/// Per-category half-lives. Conversation uses half of its retention window
-/// so a memory still holds 25% of its score when hygiene prunes it; Daily
-/// and System use fixed short half-lives.
+/// Days a `Conversation` memory keeps its full score before decay starts,
+/// so follow-ups on recent work compete at full strength.
+const CONVERSATION_GRACE_DAYS: f64 = 7.0;
+
+/// Per-category half-lives. Conversation uses half of its retention window,
+/// after a [`CONVERSATION_GRACE_DAYS`] flat start, so a memory still holds
+/// over 25% of its score when hygiene prunes it; Daily and System use fixed
+/// short half-lives.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DecayHalfLives {
     conversation: f64,
@@ -45,6 +50,14 @@ impl DecayHalfLives {
             MemoryCategory::System => Some(self.system),
             MemoryCategory::Custom(_) => Some(DEFAULT_HALF_LIFE_DAYS),
         }
+    }
+}
+
+fn grace_days(category: &MemoryCategory) -> f64 {
+    if *category == MemoryCategory::Conversation {
+        CONVERSATION_GRACE_DAYS
+    } else {
+        0.0
     }
 }
 
@@ -93,8 +106,9 @@ pub fn core_recency_boost(entry: &MemoryEntry, window_days: f64) -> f64 {
 /// - Entries without a parseable RFC3339 timestamp are left unchanged.
 /// - Entries without a score (`None`) are left unchanged.
 ///
-/// Decay formula: `score * 2^(-age_days / half_life_days)`, with the
-/// half-life chosen per category by `half_lives`.
+/// Decay formula: `score * 2^(-max(age_days - grace_days, 0) / half_life_days)`,
+/// with the half-life chosen per category by `half_lives`. Only
+/// `Conversation` has a grace period.
 pub fn apply_time_decay(entries: &mut [MemoryEntry], half_lives: &DecayHalfLives) {
     let now = Utc::now();
 
@@ -112,7 +126,8 @@ pub fn apply_time_decay(entries: &mut [MemoryEntry], half_lives: &DecayHalfLives
             continue;
         };
 
-        let decay_factor = (-age_days / half_life * std::f64::consts::LN_2).exp();
+        let decayed_days = (age_days - grace_days(&entry.category)).max(0.0);
+        let decay_factor = (-decayed_days / half_life * std::f64::consts::LN_2).exp();
         entry.score = Some(score * decay_factor);
     }
 }
@@ -199,19 +214,41 @@ mod tests {
     }
 
     #[test]
-    fn entry_at_retention_keeps_quarter_score() {
+    fn conversation_keeps_full_score_during_grace() {
+        let mut entries = vec![make_entry(
+            MemoryCategory::Conversation,
+            Some(0.9),
+            &days_ago_rfc3339(6),
+        )];
+        apply_time_decay(&mut entries, &WEEK);
+        assert!((entries[0].score.unwrap() - 0.9).abs() < 1e-9);
+    }
+
+    #[test]
+    fn conversation_decays_from_end_of_grace() {
         let half_lives = DecayHalfLives::from_config(&MemoryConfig {
-            conversation_retention_days: 30,
+            conversation_retention_days: 60,
             ..MemoryConfig::default()
         });
         let mut entries = vec![make_entry(
             MemoryCategory::Conversation,
             Some(1.0),
-            &days_ago_rfc3339(30),
+            &days_ago_rfc3339(37),
         )];
         apply_time_decay(&mut entries, &half_lives);
         let decayed = entries[0].score.unwrap();
-        assert!((decayed - 0.25).abs() < 0.01, "got {decayed}");
+        assert!((decayed - 0.5).abs() < 0.01, "got {decayed}");
+    }
+
+    #[test]
+    fn grace_applies_only_to_conversation() {
+        let mut entries = vec![make_entry(
+            MemoryCategory::Daily,
+            Some(1.0),
+            &days_ago_rfc3339(6),
+        )];
+        apply_time_decay(&mut entries, &WEEK);
+        assert!(entries[0].score.unwrap() < 0.6);
     }
 
     #[test]
@@ -243,7 +280,7 @@ mod tests {
     #[test]
     fn one_half_life_halves_score() {
         let mut entries = vec![make_entry(
-            MemoryCategory::Conversation,
+            MemoryCategory::Daily,
             Some(1.0),
             &days_ago_rfc3339(7),
         )];
@@ -258,7 +295,7 @@ mod tests {
     #[test]
     fn two_half_lives_quarters_score() {
         let mut entries = vec![make_entry(
-            MemoryCategory::Conversation,
+            MemoryCategory::Daily,
             Some(1.0),
             &days_ago_rfc3339(14),
         )];
