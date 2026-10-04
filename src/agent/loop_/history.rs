@@ -408,8 +408,9 @@ impl TurnBuffer {
 ///
 /// Best-effort: failures are logged but never block the caller.
 ///
-/// This is the unified extraction entry-point used by all agent entry
-/// points (single-message, interactive, channel, `Agent` struct).
+/// This is the unified extraction entry-point used by the single-message,
+/// interactive, and `Agent` struct entry points. Channel message handling
+/// does not call it.
 pub(crate) async fn extract_facts_from_turns(
     provider: &dyn Provider,
     model: &str,

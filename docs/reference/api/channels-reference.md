@@ -243,3 +243,23 @@ If a specific channel task crashes or exits, the channel supervisor in `channels
 - `Channel message worker crashed:`
 
 These messages indicate automatic restart behavior is active, and you should inspect preceding logs for root cause.
+
+---
+
+## 8. Differences from the CLI/Daemon Agent Loop
+
+Channel messages are handled by `process_channel_message` in `src/channels/mod.rs`, not by the CLI loop in `src/agent/loop_.rs`. Both share the system prompt (skills and bootstrap files such as MEMORY.md), the tool-call loop, cost preflight, query-classification routing, conversation auto-save, and memory ranking (`ranked_recall`). They differ in these ways:
+
+| Capability | CLI / daemon | Channels |
+|---|---|---|
+| Memory context injection | Every turn | First message of a conversation only; follow-ups rely on thread history |
+| Durable fact extraction to `core` (`extract_facts_from_turns`) | After each single message; every 5 turns in the REPL and on exit | Not run; facts reach `core` only via `memory_store` or the nightly consolidation job |
+| History pruning (`[agent.history_pruner]`) and context compression (`[agent.context_compression]`) | After every turn, flushing durable facts to `core` before compaction | Only after a context-window error; the compaction summary is saved as a `daily` memory. Otherwise history is capped by `max_history_messages` and trimmed to the token budget |
+| Research phase (`[research]`) | Runs when configured | Not run |
+| Loop detection (`agent.loop_detection_*`) | Uses configured thresholds | Uses built-in defaults (3 / 2 / 3) |
+| Hardware datasheet context and peripheral tools | Included when peripherals are configured | Not included |
+| Turn-based safety heartbeat (`safety_heartbeat_turn_interval`) | REPL only | Not used; the tool-iteration heartbeat still applies |
+| Tool filtering | `agent.allowed_tools` / `agent.denied_tools` | `autonomy.non_cli_excluded_tools` plus approval prompts |
+| `/clear` / `/new` | Clears history and forgets `conversation` and `daily` memories | Clears that sender's history only |
+
+Channel-only behavior includes inbound prompt-injection, perplexity, and semantic guards; outbound leak-guard sanitization; non-CLI approval prompts; per-sender `/model`, `/models`, and `/effort` overrides; message timeouts and cancel-on-newer; session persistence; and draft streaming, typing indicators, and reactions.
