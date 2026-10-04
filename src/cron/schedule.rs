@@ -91,17 +91,6 @@ pub fn parse_schedule_json(value: Value) -> Result<Schedule> {
     })
 }
 
-/// Format a deserialization failure into a model-actionable error message.
-pub fn format_schedule_parse_error(value: &Value, err: &serde_json::Error) -> String {
-    if let Some(raw_at) = value.get("at").and_then(Value::as_str) {
-        return format!(
-            "Invalid schedule: {} ({err})",
-            schedule_at_parse_hint(raw_at)
-        );
-    }
-    format!("Invalid schedule: {err}")
-}
-
 pub fn next_run_for_schedule(schedule: &Schedule, from: DateTime<Utc>) -> Result<DateTime<Utc>> {
     match schedule {
         Schedule::Cron { expr, tz } => {

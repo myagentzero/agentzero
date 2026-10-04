@@ -75,39 +75,37 @@ use serde::{Deserialize, Serialize};
 
 pub mod agent;
 pub(crate) mod approval;
-pub(crate) mod auth;
+pub mod auth;
 pub mod channels;
 pub mod config;
 pub mod coordination;
 pub(crate) mod cost;
-pub(crate) mod cron;
-pub(crate) mod daemon;
-pub(crate) mod doctor;
+pub mod cron;
+pub mod daemon;
+pub mod doctor;
 pub mod gateway;
-pub(crate) mod hardware;
+pub mod hardware;
 pub(crate) mod health;
 pub(crate) mod heartbeat;
 pub mod hooks;
 pub(crate) mod identity;
-// Intentionally unused re-export — public API surface for plugin authors.
-pub(crate) mod integrations;
+pub mod integrations;
 pub mod memory;
 pub(crate) mod multimodal;
 pub mod observability;
-pub(crate) mod onboard;
+pub mod onboard;
 pub mod peripherals;
-#[allow(unused_imports)]
 pub(crate) mod plugins;
 pub mod providers;
 pub mod runtime;
-pub(crate) mod security;
-pub(crate) mod service;
-pub(crate) mod skills;
+pub mod security;
+pub mod service;
+pub mod skills;
 #[cfg(test)]
 pub(crate) mod test_locks;
 pub mod tools;
 pub(crate) mod tunnel;
-pub(crate) mod util;
+pub mod util;
 
 pub use config::Config;
 

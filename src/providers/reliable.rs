@@ -6,6 +6,7 @@ use super::traits::{
 use async_trait::async_trait;
 use futures_util::{StreamExt, stream};
 use std::collections::HashMap;
+use std::future::Future;
 use std::time::Duration;
 
 // ── Error Classification ─────────────────────────────────────────────────
@@ -326,6 +327,117 @@ impl ReliableProvider {
             base
         }
     }
+
+    /// Run `call` across the model chain → provider chain → retry loop until
+    /// one attempt succeeds. `call` receives `(provider, provider_name, sent_model)`.
+    async fn with_failover<'a, T, F, Fut>(&'a self, model: &'a str, call: F) -> anyhow::Result<T>
+    where
+        F: Fn(&'a dyn Provider, &'a str, &'a str) -> Fut,
+        Fut: Future<Output = anyhow::Result<T>>,
+    {
+        let models = self.model_chain(model);
+        let mut failures = Vec::new();
+
+        // Each iteration: attempt one (provider, model) call. On success, return
+        // immediately. On non-retryable error, break to next provider. On
+        // retryable error, sleep with exponential backoff and retry.
+        for current_model in &models {
+            for (provider_index, (provider_name, provider)) in self.providers.iter().enumerate() {
+                let sent_models =
+                    self.provider_model_chain(current_model, provider_name, provider_index == 0);
+                for sent_model in sent_models {
+                    let mut backoff_ms = self.base_backoff_ms;
+
+                    for attempt in 0..=self.max_retries {
+                        match call(provider.as_ref(), provider_name, sent_model).await {
+                            Ok(resp) => {
+                                if attempt > 0 || sent_model != model {
+                                    tracing::info!(
+                                        provider = provider_name,
+                                        model = sent_model,
+                                        attempt,
+                                        original_model = model,
+                                        "Provider recovered (failover/retry)"
+                                    );
+                                }
+                                return Ok(resp);
+                            }
+                            Err(e) => {
+                                let non_retryable_rate_limit = is_non_retryable_rate_limit(&e);
+                                let non_retryable =
+                                    is_non_retryable(&e) || non_retryable_rate_limit;
+                                let rate_limited = is_rate_limited(&e);
+                                let failure_reason = failure_reason(rate_limited, non_retryable);
+                                let error_detail = compact_error_detail(&e);
+
+                                push_failure(
+                                    &mut failures,
+                                    provider_name,
+                                    sent_model,
+                                    attempt + 1,
+                                    self.max_retries + 1,
+                                    failure_reason,
+                                    &error_detail,
+                                );
+
+                                if non_retryable {
+                                    tracing::warn!(
+                                        provider = provider_name,
+                                        model = sent_model,
+                                        error = %error_detail,
+                                        "Non-retryable error, moving on"
+                                    );
+
+                                    if is_context_window_exceeded(&e) {
+                                        anyhow::bail!(
+                                            "Request exceeds model context window; retries and fallbacks were skipped. Attempts:\n{}",
+                                            failures.join("\n")
+                                        );
+                                    }
+
+                                    break;
+                                }
+
+                                if attempt < self.max_retries {
+                                    let wait = self.compute_backoff(backoff_ms, &e);
+                                    tracing::warn!(
+                                        provider = provider_name,
+                                        model = sent_model,
+                                        attempt = attempt + 1,
+                                        backoff_ms = wait,
+                                        reason = failure_reason,
+                                        error = %error_detail,
+                                        "Provider call failed, retrying"
+                                    );
+                                    tokio::time::sleep(Duration::from_millis(wait)).await;
+                                    backoff_ms = (backoff_ms.saturating_mul(2)).min(10_000);
+                                }
+                            }
+                        }
+                    }
+
+                    tracing::warn!(
+                        provider = provider_name,
+                        model = sent_model,
+                        "Exhausted retries, trying next provider/model"
+                    );
+                }
+            }
+
+            if *current_model != model {
+                tracing::warn!(
+                    original_model = model,
+                    fallback_model = *current_model,
+                    "Model fallback exhausted all providers, trying next fallback model"
+                );
+            }
+        }
+
+        anyhow::bail!(
+            "All providers/models failed. Attempts:\n{}",
+            failures.join("\n")
+        )
+    }
 }
 
 #[async_trait]
@@ -351,112 +463,10 @@ impl Provider for ReliableProvider {
         model: &str,
         temperature: f64,
     ) -> anyhow::Result<String> {
-        let models = self.model_chain(model);
-        let mut failures = Vec::new();
-
-        // Outer: model fallback chain. Middle: provider priority. Inner: retries.
-        // Each iteration: attempt one (provider, model) call. On success, return
-        // immediately. On non-retryable error, break to next provider. On
-        // retryable error, sleep with exponential backoff and retry.
-        for current_model in &models {
-            for (provider_index, (provider_name, provider)) in self.providers.iter().enumerate() {
-                let sent_models =
-                    self.provider_model_chain(current_model, provider_name, provider_index == 0);
-                for sent_model in sent_models {
-                    let mut backoff_ms = self.base_backoff_ms;
-
-                    for attempt in 0..=self.max_retries {
-                        match provider
-                            .chat_with_system(system_prompt, message, sent_model, temperature)
-                            .await
-                        {
-                            Ok(resp) => {
-                                if attempt > 0 || sent_model != model {
-                                    tracing::info!(
-                                        provider = provider_name,
-                                        model = sent_model,
-                                        attempt,
-                                        original_model = model,
-                                        "Provider recovered (failover/retry)"
-                                    );
-                                }
-                                return Ok(resp);
-                            }
-                            Err(e) => {
-                                let non_retryable_rate_limit = is_non_retryable_rate_limit(&e);
-                                let non_retryable =
-                                    is_non_retryable(&e) || non_retryable_rate_limit;
-                                let rate_limited = is_rate_limited(&e);
-                                let failure_reason = failure_reason(rate_limited, non_retryable);
-                                let error_detail = compact_error_detail(&e);
-
-                                push_failure(
-                                    &mut failures,
-                                    provider_name,
-                                    sent_model,
-                                    attempt + 1,
-                                    self.max_retries + 1,
-                                    failure_reason,
-                                    &error_detail,
-                                );
-
-                                if non_retryable {
-                                    tracing::warn!(
-                                        provider = provider_name,
-                                        model = sent_model,
-                                        error = %error_detail,
-                                        "Non-retryable error, moving on"
-                                    );
-
-                                    if is_context_window_exceeded(&e) {
-                                        anyhow::bail!(
-                                            "Request exceeds model context window; retries and fallbacks were skipped. Attempts:\n{}",
-                                            failures.join("\n")
-                                        );
-                                    }
-
-                                    break;
-                                }
-
-                                if attempt < self.max_retries {
-                                    let wait = self.compute_backoff(backoff_ms, &e);
-                                    tracing::warn!(
-                                        provider = provider_name,
-                                        model = sent_model,
-                                        attempt = attempt + 1,
-                                        backoff_ms = wait,
-                                        reason = failure_reason,
-                                        error = %error_detail,
-                                        "Provider call failed, retrying"
-                                    );
-                                    tokio::time::sleep(Duration::from_millis(wait)).await;
-                                    backoff_ms = (backoff_ms.saturating_mul(2)).min(10_000);
-                                }
-                            }
-                        }
-                    }
-
-                    tracing::warn!(
-                        provider = provider_name,
-                        model = sent_model,
-                        "Exhausted retries, trying next provider/model"
-                    );
-                }
-            }
-
-            if *current_model != model {
-                tracing::warn!(
-                    original_model = model,
-                    fallback_model = *current_model,
-                    "Model fallback exhausted all providers, trying next fallback model"
-                );
-            }
-        }
-
-        anyhow::bail!(
-            "All providers/models failed. Attempts:\n{}",
-            failures.join("\n")
-        )
+        self.with_failover(model, |provider, _, sent_model| {
+            provider.chat_with_system(system_prompt, message, sent_model, temperature)
+        })
+        .await
     }
 
     async fn chat_with_history(
@@ -465,100 +475,10 @@ impl Provider for ReliableProvider {
         model: &str,
         temperature: f64,
     ) -> anyhow::Result<String> {
-        let models = self.model_chain(model);
-        let mut failures = Vec::new();
-
-        for current_model in &models {
-            for (provider_index, (provider_name, provider)) in self.providers.iter().enumerate() {
-                let sent_models =
-                    self.provider_model_chain(current_model, provider_name, provider_index == 0);
-                for sent_model in sent_models {
-                    let mut backoff_ms = self.base_backoff_ms;
-
-                    for attempt in 0..=self.max_retries {
-                        match provider
-                            .chat_with_history(messages, sent_model, temperature)
-                            .await
-                        {
-                            Ok(resp) => {
-                                if attempt > 0 || sent_model != model {
-                                    tracing::info!(
-                                        provider = provider_name,
-                                        model = sent_model,
-                                        attempt,
-                                        original_model = model,
-                                        "Provider recovered (failover/retry)"
-                                    );
-                                }
-                                return Ok(resp);
-                            }
-                            Err(e) => {
-                                let non_retryable_rate_limit = is_non_retryable_rate_limit(&e);
-                                let non_retryable =
-                                    is_non_retryable(&e) || non_retryable_rate_limit;
-                                let rate_limited = is_rate_limited(&e);
-                                let failure_reason = failure_reason(rate_limited, non_retryable);
-                                let error_detail = compact_error_detail(&e);
-
-                                push_failure(
-                                    &mut failures,
-                                    provider_name,
-                                    sent_model,
-                                    attempt + 1,
-                                    self.max_retries + 1,
-                                    failure_reason,
-                                    &error_detail,
-                                );
-
-                                if non_retryable {
-                                    tracing::warn!(
-                                        provider = provider_name,
-                                        model = sent_model,
-                                        error = %error_detail,
-                                        "Non-retryable error, moving on"
-                                    );
-
-                                    if is_context_window_exceeded(&e) {
-                                        anyhow::bail!(
-                                            "Request exceeds model context window; retries and fallbacks were skipped. Attempts:\n{}",
-                                            failures.join("\n")
-                                        );
-                                    }
-
-                                    break;
-                                }
-
-                                if attempt < self.max_retries {
-                                    let wait = self.compute_backoff(backoff_ms, &e);
-                                    tracing::warn!(
-                                        provider = provider_name,
-                                        model = sent_model,
-                                        attempt = attempt + 1,
-                                        backoff_ms = wait,
-                                        reason = failure_reason,
-                                        error = %error_detail,
-                                        "Provider call failed, retrying"
-                                    );
-                                    tokio::time::sleep(Duration::from_millis(wait)).await;
-                                    backoff_ms = (backoff_ms.saturating_mul(2)).min(10_000);
-                                }
-                            }
-                        }
-                    }
-
-                    tracing::warn!(
-                        provider = provider_name,
-                        model = sent_model,
-                        "Exhausted retries, trying next provider/model"
-                    );
-                }
-            }
-        }
-
-        anyhow::bail!(
-            "All providers/models failed. Attempts:\n{}",
-            failures.join("\n")
-        )
+        self.with_failover(model, |provider, _, sent_model| {
+            provider.chat_with_history(messages, sent_model, temperature)
+        })
+        .await
     }
 
     fn supports_native_tools(&self) -> bool {
@@ -583,100 +503,10 @@ impl Provider for ReliableProvider {
         model: &str,
         temperature: f64,
     ) -> anyhow::Result<ChatResponse> {
-        let models = self.model_chain(model);
-        let mut failures = Vec::new();
-
-        for current_model in &models {
-            for (provider_index, (provider_name, provider)) in self.providers.iter().enumerate() {
-                let sent_models =
-                    self.provider_model_chain(current_model, provider_name, provider_index == 0);
-                for sent_model in sent_models {
-                    let mut backoff_ms = self.base_backoff_ms;
-
-                    for attempt in 0..=self.max_retries {
-                        match provider
-                            .chat_with_tools(messages, tools, sent_model, temperature)
-                            .await
-                        {
-                            Ok(resp) => {
-                                if attempt > 0 || sent_model != model {
-                                    tracing::info!(
-                                        provider = provider_name,
-                                        model = sent_model,
-                                        attempt,
-                                        original_model = model,
-                                        "Provider recovered (failover/retry)"
-                                    );
-                                }
-                                return Ok(resp);
-                            }
-                            Err(e) => {
-                                let non_retryable_rate_limit = is_non_retryable_rate_limit(&e);
-                                let non_retryable =
-                                    is_non_retryable(&e) || non_retryable_rate_limit;
-                                let rate_limited = is_rate_limited(&e);
-                                let failure_reason = failure_reason(rate_limited, non_retryable);
-                                let error_detail = compact_error_detail(&e);
-
-                                push_failure(
-                                    &mut failures,
-                                    provider_name,
-                                    sent_model,
-                                    attempt + 1,
-                                    self.max_retries + 1,
-                                    failure_reason,
-                                    &error_detail,
-                                );
-
-                                if non_retryable {
-                                    tracing::warn!(
-                                        provider = provider_name,
-                                        model = sent_model,
-                                        error = %error_detail,
-                                        "Non-retryable error, moving on"
-                                    );
-
-                                    if is_context_window_exceeded(&e) {
-                                        anyhow::bail!(
-                                            "Request exceeds model context window; retries and fallbacks were skipped. Attempts:\n{}",
-                                            failures.join("\n")
-                                        );
-                                    }
-
-                                    break;
-                                }
-
-                                if attempt < self.max_retries {
-                                    let wait = self.compute_backoff(backoff_ms, &e);
-                                    tracing::warn!(
-                                        provider = provider_name,
-                                        model = sent_model,
-                                        attempt = attempt + 1,
-                                        backoff_ms = wait,
-                                        reason = failure_reason,
-                                        error = %error_detail,
-                                        "Provider call failed, retrying"
-                                    );
-                                    tokio::time::sleep(Duration::from_millis(wait)).await;
-                                    backoff_ms = (backoff_ms.saturating_mul(2)).min(10_000);
-                                }
-                            }
-                        }
-                    }
-
-                    tracing::warn!(
-                        provider = provider_name,
-                        model = sent_model,
-                        "Exhausted retries, trying next provider/model"
-                    );
-                }
-            }
-        }
-
-        anyhow::bail!(
-            "All providers/models failed. Attempts:\n{}",
-            failures.join("\n")
-        )
+        self.with_failover(model, |provider, _, sent_model| {
+            provider.chat_with_tools(messages, tools, sent_model, temperature)
+        })
+        .await
     }
 
     async fn chat(
@@ -696,113 +526,18 @@ impl Provider for ReliableProvider {
         model: &str,
         temperature: f64,
     ) -> anyhow::Result<RoutedChatResponse> {
-        let models = self.model_chain(model);
-        let mut failures = Vec::new();
-
-        for current_model in &models {
-            for (provider_index, (provider_name, provider)) in self.providers.iter().enumerate() {
-                let sent_models =
-                    self.provider_model_chain(current_model, provider_name, provider_index == 0);
-                for sent_model in sent_models {
-                    let mut backoff_ms = self.base_backoff_ms;
-
-                    for attempt in 0..=self.max_retries {
-                        let req = ChatRequest {
-                            messages: request.messages,
-                            tools: request.tools,
-                        };
-                        match provider.chat(req, sent_model, temperature).await {
-                            Ok(resp) => {
-                                if attempt > 0 || sent_model != model {
-                                    tracing::info!(
-                                        provider = provider_name,
-                                        model = sent_model,
-                                        attempt,
-                                        original_model = model,
-                                        "Provider recovered (failover/retry)"
-                                    );
-                                }
-                                return Ok(RoutedChatResponse {
-                                    response: resp,
-                                    served_by_provider: Some(provider_name.clone()),
-                                    served_by_model: Some(sent_model.to_string()),
-                                });
-                            }
-                            Err(e) => {
-                                let non_retryable_rate_limit = is_non_retryable_rate_limit(&e);
-                                let non_retryable =
-                                    is_non_retryable(&e) || non_retryable_rate_limit;
-                                let rate_limited = is_rate_limited(&e);
-                                let failure_reason = failure_reason(rate_limited, non_retryable);
-                                let error_detail = compact_error_detail(&e);
-
-                                push_failure(
-                                    &mut failures,
-                                    provider_name,
-                                    sent_model,
-                                    attempt + 1,
-                                    self.max_retries + 1,
-                                    failure_reason,
-                                    &error_detail,
-                                );
-
-                                if non_retryable {
-                                    tracing::warn!(
-                                        provider = provider_name,
-                                        model = sent_model,
-                                        error = %error_detail,
-                                        "Non-retryable error, moving on"
-                                    );
-
-                                    if is_context_window_exceeded(&e) {
-                                        anyhow::bail!(
-                                            "Request exceeds model context window; retries and fallbacks were skipped. Attempts:\n{}",
-                                            failures.join("\n")
-                                        );
-                                    }
-
-                                    break;
-                                }
-
-                                if attempt < self.max_retries {
-                                    let wait = self.compute_backoff(backoff_ms, &e);
-                                    tracing::warn!(
-                                        provider = provider_name,
-                                        model = sent_model,
-                                        attempt = attempt + 1,
-                                        backoff_ms = wait,
-                                        reason = failure_reason,
-                                        error = %error_detail,
-                                        "Provider call failed, retrying"
-                                    );
-                                    tokio::time::sleep(Duration::from_millis(wait)).await;
-                                    backoff_ms = (backoff_ms.saturating_mul(2)).min(10_000);
-                                }
-                            }
-                        }
-                    }
-
-                    tracing::warn!(
-                        provider = provider_name,
-                        model = sent_model,
-                        "Exhausted retries, trying next provider/model"
-                    );
-                }
-            }
-
-            if *current_model != model {
-                tracing::warn!(
-                    original_model = model,
-                    fallback_model = *current_model,
-                    "Model fallback exhausted all providers, trying next fallback model"
-                );
-            }
-        }
-
-        anyhow::bail!(
-            "All providers/models failed. Attempts:\n{}",
-            failures.join("\n")
-        )
+        let (messages, tools) = (request.messages, request.tools);
+        self.with_failover(model, |provider, provider_name, sent_model| async move {
+            let response = provider
+                .chat(ChatRequest { messages, tools }, sent_model, temperature)
+                .await?;
+            Ok(RoutedChatResponse {
+                response,
+                served_by_provider: Some(provider_name.to_string()),
+                served_by_model: Some(sent_model.to_string()),
+            })
+        })
+        .await
     }
 
     fn supports_streaming(&self) -> bool {

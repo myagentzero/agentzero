@@ -56,14 +56,6 @@ impl DiagItem {
         }
     }
 
-    fn icon(&self) -> &'static str {
-        match self.severity {
-            Severity::Ok => "✅",
-            Severity::Warn => "⚠️ ",
-            Severity::Error => "❌",
-        }
-    }
-
     fn into_result(self) -> DiagResult {
         DiagResult {
             severity: self.severity,
@@ -1337,13 +1329,6 @@ mod tests {
 
         let invalid_unknown = provider_validation_error("totally-fake").unwrap_or_default();
         assert!(invalid_unknown.contains("Unknown provider"));
-    }
-
-    #[test]
-    fn diag_item_icons() {
-        assert_eq!(DiagItem::ok("t", "m").icon(), "✅");
-        assert_eq!(DiagItem::warn("t", "m").icon(), "⚠️ ");
-        assert_eq!(DiagItem::error("t", "m").icon(), "❌");
     }
 
     #[test]

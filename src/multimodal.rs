@@ -22,7 +22,6 @@ const ALLOWED_IMAGE_MIME_TYPES: &[&str] = &[
 #[derive(Debug, Clone)]
 pub struct PreparedMessages {
     pub messages: Vec<ChatMessage>,
-    pub contains_images: bool,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -101,10 +100,6 @@ pub fn count_image_markers(messages: &[ChatMessage]) -> usize {
         .sum()
 }
 
-pub fn contains_image_markers(messages: &[ChatMessage]) -> bool {
-    count_image_markers(messages) > 0
-}
-
 pub fn extract_ollama_image_payload(image_ref: &str) -> Option<String> {
     if image_ref.starts_with("data:") {
         let comma_idx = image_ref.find(',')?;
@@ -118,13 +113,6 @@ pub fn extract_ollama_image_payload(image_ref: &str) -> Option<String> {
     } else {
         Some(image_ref.trim().to_string()).filter(|value| !value.is_empty())
     }
-}
-
-pub async fn prepare_messages_for_provider(
-    messages: &[ChatMessage],
-    config: &MultimodalConfig,
-) -> anyhow::Result<PreparedMessages> {
-    prepare_messages_for_provider_with_provider_hint(messages, config, None).await
 }
 
 pub async fn prepare_messages_for_provider_with_provider_hint(
@@ -147,7 +135,6 @@ pub async fn prepare_messages_for_provider_with_provider_hint(
     if found_images == 0 {
         return Ok(PreparedMessages {
             messages: messages.to_vec(),
-            contains_images: false,
         });
     }
 
@@ -180,7 +167,6 @@ pub async fn prepare_messages_for_provider_with_provider_hint(
 
     Ok(PreparedMessages {
         messages: normalized_messages,
-        contains_images: true,
     })
 }
 
@@ -654,11 +640,14 @@ mod tests {
             image_path.display()
         ))];
 
-        let prepared = prepare_messages_for_provider(&messages, &MultimodalConfig::default())
-            .await
-            .unwrap();
+        let prepared = prepare_messages_for_provider_with_provider_hint(
+            &messages,
+            &MultimodalConfig::default(),
+            None,
+        )
+        .await
+        .unwrap();
 
-        assert!(prepared.contains_images);
         assert_eq!(prepared.messages.len(), 1);
 
         let (cleaned, refs) = parse_image_markers(&prepared.messages[0].content);
@@ -679,7 +668,7 @@ mod tests {
             allow_remote_fetch: false,
         };
 
-        let error = prepare_messages_for_provider(&messages, &config)
+        let error = prepare_messages_for_provider_with_provider_hint(&messages, &config, None)
             .await
             .expect_err("should reject image count overflow");
 
@@ -696,9 +685,13 @@ mod tests {
             "Look [IMAGE:https://example.com/img.png]".to_string(),
         )];
 
-        let error = prepare_messages_for_provider(&messages, &MultimodalConfig::default())
-            .await
-            .expect_err("should reject remote image URL when fetch is disabled");
+        let error = prepare_messages_for_provider_with_provider_hint(
+            &messages,
+            &MultimodalConfig::default(),
+            None,
+        )
+        .await
+        .expect_err("should reject remote image URL when fetch is disabled");
 
         assert!(
             error
@@ -725,7 +718,7 @@ mod tests {
             allow_remote_fetch: false,
         };
 
-        let error = prepare_messages_for_provider(&messages, &config)
+        let error = prepare_messages_for_provider_with_provider_hint(&messages, &config, None)
             .await
             .expect_err("should reject oversized local image");
 

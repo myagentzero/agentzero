@@ -29,17 +29,6 @@ impl DockerSandbox {
         }
     }
 
-    pub fn with_image(image: String) -> std::io::Result<Self> {
-        if Self::is_installed() {
-            Ok(Self { image })
-        } else {
-            Err(std::io::Error::new(
-                std::io::ErrorKind::NotFound,
-                "Docker not found",
-            ))
-        }
-    }
-
     pub fn probe() -> std::io::Result<Self> {
         Self::new()
     }
@@ -107,15 +96,6 @@ mod tests {
     fn docker_sandbox_default_image() {
         let sandbox = DockerSandbox::default();
         assert_eq!(sandbox.image, "alpine:latest");
-    }
-
-    #[test]
-    fn docker_with_custom_image() {
-        let result = DockerSandbox::with_image("ubuntu:latest".to_string());
-        match result {
-            Ok(sandbox) => assert_eq!(sandbox.image, "ubuntu:latest"),
-            Err(_) => assert!(!DockerSandbox::is_installed()),
-        }
     }
 
     // ── §1.1 Sandbox isolation flag tests ──────────────────────

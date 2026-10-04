@@ -634,53 +634,6 @@ fn contains_unquoted_single_ampersand(command: &str) -> bool {
     false
 }
 
-/// Detect an unquoted character in a shell command.
-fn contains_unquoted_char(command: &str, target: char) -> bool {
-    let mut quote = QuoteState::None;
-    let mut escaped = false;
-
-    for ch in command.chars() {
-        match quote {
-            QuoteState::Single => {
-                if ch == '\'' {
-                    quote = QuoteState::None;
-                }
-            }
-            QuoteState::Double => {
-                if escaped {
-                    escaped = false;
-                    continue;
-                }
-                if ch == '\\' {
-                    escaped = true;
-                    continue;
-                }
-                if ch == '"' {
-                    quote = QuoteState::None;
-                }
-            }
-            QuoteState::None => {
-                if escaped {
-                    escaped = false;
-                    continue;
-                }
-                if ch == '\\' {
-                    escaped = true;
-                    continue;
-                }
-                match ch {
-                    '\'' => quote = QuoteState::Single,
-                    '"' => quote = QuoteState::Double,
-                    _ if ch == target => return true,
-                    _ => {}
-                }
-            }
-        }
-    }
-
-    false
-}
-
 /// If the redirection operator (`>`, `>>`, or `<`) starting at `chars[i]`
 /// targets `/dev/null` (e.g. `2>/dev/null`, `>>/dev/null`, `</dev/null`),
 /// returns the index just past `/dev/null`. Returns `None` otherwise.

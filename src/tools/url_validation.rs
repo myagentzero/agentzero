@@ -337,7 +337,7 @@ pub fn is_private_or_local_host(host: &str) -> bool {
     false
 }
 
-fn is_non_global_v4(v4: std::net::Ipv4Addr) -> bool {
+pub(crate) fn is_non_global_v4(v4: std::net::Ipv4Addr) -> bool {
     let [a, b, c, _] = v4.octets();
     v4.is_loopback()
         || v4.is_private()
@@ -353,7 +353,7 @@ fn is_non_global_v4(v4: std::net::Ipv4Addr) -> bool {
         || (a == 198 && (18..=19).contains(&b))
 }
 
-fn is_non_global_v6(v6: std::net::Ipv6Addr) -> bool {
+pub(crate) fn is_non_global_v6(v6: std::net::Ipv6Addr) -> bool {
     let segs = v6.segments();
     v6.is_loopback()
         || v6.is_unspecified()

@@ -65,12 +65,6 @@ impl GitOperationsTool {
         )
     }
 
-    /// Check if an operation is read-only
-    fn is_read_only(&self, operation: &str) -> bool {
-        // branch is omitted: it can both list (read) and create (write) depending on args
-        matches!(operation, "status" | "diff" | "log" | "show" | "rev-parse")
-    }
-
     /// Resolve a user-provided path to an absolute path within the workspace.
     /// Returns the workspace_dir if no path is provided.
     /// Rejects paths that escape the workspace via traversal.
@@ -1148,23 +1142,6 @@ mod tests {
         // "branch" is not in requires_write_access so listing is never blocked at the operation
         // level. Branch creation guards itself internally.
         assert!(!tool.requires_write_access("branch"));
-        // "branch" is also not classified as purely read-only since it can create branches.
-        assert!(!tool.is_read_only("branch"));
-    }
-
-    #[test]
-    fn is_read_only_detection() {
-        let tmp = TempDir::new().unwrap();
-        let tool = test_tool(tmp.path());
-
-        assert!(tool.is_read_only("status"));
-        assert!(tool.is_read_only("diff"));
-        assert!(tool.is_read_only("log"));
-        // "branch" is conditional — not purely read-only (can create), not write-gated (can list)
-        assert!(!tool.is_read_only("branch"));
-
-        assert!(!tool.is_read_only("commit"));
-        assert!(!tool.is_read_only("add"));
     }
 
     #[tokio::test]
@@ -1387,15 +1364,6 @@ mod tests {
 
         assert!(tool.requires_write_access("push"));
         assert!(tool.requires_write_access("pull"));
-    }
-
-    #[test]
-    fn push_pull_not_read_only() {
-        let tmp = TempDir::new().unwrap();
-        let tool = test_tool(tmp.path());
-
-        assert!(!tool.is_read_only("push"));
-        assert!(!tool.is_read_only("pull"));
     }
 
     #[test]

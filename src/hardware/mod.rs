@@ -3,10 +3,7 @@
 //! See `docs/hardware-peripherals-design.md` for the full design.
 
 pub mod datasheet;
-pub mod device;
-pub mod protocol;
 pub mod registry;
-pub mod transport;
 
 #[cfg(all(
     feature = "hardware",
@@ -19,9 +16,6 @@ pub mod discover;
     any(target_os = "linux", target_os = "macos", target_os = "windows")
 ))]
 pub mod introspect;
-
-#[cfg(feature = "hardware")]
-pub mod serial;
 
 use crate::config::Config;
 use anyhow::Result;

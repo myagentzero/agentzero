@@ -64,8 +64,6 @@ pub(crate) struct ForecastPeriod {
     pub short_forecast: String,
     #[serde(rename = "detailedForecast")]
     pub detailed_forecast: String,
-    #[serde(rename = "isDaytime")]
-    pub is_daytime: bool,
     #[serde(rename = "probabilityOfPrecipitation")]
     pub probability_of_precipitation: Option<PrecipitationProbability>,
 }
@@ -351,7 +349,7 @@ mod tests {
         WeatherTool::new()
     }
 
-    fn make_period(name: &str, temp: i64, daytime: bool) -> ForecastPeriod {
+    fn make_period(name: &str, temp: i64) -> ForecastPeriod {
         ForecastPeriod {
             name: name.into(),
             temperature: temp,
@@ -360,7 +358,6 @@ mod tests {
             wind_direction: "NW".into(),
             short_forecast: "Partly Cloudy".into(),
             detailed_forecast: "Partly cloudy with a high near 75.".into(),
-            is_daytime: daytime,
             probability_of_precipitation: Some(PrecipitationProbability { value: Some(20.0) }),
         }
     }
@@ -370,12 +367,12 @@ mod tests {
             city: "Topeka".into(),
             state: "KS".into(),
             periods: vec![
-                make_period("Today", 75, true),
-                make_period("Tonight", 55, false),
-                make_period("Tuesday", 80, true),
-                make_period("Tuesday Night", 60, false),
-                make_period("Wednesday", 72, true),
-                make_period("Wednesday Night", 50, false),
+                make_period("Today", 75),
+                make_period("Tonight", 55),
+                make_period("Tuesday", 80),
+                make_period("Tuesday Night", 60),
+                make_period("Wednesday", 72),
+                make_period("Wednesday Night", 50),
             ],
         }
     }
@@ -491,7 +488,7 @@ mod tests {
 
     #[test]
     fn format_period_includes_all_fields() {
-        let period = make_period("Today", 75, true);
+        let period = make_period("Today", 75);
         let formatted = WeatherTool::format_period(&period);
         assert!(formatted.contains("Today"));
         assert!(formatted.contains("75°F"));
@@ -503,7 +500,7 @@ mod tests {
 
     #[test]
     fn format_period_no_precip_when_none() {
-        let mut period = make_period("Tonight", 55, false);
+        let mut period = make_period("Tonight", 55);
         period.probability_of_precipitation = None;
         let formatted = WeatherTool::format_period(&period);
         assert!(!formatted.contains("Precip"));
@@ -511,7 +508,7 @@ mod tests {
 
     #[test]
     fn format_period_no_precip_when_value_is_null() {
-        let mut period = make_period("Tonight", 55, false);
+        let mut period = make_period("Tonight", 55);
         period.probability_of_precipitation = Some(PrecipitationProbability { value: None });
         let formatted = WeatherTool::format_period(&period);
         assert!(!formatted.contains("Precip"));
@@ -609,7 +606,6 @@ mod tests {
         let period = &parsed.properties.periods[0];
         assert_eq!(period.name, "Today");
         assert_eq!(period.temperature, 75);
-        assert!(period.is_daytime);
     }
 
     #[test]

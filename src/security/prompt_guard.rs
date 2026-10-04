@@ -39,16 +39,6 @@ pub enum GuardAction {
     Sanitize,
 }
 
-impl GuardAction {
-    pub fn from_str(s: &str) -> Self {
-        match s.to_lowercase().as_str() {
-            "block" => Self::Block,
-            "sanitize" => Self::Sanitize,
-            _ => Self::Warn,
-        }
-    }
-}
-
 /// Prompt injection guard with configurable sensitivity.
 #[derive(Debug, Clone)]
 pub struct PromptGuard {

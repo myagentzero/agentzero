@@ -159,10 +159,6 @@ impl AuthProfilesStore {
         }
     }
 
-    pub fn path(&self) -> &Path {
-        &self.path
-    }
-
     pub async fn load(&self) -> Result<AuthProfilesData> {
         let _lock = self.acquire_lock().await?;
         self.load_locked().await
@@ -218,14 +214,6 @@ impl AuthProfilesStore {
         self.save_locked(&data).await
     }
 
-    pub async fn clear_active_profile(&self, provider: &str) -> Result<()> {
-        let _lock = self.acquire_lock().await?;
-        let mut data = self.load_locked().await?;
-        data.active_profiles.remove(provider);
-        data.updated_at = Utc::now();
-        self.save_locked(&data).await
-    }
-
     pub async fn update_profile<F>(&self, profile_id: &str, mut updater: F) -> Result<AuthProfile>
     where
         F: FnMut(&mut AuthProfile) -> Result<()>,
@@ -244,39 +232,6 @@ impl AuthProfilesStore {
         data.updated_at = Utc::now();
         self.save_locked(&data).await?;
         Ok(updated_profile)
-    }
-
-    /// Update quota metadata for an auth profile.
-    ///
-    /// This is typically called after a successful or rate-limited API call
-    /// to persist quota information (remaining requests, reset time, etc.).
-    pub async fn update_quota_metadata(
-        &self,
-        profile_id: &str,
-        rate_limit_remaining: Option<u64>,
-        rate_limit_reset_at: Option<DateTime<Utc>>,
-        rate_limit_total: Option<u64>,
-    ) -> Result<()> {
-        self.update_profile(profile_id, |profile| {
-            if let Some(remaining) = rate_limit_remaining {
-                profile
-                    .metadata
-                    .insert("rate_limit_remaining".to_string(), remaining.to_string());
-            }
-            if let Some(reset_at) = rate_limit_reset_at {
-                profile
-                    .metadata
-                    .insert("rate_limit_reset_at".to_string(), reset_at.to_rfc3339());
-            }
-            if let Some(total) = rate_limit_total {
-                profile
-                    .metadata
-                    .insert("rate_limit_total".to_string(), total.to_string());
-            }
-            Ok(())
-        })
-        .await?;
-        Ok(())
     }
 
     async fn load_locked(&self) -> Result<AuthProfilesData> {
@@ -726,7 +681,7 @@ mod tests {
             Some("refresh-123")
         );
 
-        let raw = tokio::fs::read_to_string(store.path()).await.unwrap();
+        let raw = tokio::fs::read_to_string(&store.path).await.unwrap();
         assert!(raw.contains("enc2:"));
         assert!(!raw.contains("refresh-123"));
         assert!(!raw.contains("access-123"));
@@ -740,7 +695,7 @@ mod tests {
         let profile = AuthProfile::new_token("anthropic", "default", "token-abc".into());
         store.upsert_profile(profile, true).await.unwrap();
 
-        let path = store.path().to_path_buf();
+        let path = store.path.clone();
         assert!(path.exists());
 
         let contents = tokio::fs::read_to_string(path).await.unwrap();

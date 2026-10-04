@@ -9,8 +9,7 @@
 //! OS-level isolation is provided through the [`Sandbox`] trait defined in
 //! [`traits`], with pluggable backends including Docker, Firejail, Bubblewrap,
 //! and Landlock. The [`create_sandbox`] function selects the best available
-//! backend at runtime. An [`AuditLogger`] records security-relevant events for
-//! forensic review.
+//! backend at runtime.
 //!
 //! # Extension
 //!
@@ -18,7 +17,6 @@
 //! register it in [`detect::create_sandbox`]. See `AGENTS.md` §7.5 for security
 //! change guidelines.
 
-pub mod audit;
 #[cfg(feature = "sandbox-bubblewrap")]
 pub mod bubblewrap;
 pub mod canary_guard;
@@ -39,11 +37,9 @@ pub mod pairing;
 pub mod perplexity;
 pub mod policy;
 pub mod prompt_guard;
-pub mod roles;
 pub mod secrets;
 pub mod semantic_guard;
 pub mod sensitive_paths;
-pub mod syscall_anomaly;
 pub mod traits;
 
 pub use canary_guard::CanaryGuard;

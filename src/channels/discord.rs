@@ -649,24 +649,6 @@ fn split_message_for_discord(message: &str) -> Vec<String> {
     chunks
 }
 
-#[allow(clippy::cast_possible_truncation)]
-fn pick_uniform_index(len: usize) -> usize {
-    debug_assert!(len > 0);
-    let upper = len as u64;
-    let reject_threshold = (u64::MAX / upper) * upper;
-
-    loop {
-        let value = rand::random::<u64>();
-        if value < reject_threshold {
-            return (value % upper) as usize;
-        }
-    }
-}
-
-fn random_discord_ack_reaction() -> &'static str {
-    DISCORD_ACK_REACTIONS[pick_uniform_index(DISCORD_ACK_REACTIONS.len())]
-}
-
 /// URL-encode a Unicode emoji for use in Discord reaction API paths.
 ///
 /// Discord's reaction endpoints accept raw Unicode emoji in the URL path,
@@ -1796,14 +1778,6 @@ mod tests {
     fn encode_emoji_simple_ascii_char() {
         let encoded = encode_emoji_for_discord("A");
         assert_eq!(encoded, "%41");
-    }
-
-    #[test]
-    fn random_discord_ack_reaction_is_from_pool() {
-        for _ in 0..128 {
-            let emoji = random_discord_ack_reaction();
-            assert!(DISCORD_ACK_REACTIONS.contains(&emoji));
-        }
     }
 
     #[test]

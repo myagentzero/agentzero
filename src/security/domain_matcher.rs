@@ -57,10 +57,6 @@ impl DomainMatcher {
         })
     }
 
-    pub fn patterns(&self) -> &[String] {
-        &self.patterns
-    }
-
     pub fn is_gated(&self, domain: &str) -> bool {
         let Some(normalized_domain) = normalize_domain(domain) else {
             return false;

@@ -1,7 +1,7 @@
 use crate::config::Config;
 use crate::cron::{
-    CronJob, CronJobPatch, CronRun, DeliveryConfig, JobType, Schedule, SessionTarget,
-    next_run_for_schedule, schedule_cron_expression, validate_schedule,
+    CronJob, CronJobPatch, DeliveryConfig, JobType, Schedule, SessionTarget, next_run_for_schedule,
+    schedule_cron_expression, validate_schedule,
 };
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
@@ -371,39 +371,6 @@ fn truncate_cron_output(output: &str) -> String {
     truncated
 }
 
-pub fn list_runs(config: &Config, job_id: &str, limit: usize) -> Result<Vec<CronRun>> {
-    with_connection(config, |conn| {
-        let lim = i64::try_from(limit.max(1)).context("Run history limit overflow")?;
-        let mut stmt = conn.prepare(
-            "SELECT id, job_id, started_at, finished_at, status, output, duration_ms
-             FROM cron_runs
-             WHERE job_id = ?1
-             ORDER BY started_at DESC, id DESC
-             LIMIT ?2",
-        )?;
-
-        let rows = stmt.query_map(params![job_id, lim], |row| {
-            Ok(CronRun {
-                id: row.get(0)?,
-                job_id: row.get(1)?,
-                started_at: parse_rfc3339(&row.get::<_, String>(2)?)
-                    .map_err(sql_conversion_error)?,
-                finished_at: parse_rfc3339(&row.get::<_, String>(3)?)
-                    .map_err(sql_conversion_error)?,
-                status: row.get(4)?,
-                output: row.get(5)?,
-                duration_ms: row.get(6)?,
-            })
-        })?;
-
-        let mut runs = Vec::new();
-        for row in rows {
-            runs.push(row?);
-        }
-        Ok(runs)
-    })
-}
-
 fn parse_rfc3339(raw: &str) -> Result<DateTime<Utc>> {
     let parsed = DateTime::parse_from_rfc3339(raw)
         .with_context(|| format!("Invalid RFC3339 timestamp in cron DB: {raw}"))?;
@@ -590,6 +557,17 @@ mod tests {
         };
         std::fs::create_dir_all(&config.workspace_dir).unwrap();
         config
+    }
+
+    fn run_outputs(config: &Config, job_id: &str) -> Vec<Option<String>> {
+        with_connection(config, |conn| {
+            let mut stmt = conn.prepare(
+                "SELECT output FROM cron_runs WHERE job_id = ?1 ORDER BY started_at DESC, id DESC",
+            )?;
+            let rows = stmt.query_map(params![job_id], |row| row.get(0))?;
+            Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+        })
+        .unwrap()
     }
 
     #[test]
@@ -870,8 +848,7 @@ mod tests {
             record_run(&config, &job.id, start, end, "ok", Some("done"), 100).unwrap();
         }
 
-        let runs = list_runs(&config, &job.id, 10).unwrap();
-        assert_eq!(runs.len(), 2);
+        assert_eq!(run_outputs(&config, &job.id).len(), 2);
     }
 
     #[test]
@@ -901,8 +878,7 @@ mod tests {
         .unwrap();
 
         remove_job(&config, &job.id).unwrap();
-        let runs = list_runs(&config, &job.id, 10).unwrap();
-        assert!(runs.is_empty());
+        assert!(run_outputs(&config, &job.id).is_empty());
     }
 
     #[test]
@@ -932,8 +908,8 @@ mod tests {
         )
         .unwrap();
 
-        let runs = list_runs(&config, &job.id, 1).unwrap();
-        let stored = runs[0].output.as_deref().unwrap_or_default();
+        let runs = run_outputs(&config, &job.id);
+        let stored = runs[0].as_deref().unwrap_or_default();
         assert!(stored.ends_with(TRUNCATED_OUTPUT_MARKER));
         assert!(stored.len() <= MAX_CRON_OUTPUT_BYTES);
     }

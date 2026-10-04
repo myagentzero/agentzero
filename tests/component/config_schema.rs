@@ -156,20 +156,23 @@ fn security_config_defaults() {
         sec.sandbox.enabled.is_none(),
         "sandbox enabled should auto-detect (None) by default"
     );
-    assert!(sec.audit.enabled, "audit should be enabled by default");
+    assert!(
+        sec.resources.memory_monitoring,
+        "memory monitoring should be enabled by default"
+    );
 }
 
 #[test]
 fn security_config_toml_roundtrip() {
     let mut sec = SecurityConfig::default();
     sec.sandbox.enabled = Some(true);
-    sec.audit.max_size_mb = 200;
+    sec.resources.max_subprocesses = 20;
 
     let toml_str = toml::to_string(&sec).expect("SecurityConfig should serialize");
     let parsed: SecurityConfig = toml::from_str(&toml_str).expect("should deserialize back");
 
     assert_eq!(parsed.sandbox.enabled, Some(true));
-    assert_eq!(parsed.audit.max_size_mb, 200);
+    assert_eq!(parsed.resources.max_subprocesses, 20);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

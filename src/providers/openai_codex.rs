@@ -2,6 +2,7 @@ use crate::auth::AuthService;
 use crate::auth::openai_oauth::extract_account_id_from_jwt;
 use crate::multimodal;
 use crate::providers::ProviderRuntimeOptions;
+use crate::providers::compatible::{extract_responses_stream_error_message, first_nonempty};
 use crate::providers::traits::{ChatMessage, Provider, ProviderCapabilities};
 use async_trait::async_trait;
 use futures_util::{SinkExt, StreamExt};
@@ -272,17 +273,6 @@ fn is_default_responses_url(url: &str) -> bool {
     canonical_endpoint(url) == canonical_endpoint(DEFAULT_CODEX_RESPONSES_URL)
 }
 
-fn first_nonempty(text: Option<&str>) -> Option<String> {
-    text.and_then(|value| {
-        let trimmed = value.trim();
-        if trimmed.is_empty() {
-            None
-        } else {
-            Some(trimmed.to_string())
-        }
-    })
-}
-
 fn parse_transport_override(
     raw: Option<&str>,
     source: &str,
@@ -347,10 +337,6 @@ fn resolve_transport_mode(options: &ProviderRuntimeOptions) -> anyhow::Result<Co
     }
 
     Ok(CodexTransport::Auto)
-}
-
-fn resolve_instructions(system_prompt: Option<&str>) -> String {
-    first_nonempty(system_prompt).unwrap_or_else(|| DEFAULT_CODEX_INSTRUCTIONS.to_string())
 }
 
 fn normalize_model_id(model: &str) -> &str {
@@ -542,10 +528,9 @@ fn parse_sse_text(body: &str) -> anyhow::Result<Option<String>> {
     let mut saw_delta = false;
     let mut delta_accumulator = String::new();
     let mut fallback_text = None;
-    let mut buffer = body.to_string();
 
     let mut process_event = |event: Value| -> anyhow::Result<()> {
-        if let Some(message) = extract_stream_error_message(&event) {
+        if let Some(message) = extract_responses_stream_error_message(&event) {
             return Err(anyhow::anyhow!("OpenAI Codex stream error: {message}"));
         }
         if let Some(text) = extract_stream_event_text(&event, saw_delta) {
@@ -593,14 +578,14 @@ fn parse_sse_text(body: &str) -> anyhow::Result<Option<String>> {
         Ok(())
     };
 
-    while let Some(idx) = buffer.find("\n\n") {
-        let chunk = buffer[..idx].to_string();
-        buffer = buffer[idx + 2..].to_string();
-        process_chunk(&chunk)?;
+    let mut rest = body;
+    while let Some(idx) = rest.find("\n\n") {
+        process_chunk(&rest[..idx])?;
+        rest = &rest[idx + 2..];
     }
 
-    if !buffer.trim().is_empty() {
-        process_chunk(&buffer)?;
+    if !rest.trim().is_empty() {
+        process_chunk(rest)?;
     }
 
     if saw_delta {
@@ -608,37 +593,6 @@ fn parse_sse_text(body: &str) -> anyhow::Result<Option<String>> {
     }
 
     Ok(fallback_text)
-}
-
-fn extract_stream_error_message(event: &Value) -> Option<String> {
-    let event_type = event.get("type").and_then(Value::as_str);
-
-    if event_type == Some("error") {
-        return first_nonempty(
-            event
-                .get("message")
-                .and_then(Value::as_str)
-                .or_else(|| event.get("code").and_then(Value::as_str))
-                .or_else(|| {
-                    event
-                        .get("error")
-                        .and_then(|error| error.get("message"))
-                        .and_then(Value::as_str)
-                }),
-        );
-    }
-
-    if event_type == Some("response.failed") {
-        return first_nonempty(
-            event
-                .get("response")
-                .and_then(|response| response.get("error"))
-                .and_then(|error| error.get("message"))
-                .and_then(Value::as_str),
-        );
-    }
-
-    None
 }
 
 async fn decode_responses_body(response: reqwest::Response) -> anyhow::Result<String> {
@@ -840,7 +794,7 @@ impl OpenAiCodexProvider {
                 _ => continue,
             };
 
-            if let Some(message) = extract_stream_error_message(&event) {
+            if let Some(message) = extract_responses_stream_error_message(&event) {
                 return Err(WebsocketRequestError::stream(anyhow::anyhow!(
                     "OpenAI Codex websocket stream error: {message}"
                 )));
@@ -1359,30 +1313,6 @@ mod tests {
         let provider = OpenAiCodexProvider::new(&options, Some("test-key")).unwrap();
         assert!(provider.custom_endpoint);
         assert_eq!(provider.gateway_api_key.as_deref(), Some("test-key"));
-    }
-
-    #[test]
-    fn resolve_instructions_uses_default_when_missing() {
-        assert_eq!(
-            resolve_instructions(None),
-            DEFAULT_CODEX_INSTRUCTIONS.to_string()
-        );
-    }
-
-    #[test]
-    fn resolve_instructions_uses_default_when_blank() {
-        assert_eq!(
-            resolve_instructions(Some("   ")),
-            DEFAULT_CODEX_INSTRUCTIONS.to_string()
-        );
-    }
-
-    #[test]
-    fn resolve_instructions_uses_system_prompt_when_present() {
-        assert_eq!(
-            resolve_instructions(Some("Be strict")),
-            "Be strict".to_string()
-        );
     }
 
     #[test]

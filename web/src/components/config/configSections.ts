@@ -4,7 +4,6 @@ import {
   ShieldCheck,
   Box,
   Gauge,
-  FileText,
   KeyRound,
   OctagonAlert,
   Filter,
@@ -224,22 +223,6 @@ export const CONFIG_SECTIONS: SectionDef[] = [
       { key: 'max_cpu_time_seconds', label: 'Max CPU Time (s)', type: 'number', min: 1, defaultValue: 60, description: 'Default: 60' },
       { key: 'max_subprocesses', label: 'Max Subprocesses', type: 'number', min: 1, defaultValue: 10, description: 'Default: 10' },
       { key: 'memory_monitoring', label: 'Memory Monitoring', type: 'toggle', defaultValue: true },
-    ],
-  },
-
-  // ── Security: Audit ───────────────────────────────────────────────
-  {
-    path: 'security.audit',
-    category: 'security',
-    title: 'Security: Audit',
-    description: 'Audit logging configuration',
-    icon: FileText,
-    defaultCollapsed: true,
-    fields: [
-      { key: 'enabled', label: 'Enabled', type: 'toggle', defaultValue: true },
-      { key: 'log_path', label: 'Log Path', type: 'text', defaultValue: 'audit.log', description: 'Default: audit.log' },
-      { key: 'max_size_mb', label: 'Max Size (MB)', type: 'number', min: 1, defaultValue: 100, description: 'Default: 100' },
-      { key: 'sign_events', label: 'Sign Events', type: 'toggle', defaultValue: false },
     ],
   },
 
@@ -508,20 +491,6 @@ export const CONFIG_SECTIONS: SectionDef[] = [
       { key: 'enabled', label: 'Enabled', type: 'toggle', defaultValue: false },
       { key: 'max_skills', label: 'Max Skills', type: 'number', min: 1, defaultValue: 500, description: 'Default: 500' },
       { key: 'similarity_threshold', label: 'Similarity Threshold', type: 'number', min: 0, max: 1, step: 0.01, defaultValue: 0.85, description: 'Default: 0.85 — embedding similarity for deduplication' },
-    ],
-  },
-
-  // ── Skills: Improvement ──────────────────────────────────────────
-  {
-    path: 'skills.skill_improvement',
-    category: 'skills',
-    title: 'Skills: Improvement',
-    description: 'Automatic skill refinement after successful usage',
-    icon: Sparkles,
-    defaultCollapsed: true,
-    fields: [
-      { key: 'enabled', label: 'Enabled', type: 'toggle', defaultValue: true, description: 'Auto-refine skill files after successful usage' },
-      { key: 'cooldown_secs', label: 'Cooldown (s)', type: 'number', min: 0, defaultValue: 3600, description: 'Default: 3600 (1 hour between improvements per skill)' },
     ],
   },
 
@@ -1169,22 +1138,6 @@ export const CONFIG_SECTIONS: SectionDef[] = [
     defaultCollapsed: true,
     fields: [
       { key: 'enabled', label: 'Enabled', type: 'toggle', defaultValue: true },
-    ],
-  },
-
-  // ── Plugins ───────────────────────────────────────────────────────
-  {
-    path: 'plugins',
-    category: 'advanced',
-    title: 'Plugins',
-    description: 'Plugin system settings',
-    icon: Puzzle,
-    defaultCollapsed: true,
-    fields: [
-      { key: 'enabled', label: 'Enabled', type: 'toggle', defaultValue: true },
-      { key: 'allow', label: 'Allow List', type: 'tag-list', tagPlaceholder: 'e.g. my-plugin, tools-extra' },
-      { key: 'deny', label: 'Deny List', type: 'tag-list', tagPlaceholder: 'e.g. untrusted-plugin' },
-      { key: 'load_paths', label: 'Load Paths', type: 'tag-list', tagPlaceholder: 'e.g. ./plugins, /opt/agentzero/plugins' },
     ],
   },
 

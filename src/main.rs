@@ -139,47 +139,13 @@ async fn open_url_in_default_browser(url: &str) -> Result<()> {
     }
 }
 
-mod agent;
-mod approval;
-mod auth;
-mod channels;
-mod config;
-mod coordination;
-mod cost;
-mod cron;
-mod daemon;
-mod doctor;
-mod gateway;
-mod hardware;
-mod health;
-mod heartbeat;
-mod hooks;
-mod identity;
-mod integrations;
-mod memory;
-mod multimodal;
-mod observability;
-mod onboard;
-mod peripherals;
-mod plugins;
-mod providers;
-mod runtime;
-mod security;
-mod service;
-mod skills;
-#[cfg(test)]
-mod test_locks;
-mod tools;
-mod tunnel;
-mod util;
-
-use config::Config;
-
-// Re-export so binary modules can use crate::<CommandEnum> while keeping a single source of truth.
-pub use agentzero::{
-    ChannelCommands, CronCommands, HardwareCommands, IntegrationCommands, PeripheralCommands,
-    ServiceCommands, SkillCommands,
+use agentzero::{
+    ChannelCommands, CronCommands, IntegrationCommands, MemoryCommands, ServiceCommands,
+    SkillCommands, agent, auth, channels, config, cron, daemon, doctor, gateway, hardware,
+    integrations, memory, observability, onboard, peripherals, providers, security, service,
+    skills, util,
 };
+use config::Config;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
 enum EstopLevelArg {
@@ -809,58 +775,6 @@ enum DoctorCommands {
         /// Maximum number of events to display
         #[arg(long, default_value = "20")]
         limit: usize,
-    },
-}
-
-#[derive(Subcommand, Debug)]
-enum MemoryCommands {
-    /// List memory entries with optional filters
-    List {
-        #[arg(long)]
-        category: Option<String>,
-        #[arg(long)]
-        session: Option<String>,
-        #[arg(long, default_value = "50")]
-        limit: usize,
-        #[arg(long, default_value = "0")]
-        offset: usize,
-    },
-    /// Get a specific memory entry by key
-    Get { key: String },
-    /// Store a memory entry
-    Store {
-        /// Unique key for the memory (e.g., user_lang, project_stack)
-        key: String,
-        /// Content to store
-        content: String,
-        /// Category: core (default), daily, conversation, or custom name
-        #[arg(long, default_value = "core")]
-        category: String,
-        /// Optional session ID to scope the memory
-        #[arg(long)]
-        session: Option<String>,
-    },
-    /// Show memory backend statistics and health
-    Stats,
-    /// Clear memories by category, by key, or clear all
-    Clear {
-        /// Delete a single entry by key (supports prefix match)
-        #[arg(long)]
-        key: Option<String>,
-        #[arg(long)]
-        category: Option<String>,
-        /// Skip confirmation prompt
-        #[arg(long)]
-        yes: bool,
-    },
-    /// Rebuild embeddings for all memories (use after changing embedding model)
-    Reindex {
-        /// Skip confirmation prompt
-        #[arg(long)]
-        yes: bool,
-        /// Show progress during reindex
-        #[arg(long, default_value = "true")]
-        progress: bool,
     },
 }
 
@@ -2392,7 +2306,7 @@ async fn handle_auth_command(auth_command: AuthCommands, config: &Config) -> Res
                     marker,
                     id,
                     profile.kind,
-                    crate::security::redact(profile.account_id.as_deref().unwrap_or("unknown")),
+                    security::redact(profile.account_id.as_deref().unwrap_or("unknown")),
                     format_expiry(profile)
                 );
             }

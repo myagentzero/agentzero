@@ -558,10 +558,6 @@ fn extract_ws_bearer_token(headers: &HeaderMap, query_token: Option<&str>) -> Op
         .map(ToOwned::to_owned)
 }
 
-fn extract_query_token(raw_query: Option<&str>) -> Option<String> {
-    parse_ws_query_params(raw_query).token
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -637,15 +633,6 @@ mod tests {
             extract_ws_bearer_token(&headers, Some("query-token")).as_deref(),
             Some("protocol-token")
         );
-    }
-
-    #[test]
-    fn extract_query_token_reads_token_param() {
-        assert_eq!(
-            extract_query_token(Some("foo=1&token=query-token&bar=2")).as_deref(),
-            Some("query-token")
-        );
-        assert!(extract_query_token(Some("foo=1")).is_none());
     }
 
     #[test]

@@ -160,8 +160,6 @@ fn unicode_emoji_to_slack_name(emoji: &str) -> &str {
     }
 }
 const SLACK_ATTACHMENT_RENDER_CONCURRENCY: usize = 3;
-const SLACK_POLL_ACTIVE_THREAD_MAX: usize = 50;
-const SLACK_POLL_THREAD_EXPIRE_SECS: u64 = 24 * 60 * 60;
 const SLACK_ACK_REACTIONS: &[&str] = &["⚡", "👀", "🔥", "👍", "🎉"];
 
 fn slack_default_ack_config() -> &'static crate::config::AckReactionConfig {
@@ -767,18 +765,6 @@ impl SlackChannel {
         } else {
             text.trim().to_string()
         })
-    }
-
-    fn normalize_incoming_content(
-        text: &str,
-        require_mention: bool,
-        bot_user_id: &str,
-    ) -> Option<String> {
-        let normalized = Self::normalize_incoming_text(text, require_mention, bot_user_id)?;
-        if normalized.is_empty() {
-            return None;
-        }
-        Some(normalized)
     }
 
     fn is_supported_message_subtype(subtype: Option<&str>) -> bool {
@@ -3074,28 +3060,6 @@ impl SlackChannel {
         }
     }
 
-    fn evaluate_health(bot_ok: bool, socket_mode_enabled: bool, socket_mode_ok: bool) -> bool {
-        if !bot_ok {
-            return false;
-        }
-        if socket_mode_enabled {
-            return socket_mode_ok;
-        }
-        true
-    }
-
-    fn slack_api_call_succeeded(status: reqwest::StatusCode, body: &str) -> bool {
-        if !status.is_success() {
-            return false;
-        }
-
-        let parsed: serde_json::Value = serde_json::from_str(body).unwrap_or_default();
-        parsed
-            .get("ok")
-            .and_then(|value| value.as_bool())
-            .unwrap_or(false)
-    }
-
     async fn fetch_history_with_retry(
         &self,
         channel_id: &str,
@@ -3296,53 +3260,6 @@ impl SlackChannel {
         }
 
         None
-    }
-
-    /// Extract thread parent timestamps from channel history messages.
-    /// Returns `(thread_ts, latest_reply_ts)` pairs for messages with active threads.
-    fn extract_active_threads(messages: &[serde_json::Value]) -> Vec<(String, String)> {
-        messages
-            .iter()
-            .filter_map(|msg| {
-                let thread_ts = msg.get("thread_ts").and_then(|v| v.as_str())?;
-                let ts = msg.get("ts").and_then(|v| v.as_str()).unwrap_or_default();
-                // Only consider messages that are thread parents (ts == thread_ts)
-                if ts != thread_ts {
-                    return None;
-                }
-                let reply_count = msg.get("reply_count").and_then(|v| v.as_u64()).unwrap_or(0);
-                if reply_count == 0 {
-                    return None;
-                }
-                let latest_reply = msg
-                    .get("latest_reply")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or(thread_ts);
-                Some((thread_ts.to_string(), latest_reply.to_string()))
-            })
-            .collect()
-    }
-
-    /// Evict expired or excess threads from the active-thread tracker.
-    /// Each value is `(channel_id, last_seen_reply_ts, last_activity)`.
-    fn evict_stale_threads(
-        active_threads: &mut HashMap<String, (String, String, Instant)>,
-        now: Instant,
-    ) {
-        let max_age = Duration::from_secs(SLACK_POLL_THREAD_EXPIRE_SECS);
-        active_threads
-            .retain(|_, (_, _, last_activity)| now.duration_since(*last_activity) < max_age);
-        if active_threads.len() > SLACK_POLL_ACTIVE_THREAD_MAX {
-            let overflow = active_threads.len() - SLACK_POLL_ACTIVE_THREAD_MAX;
-            let mut entries: Vec<_> = active_threads
-                .iter()
-                .map(|(k, (_, _, t))| (k.clone(), *t))
-                .collect();
-            entries.sort_by_key(|(_, t)| *t);
-            for (key, _) in entries.into_iter().take(overflow) {
-                active_threads.remove(&key);
-            }
-        }
     }
 }
 
@@ -3938,23 +3855,6 @@ mod tests {
     }
 
     #[test]
-    fn normalize_incoming_content_requires_mention_when_enabled() {
-        assert!(SlackChannel::normalize_incoming_content("hello", true, "U_BOT").is_none());
-        assert_eq!(
-            SlackChannel::normalize_incoming_content("<@U_BOT> run", true, "U_BOT").as_deref(),
-            Some("run")
-        );
-    }
-
-    #[test]
-    fn normalize_incoming_content_without_mention_mode_keeps_message() {
-        assert_eq!(
-            SlackChannel::normalize_incoming_content("  hello world  ", false, "U_BOT").as_deref(),
-            Some("hello world")
-        );
-    }
-
-    #[test]
     fn default_ack_config_uses_chart_for_okr_terms() {
         use crate::channels::ack_reaction::{
             AckReactionContext, AckReactionContextChatType, select_ack_reaction,
@@ -4379,32 +4279,6 @@ mod tests {
         let channel = SlackChannel::new("xoxb-fake".into(), None, None, vec![], vec![])
             .with_transcription(tc);
         assert!(channel.transcription.is_none());
-    }
-
-    #[test]
-    fn evaluate_health_enforces_socket_mode_probe_when_enabled() {
-        assert!(!SlackChannel::evaluate_health(false, false, true));
-        assert!(!SlackChannel::evaluate_health(false, true, true));
-        assert!(SlackChannel::evaluate_health(true, false, false));
-        assert!(SlackChannel::evaluate_health(true, false, true));
-        assert!(!SlackChannel::evaluate_health(true, true, false));
-        assert!(SlackChannel::evaluate_health(true, true, true));
-    }
-
-    #[test]
-    fn slack_api_call_succeeded_requires_ok_true_in_body() {
-        assert!(!SlackChannel::slack_api_call_succeeded(
-            reqwest::StatusCode::OK,
-            r#"{"ok":false,"error":"invalid_auth"}"#
-        ));
-    }
-
-    #[test]
-    fn slack_api_call_succeeded_accepts_ok_true() {
-        assert!(SlackChannel::slack_api_call_succeeded(
-            reqwest::StatusCode::OK,
-            r#"{"ok":true}"#
-        ));
     }
 
     #[test]

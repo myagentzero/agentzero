@@ -5,9 +5,6 @@ use crate::cron::{
 };
 use anyhow::Result;
 
-/// Default cron expression: 3:00 AM daily.
-const DEFAULT_SCHEDULE_EXPR: &str = "0 3 * * *";
-
 /// Job name marker used to identify consolidation jobs.
 pub const CONSOLIDATION_JOB_NAME: &str = "__consolidate_nightly";
 
@@ -247,7 +244,7 @@ mod tests {
 
         match &job.schedule {
             Schedule::Cron { expr, tz } => {
-                assert_eq!(expr, DEFAULT_SCHEDULE_EXPR);
+                assert_eq!(expr, "0 3 * * *");
                 assert!(tz.is_none());
             }
             other => panic!("Expected Cron schedule, got {other:?}"),

@@ -22,7 +22,6 @@ pub struct RouterProvider {
     routes: HashMap<String, (usize, String)>, // hint → (provider_index, model)
     providers: Vec<(String, Box<dyn Provider>)>,
     default_index: usize,
-    default_model: String,
     /// Vision support override from config (`None` = defer to providers).
     vision_override: Option<bool>,
 }
@@ -79,7 +78,6 @@ impl RouterProvider {
             routes: resolved_routes,
             providers,
             default_index,
-            default_model,
             vision_override: None,
         }
     }

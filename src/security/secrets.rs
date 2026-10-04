@@ -120,11 +120,6 @@ impl SecretStore {
         }
     }
 
-    /// Check if a value uses the legacy `enc:` format that should be migrated.
-    pub fn needs_migration(value: &str) -> bool {
-        value.starts_with("enc:")
-    }
-
     /// Decrypt using ChaCha20-Poly1305 (current secure format).
     fn decrypt_chacha20(&self, hex_str: &str) -> Result<String> {
         let blob =
@@ -162,12 +157,6 @@ impl SecretStore {
     pub fn is_encrypted(value: &str) -> bool {
         value.starts_with("enc2:") || value.starts_with("enc:")
     }
-
-    /// Check if a value uses the secure `enc2:` format.
-    pub fn is_secure_encrypted(value: &str) -> bool {
-        value.starts_with("enc2:")
-    }
-
     /// Load the encryption key from disk, or create one if it doesn't exist.
     fn load_or_create_key(&self) -> Result<Vec<u8>> {
         if self.key_path.exists() {
@@ -500,22 +489,6 @@ mod tests {
     // ── Migration tests ─────────────────────────────────────────
 
     #[test]
-    fn needs_migration_detects_legacy_prefix() {
-        assert!(SecretStore::needs_migration("enc:aabbcc"));
-        assert!(!SecretStore::needs_migration("enc2:aabbcc"));
-        assert!(!SecretStore::needs_migration("sk-plaintext"));
-        assert!(!SecretStore::needs_migration(""));
-    }
-
-    #[test]
-    fn is_secure_encrypted_detects_enc2_only() {
-        assert!(SecretStore::is_secure_encrypted("enc2:aabbcc"));
-        assert!(!SecretStore::is_secure_encrypted("enc:aabbcc"));
-        assert!(!SecretStore::is_secure_encrypted("sk-plaintext"));
-        assert!(!SecretStore::is_secure_encrypted(""));
-    }
-
-    #[test]
     fn decrypt_and_migrate_returns_none_for_enc2() {
         let tmp = TempDir::new().unwrap();
         let store = SecretStore::new(tmp.path(), true);
@@ -558,9 +531,6 @@ mod tests {
         let ciphertext = xor_cipher(plaintext.as_bytes(), &key);
         let legacy_value = format!("enc:{}", hex_encode(&ciphertext));
 
-        // Verify it needs migration
-        assert!(SecretStore::needs_migration(&legacy_value));
-
         // Decrypt and migrate
         let (decrypted, migrated) = store.decrypt_and_migrate(&legacy_value).unwrap();
         assert_eq!(decrypted, plaintext, "Plaintext must match original");
@@ -570,10 +540,6 @@ mod tests {
         assert!(
             new_value.starts_with("enc2:"),
             "Migrated value must use enc2: prefix"
-        );
-        assert!(
-            !SecretStore::needs_migration(&new_value),
-            "Migrated value should not need migration"
         );
 
         // Verify the migrated value decrypts correctly

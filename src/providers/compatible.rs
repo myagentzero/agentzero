@@ -11,10 +11,7 @@ use crate::providers::traits::{
 };
 use async_trait::async_trait;
 use futures_util::{SinkExt, StreamExt, stream};
-use reqwest::{
-    Client,
-    header::{HeaderMap, HeaderValue, USER_AGENT},
-};
+use reqwest::{Client, header::USER_AGENT};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -352,26 +349,19 @@ impl OpenAiCompatibleProvider {
     }
 
     fn http_client(&self) -> Client {
-        if let Some(ua) = self.user_agent.as_deref() {
-            let mut headers = HeaderMap::new();
-            if let Ok(value) = HeaderValue::from_str(ua) {
-                headers.insert(USER_AGENT, value);
-            }
-
-            let builder = Client::builder()
-                .timeout(std::time::Duration::from_secs(120))
-                .connect_timeout(std::time::Duration::from_secs(10))
-                .default_headers(headers);
-            let builder =
-                crate::config::apply_runtime_proxy_to_builder(builder, "provider.compatible");
-
-            return builder.build().unwrap_or_else(|error| {
-                tracing::warn!("Failed to build proxied timeout client with user-agent: {error}");
-                Client::new()
-            });
+        match self.user_agent.as_deref() {
+            Some(ua) => crate::config::build_runtime_proxy_client_with_user_agent(
+                "provider.compatible",
+                120,
+                10,
+                ua,
+            ),
+            None => crate::config::build_runtime_proxy_client_with_timeouts(
+                "provider.compatible",
+                120,
+                10,
+            ),
         }
-
-        crate::config::build_runtime_proxy_client_with_timeouts("provider.compatible", 120, 10)
     }
 
     /// Build the full URL for chat completions, detecting if base_url already includes the path.
@@ -451,28 +441,6 @@ impl OpenAiCompatibleProvider {
         } else {
             format!("{normalized_base}/v1/responses")
         }
-    }
-
-    fn tool_specs_to_openai_format(
-        tools: &[crate::tools::ToolSpec],
-        model: &str,
-    ) -> Vec<serde_json::Value> {
-        let strategy = Self::select_cleaning_strategy(model);
-        tools
-            .iter()
-            .map(|tool| {
-                let cleaned_params =
-                    crate::tools::SchemaCleanr::clean(tool.parameters.clone(), strategy);
-                serde_json::json!({
-                    "type": "function",
-                    "function": {
-                        "name": tool.name,
-                        "description": tool.description,
-                        "parameters": cleaned_params
-                    }
-                })
-            })
-            .collect()
     }
 
     fn openai_tools_to_tool_specs(tools: &[serde_json::Value]) -> Vec<crate::tools::ToolSpec> {
@@ -891,7 +859,6 @@ struct StreamChunkResponse {
 #[derive(Debug, Deserialize)]
 struct StreamChoice {
     delta: StreamDelta,
-    finish_reason: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1025,7 +992,7 @@ fn sse_bytes_to_chunks(
     .boxed()
 }
 
-fn first_nonempty(text: Option<&str>) -> Option<String> {
+pub(super) fn first_nonempty(text: Option<&str>) -> Option<String> {
     text.and_then(|value| {
         let trimmed = value.trim();
         if trimmed.is_empty() {
@@ -1259,7 +1226,7 @@ fn parse_responses_chat_response(response: ResponsesResponse) -> ProviderChatRes
     }
 }
 
-fn extract_responses_stream_error_message(event: &Value) -> Option<String> {
+pub(super) fn extract_responses_stream_error_message(event: &Value) -> Option<String> {
     let event_type = event.get("type").and_then(Value::as_str);
 
     if event_type == Some("error") {
@@ -4546,27 +4513,6 @@ mod tests {
         ))
         .unwrap();
         assert_eq!(value, serde_json::json!("You are a helpful assistant."));
-    }
-
-    #[test]
-    fn tool_specs_convert_to_openai_format() {
-        let specs = vec![crate::tools::ToolSpec {
-            name: "shell".to_string(),
-            description: "Run shell command".to_string(),
-            parameters: serde_json::json!({
-                "type": "object",
-                "properties": {"command": {"type": "string"}},
-                "required": ["command"]
-            }),
-            ..Default::default()
-        }];
-
-        let tools = OpenAiCompatibleProvider::tool_specs_to_openai_format(&specs, "gpt-4");
-        assert_eq!(tools.len(), 1);
-        assert_eq!(tools[0]["type"], "function");
-        assert_eq!(tools[0]["function"]["name"], "shell");
-        assert_eq!(tools[0]["function"]["description"], "Run shell command");
-        assert_eq!(tools[0]["function"]["parameters"]["required"][0], "command");
     }
 
     #[test]

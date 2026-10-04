@@ -1,5 +1,5 @@
 use std::fmt::Write;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
 use anyhow::Result;
@@ -44,9 +44,22 @@ fn next_probe_tier(current: usize) -> usize {
 
 /// Try to extract the actual context window limit from a provider error message.
 pub fn parse_context_limit_from_error(msg: &str) -> Option<usize> {
-    // Match patterns like "maximum context length is 128000" or "limit of 200000 tokens"
-    // or "context window of 131072" or "available context size (8448 tokens)"
-    let re_patterns: &[&str] = &[
+    let lower = msg.to_lowercase();
+    CONTEXT_LIMIT_PATTERNS.iter().find_map(|re| {
+        let limit = re
+            .captures(&lower)?
+            .get(1)?
+            .as_str()
+            .parse::<usize>()
+            .ok()?;
+        (1024..=10_000_000).contains(&limit).then_some(limit)
+    })
+}
+
+/// Match patterns like "maximum context length is 128000" or "limit of 200000 tokens"
+/// or "context window of 131072" or "available context size (8448 tokens)"
+static CONTEXT_LIMIT_PATTERNS: LazyLock<Vec<regex::Regex>> = LazyLock::new(|| {
+    [
         // "maximum context length is 128000"
         r"(?:max(?:imum)?|limit)\s*(?:context\s*)?(?:length|size|window)?\s*(?:is|of|:)?\s*(\d{4,})",
         // "context length is 128000" / "context window of 131072"
@@ -57,20 +70,11 @@ pub fn parse_context_limit_from_error(msg: &str) -> Option<usize> {
         r"available context size\s*\(\s*(\d{4,})",
         // "> 128000 maximum context length" (Anthropic-style)
         r">\s*(\d{4,})\s*(?:maximum|max)?\s*(?:context)?\s*(?:length|size|window|tokens?)",
-    ];
-    let lower = msg.to_lowercase();
-    for pattern in re_patterns {
-        if let Ok(re) = regex::Regex::new(pattern)
-            && let Some(caps) = re.captures(&lower)
-            && let Some(m) = caps.get(1)
-            && let Ok(limit) = m.as_str().parse::<usize>()
-            && (1024..=10_000_000).contains(&limit)
-        {
-            return Some(limit);
-        }
-    }
-    None
-}
+    ]
+    .iter()
+    .map(|pattern| regex::Regex::new(pattern).expect("valid context-limit regex"))
+    .collect()
+});
 
 // ---------------------------------------------------------------------------
 // Media markers
@@ -86,12 +90,14 @@ const ATTACHMENT_KINDS: &[&str] = &[
 /// Replace every `[KIND:...]` attachment marker (case-insensitive) with a
 /// neutral `[media attachment]` placeholder, stripping the embedded path.
 fn strip_media_markers(text: &str) -> String {
-    let alternation = ATTACHMENT_KINDS.join("|");
-    let pattern = format!(r"(?i)\[(?:{alternation}):[^\]]*\]");
-    match regex::Regex::new(&pattern) {
-        Ok(re) => re.replace_all(text, "[media attachment]").into_owned(),
-        Err(_) => text.to_string(),
-    }
+    static MEDIA_MARKER_REGEX: LazyLock<regex::Regex> = LazyLock::new(|| {
+        let alternation = ATTACHMENT_KINDS.join("|");
+        regex::Regex::new(&format!(r"(?i)\[(?:{alternation}):[^\]]*\]"))
+            .expect("valid media-marker regex")
+    });
+    MEDIA_MARKER_REGEX
+        .replace_all(text, "[media attachment]")
+        .into_owned()
 }
 
 // ---------------------------------------------------------------------------
@@ -133,10 +139,6 @@ OMIT:
 - Redundant information already stated
 
 Output concise bullet points. Be thorough but brief.";
-
-/// Temperature forwarded to the summarizer LLM call. Matches the value used by
-/// the message-count compaction path in `loop_/history.rs`.
-const SUMMARIZER_TEMPERATURE: f64 = 0.2;
 
 // ---------------------------------------------------------------------------
 // ContextCompressor
@@ -977,7 +979,7 @@ mod tests {
         ];
 
         let result = compressor
-            .compress_if_needed(&mut history, &provider, "model", SUMMARIZER_TEMPERATURE)
+            .compress_if_needed(&mut history, &provider, "model", 0.2)
             .await
             .expect("compression should succeed");
 
@@ -1014,12 +1016,7 @@ mod tests {
         ];
 
         let result = compressor
-            .compress_if_needed(
-                &mut history,
-                &provider,
-                "default-vision-model",
-                SUMMARIZER_TEMPERATURE,
-            )
+            .compress_if_needed(&mut history, &provider, "default-vision-model", 0.2)
             .await
             .expect("compression should succeed");
 

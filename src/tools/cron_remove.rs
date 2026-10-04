@@ -140,7 +140,16 @@ mod tests {
     async fn removes_existing_job() {
         let tmp = TempDir::new().unwrap();
         let cfg = test_config(&tmp).await;
-        let job = cron::add_job(&cfg, "*/5 * * * *", "echo ok").unwrap();
+        let job = cron::add_shell_job(
+            &cfg,
+            None,
+            cron::Schedule::Cron {
+                expr: "*/5 * * * *".into(),
+                tz: None,
+            },
+            "echo ok",
+        )
+        .unwrap();
         let tool = CronRemoveTool::new(cfg.clone(), test_security(&cfg));
 
         let result = tool.execute(json!({"job_id": job.id})).await.unwrap();
@@ -173,7 +182,16 @@ mod tests {
             ..Config::default()
         };
         std::fs::create_dir_all(&config.workspace_dir).unwrap();
-        let job = cron::add_job(&config, "*/5 * * * *", "echo ok").unwrap();
+        let job = cron::add_shell_job(
+            &config,
+            None,
+            cron::Schedule::Cron {
+                expr: "*/5 * * * *".into(),
+                tz: None,
+            },
+            "echo ok",
+        )
+        .unwrap();
         config.autonomy.level = AutonomyLevel::ReadOnly;
         let cfg = Arc::new(config);
         let tool = CronRemoveTool::new(cfg.clone(), test_security(&cfg));
@@ -195,7 +213,16 @@ mod tests {
         config.autonomy.max_actions_per_hour = 0;
         std::fs::create_dir_all(&config.workspace_dir).unwrap();
         let cfg = Arc::new(config);
-        let job = cron::add_job(&cfg, "*/5 * * * *", "echo ok").unwrap();
+        let job = cron::add_shell_job(
+            &cfg,
+            None,
+            cron::Schedule::Cron {
+                expr: "*/5 * * * *".into(),
+                tz: None,
+            },
+            "echo ok",
+        )
+        .unwrap();
         let tool = CronRemoveTool::new(cfg.clone(), test_security(&cfg));
 
         let result = tool.execute(json!({"job_id": job.id})).await.unwrap();

@@ -180,13 +180,6 @@ struct GeminiUsageMetadata {
     candidates_token_count: Option<u64>,
 }
 
-/// Response envelope for the internal cloudcode-pa API.
-/// The internal API nests the standard response under a `response` field.
-#[derive(Debug, Deserialize)]
-struct InternalGenerateContentResponse {
-    response: GenerateContentResponse,
-}
-
 #[derive(Debug, Deserialize)]
 struct Candidate {
     #[serde(default)]
@@ -671,13 +664,6 @@ impl GeminiProvider {
                 })
                 .is_some()
         })
-    }
-
-    /// Check if any Gemini authentication is available
-    pub fn has_any_auth() -> bool {
-        Self::load_non_empty_env("GEMINI_API_KEY").is_some()
-            || Self::load_non_empty_env("GOOGLE_API_KEY").is_some()
-            || Self::has_cli_credentials()
     }
 
     /// Get authentication source description for diagnostics.
@@ -1898,36 +1884,6 @@ mod tests {
 
         let json = serde_json::to_string(&request).unwrap();
         assert!(json.contains("\"project\":\"my-gcp-project-id\""));
-    }
-
-    #[test]
-    fn internal_response_deserialize_nested() {
-        let json = r#"{
-            "response": {
-                "candidates": [{
-                    "content": {
-                        "parts": [{"text": "Hello from internal API!"}]
-                    }
-                }]
-            }
-        }"#;
-
-        let internal: InternalGenerateContentResponse = serde_json::from_str(json).unwrap();
-        let text = internal
-            .response
-            .candidates
-            .unwrap()
-            .into_iter()
-            .next()
-            .unwrap()
-            .content
-            .unwrap()
-            .parts
-            .into_iter()
-            .next()
-            .unwrap()
-            .text;
-        assert_eq!(text, Some("Hello from internal API!".to_string()));
     }
 
     #[test]

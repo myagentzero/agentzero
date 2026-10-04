@@ -100,9 +100,7 @@ const SESSION_LIMIT_REACHED: i32 = -32001;
 
 struct Session {
     agent: Agent,
-    created_at: Instant,
     last_active: Instant,
-    workspace_dir: String,
 }
 
 // ── ACP Server ───────────────────────────────────────────────────
@@ -204,7 +202,6 @@ impl AcpServer {
             _ => Err(RpcError {
                 code: METHOD_NOT_FOUND,
                 message: format!("Method not found: {}", request.method),
-                data: None,
             }),
         };
 
@@ -250,7 +247,6 @@ impl AcpServer {
                     "Maximum session limit reached ({})",
                     self.acp_config.max_sessions
                 ),
-                data: None,
             });
         }
 
@@ -270,7 +266,6 @@ impl AcpServer {
             .map_err(|e| RpcError {
                 code: INTERNAL_ERROR,
                 message: format!("Failed to create agent: {e}"),
-                data: None,
             })?;
 
         let now = Instant::now();
@@ -278,9 +273,7 @@ impl AcpServer {
             session_id.clone(),
             Session {
                 agent,
-                created_at: now,
                 last_active: now,
-                workspace_dir: workspace_dir.clone(),
             },
         );
 
@@ -300,7 +293,6 @@ impl AcpServer {
             .ok_or_else(|| RpcError {
                 code: INVALID_PARAMS,
                 message: "Missing required parameter: sessionId".to_string(),
-                data: None,
             })?
             .to_string();
 
@@ -310,7 +302,6 @@ impl AcpServer {
             .ok_or_else(|| RpcError {
                 code: INVALID_PARAMS,
                 message: "Missing required parameter: prompt".to_string(),
-                data: None,
             })?
             .to_string();
 
@@ -321,7 +312,6 @@ impl AcpServer {
             sessions.remove(&session_id).ok_or_else(|| RpcError {
                 code: SESSION_NOT_FOUND,
                 message: format!("Session not found: {session_id}"),
-                data: None,
             })?
         };
 
@@ -387,13 +377,11 @@ impl AcpServer {
         let (mut session, turn_result) = turn_handle.await.map_err(|e| RpcError {
             code: INTERNAL_ERROR,
             message: format!("Agent task panicked: {e}"),
-            data: None,
         })?;
 
         let result = turn_result.map_err(|e| RpcError {
             code: INTERNAL_ERROR,
             message: format!("Agent turn failed: {e}"),
-            data: None,
         })?;
 
         // Put the session back
@@ -417,7 +405,6 @@ impl AcpServer {
             .ok_or_else(|| RpcError {
                 code: INVALID_PARAMS,
                 message: "Missing required parameter: sessionId".to_string(),
-                data: None,
             })?;
 
         let mut sessions = self.sessions.lock().await;
@@ -431,7 +418,6 @@ impl AcpServer {
             Err(RpcError {
                 code: SESSION_NOT_FOUND,
                 message: format!("Session not found: {session_id}"),
-                data: None,
             })
         }
     }
@@ -495,7 +481,6 @@ impl AcpServer {
 struct RpcError {
     code: i32,
     message: String,
-    data: Option<Value>,
 }
 
 type RpcResult = std::result::Result<Value, RpcError>;

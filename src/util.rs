@@ -4,7 +4,7 @@
 
 /// Install the default Rustls TLS backend at process startup.
 #[cfg(not(test))]
-pub(crate) fn install_default_tls_provider() {
+pub fn install_default_tls_provider() {
     // Prevents rustls from failing to select a process-level provider when
     // both aws-lc-rs and ring features are available (or neither is selected).
     if let Err(e) = rustls::crypto::ring::default_provider().install_default() {
@@ -13,7 +13,7 @@ pub(crate) fn install_default_tls_provider() {
 }
 
 #[cfg(test)]
-pub(crate) fn install_default_tls_provider() {}
+pub fn install_default_tls_provider() {}
 
 /// Truncate a string to at most `max_chars` characters, appending "..." if truncated.
 ///
@@ -71,17 +71,6 @@ pub fn floor_utf8_char_boundary(s: &str, index: usize) -> usize {
     }
     i
 }
-
-/// Allowed serial device path prefixes shared across hardware transports.
-const ALLOWED_SERIAL_PATH_PREFIXES: &[&str] = &[
-    "/dev/ttyACM",
-    "/dev/ttyUSB",
-    "/dev/tty.usbmodem",
-    "/dev/cu.usbmodem",
-    "/dev/tty.usbserial",
-    "/dev/cu.usbserial",
-    "COM",
-];
 
 /// Validate serial device path against per-platform rules.
 pub fn is_serial_path_allowed(path: &str) -> bool {
@@ -180,13 +169,6 @@ fn is_unicode_format_control(c: char) -> bool {
         | '\u{1BCA0}'..='\u{1BCA3}' // Shorthand format controls
         | '\u{1D173}'..='\u{1D17A}' // Musical symbol format controls
     )
-}
-
-/// Utility enum for handling optional values.
-enum MaybeSet<T> {
-    Set(T),
-    Unset,
-    Null,
 }
 
 #[cfg(test)]
@@ -361,9 +343,7 @@ pub enum CliCategory {
     VersionControl,
     Language,
     PackageManager,
-    Container,
     Build,
-    Cloud,
 }
 
 impl std::fmt::Display for CliCategory {
@@ -372,9 +352,7 @@ impl std::fmt::Display for CliCategory {
             Self::VersionControl => write!(f, "Version Control"),
             Self::Language => write!(f, "Language"),
             Self::PackageManager => write!(f, "Package Manager"),
-            Self::Container => write!(f, "Container"),
             Self::Build => write!(f, "Build"),
-            Self::Cloud => write!(f, "Cloud"),
         }
     }
 }
@@ -579,8 +557,6 @@ mod cli_discovery_tests {
         assert_eq!(CliCategory::VersionControl.to_string(), "Version Control");
         assert_eq!(CliCategory::Language.to_string(), "Language");
         assert_eq!(CliCategory::PackageManager.to_string(), "Package Manager");
-        assert_eq!(CliCategory::Container.to_string(), "Container");
         assert_eq!(CliCategory::Build.to_string(), "Build");
-        assert_eq!(CliCategory::Cloud.to_string(), "Cloud");
     }
 }

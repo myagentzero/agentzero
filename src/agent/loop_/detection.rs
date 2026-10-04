@@ -60,7 +60,6 @@ struct CallRecord {
     tool_name: String,
     args_sig: String,
     result_hash: u64,
-    success: bool,
 }
 
 // ─── Detector ────────────────────────────────────────────────────────────────
@@ -104,7 +103,6 @@ impl LoopDetector {
             tool_name: tool_name.to_owned(),
             args_sig: args_sig.to_owned(),
             result_hash,
-            success,
         });
 
         if success {

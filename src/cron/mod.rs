@@ -11,16 +11,15 @@ pub mod scheduler;
 
 #[allow(unused_imports)]
 pub use schedule::{
-    format_schedule_parse_error, next_run_for_schedule, normalize_expression,
-    parse_at_timestamp_lenient, parse_schedule_json, schedule_at_parse_hint,
-    schedule_cron_expression, validate_schedule,
+    next_run_for_schedule, normalize_expression, parse_at_timestamp_lenient, parse_schedule_json,
+    schedule_at_parse_hint, schedule_cron_expression, validate_schedule,
 };
 #[allow(unused_imports)]
 pub use store::{
-    add_agent_job, due_jobs, get_job, list_jobs, list_runs, record_last_run, record_run,
-    remove_job, reschedule_after_run, update_job,
+    add_agent_job, due_jobs, get_job, list_jobs, record_last_run, record_run, remove_job,
+    reschedule_after_run, update_job,
 };
-pub use types::{CronJob, CronJobPatch, CronRun, DeliveryConfig, JobType, Schedule, SessionTarget};
+pub use types::{CronJob, CronJobPatch, DeliveryConfig, JobType, Schedule, SessionTarget};
 
 fn validate_shell_command(config: &Config, command: &str, approved: bool) -> Result<()> {
     let security = SecurityPolicy::from_config(&config.autonomy, &config.workspace_dir);
@@ -48,14 +47,6 @@ pub fn add_shell_job_with_approval(
 ) -> Result<CronJob> {
     validate_shell_command(config, command, approved)?;
     store::add_shell_job(config, name, schedule, command)
-}
-
-pub fn add_job(config: &Config, expression: &str, command: &str) -> Result<CronJob> {
-    let schedule = Schedule::Cron {
-        expr: expression.to_string(),
-        tz: None,
-    };
-    add_shell_job(config, None, schedule, command)
 }
 
 pub fn update_shell_job(config: &Config, job_id: &str, patch: CronJobPatch) -> Result<CronJob> {

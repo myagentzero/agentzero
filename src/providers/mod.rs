@@ -1008,45 +1008,6 @@ fn resolve_provider_credential(name: &str, credential_override: Option<&str>) ->
     None
 }
 
-/// Returns true if the provider can resolve any credential from the given override and/or
-/// its supported environment/cached sources.
-///
-/// This is intended for UX/status surfaces (e.g. dashboard) to reflect runtime-configured
-/// credentials without leaking secret values.
-pub(crate) fn provider_credential_available(name: &str, credential_override: Option<&str>) -> bool {
-    if is_qwen_oauth_alias(name) {
-        let override_value = credential_override
-            .map(str::trim)
-            .filter(|value| !value.is_empty());
-        if override_value.is_some_and(|value| !value.eq_ignore_ascii_case(QWEN_OAUTH_PLACEHOLDER)) {
-            return true;
-        }
-
-        if read_non_empty_env(QWEN_OAUTH_TOKEN_ENV).is_some() {
-            return true;
-        }
-
-        if read_qwen_oauth_cached_credentials()
-            .and_then(|credentials| credentials.access_token)
-            .is_some_and(|token| !token.trim().is_empty())
-        {
-            return true;
-        }
-
-        return read_non_empty_env(QWEN_OAUTH_REFRESH_TOKEN_ENV).is_some();
-    }
-
-    if matches!(name, "gemini" | "google" | "google-gemini") {
-        if resolve_provider_credential(name, credential_override).is_some() {
-            return true;
-        }
-
-        return gemini::GeminiProvider::has_any_auth();
-    }
-
-    resolve_provider_credential(name, credential_override).is_some()
-}
-
 fn parse_custom_provider_url(
     raw_url: &str,
     provider_label: &str,
@@ -2384,44 +2345,6 @@ mod tests {
         let context = resolve_qwen_oauth_context(Some(QWEN_OAUTH_PLACEHOLDER));
 
         assert!(context.credential.is_none());
-    }
-
-    #[test]
-    fn provider_credential_available_qwen_oauth_accepts_refresh_token_without_live_refresh() {
-        let _env_lock = env_lock();
-        let fake_home = format!(
-            "/tmp/agentzero-qwen-oauth-home-{}-available-refresh",
-            std::process::id()
-        );
-        let _home_guard = EnvGuard::set("HOME", Some(fake_home.as_str()));
-        let _token_guard = EnvGuard::set(QWEN_OAUTH_TOKEN_ENV, None);
-        let _refresh_guard = EnvGuard::set(QWEN_OAUTH_REFRESH_TOKEN_ENV, Some("refresh-token"));
-        let _resource_guard = EnvGuard::set(QWEN_OAUTH_RESOURCE_URL_ENV, None);
-        let _dashscope_guard = EnvGuard::set("DASHSCOPE_API_KEY", None);
-
-        assert!(provider_credential_available(
-            "qwen-code",
-            Some(QWEN_OAUTH_PLACEHOLDER)
-        ));
-    }
-
-    #[test]
-    fn provider_credential_available_qwen_oauth_rejects_placeholder_without_sources() {
-        let _env_lock = env_lock();
-        let fake_home = format!(
-            "/tmp/agentzero-qwen-oauth-home-{}-available-none",
-            std::process::id()
-        );
-        let _home_guard = EnvGuard::set("HOME", Some(fake_home.as_str()));
-        let _token_guard = EnvGuard::set(QWEN_OAUTH_TOKEN_ENV, None);
-        let _refresh_guard = EnvGuard::set(QWEN_OAUTH_REFRESH_TOKEN_ENV, None);
-        let _resource_guard = EnvGuard::set(QWEN_OAUTH_RESOURCE_URL_ENV, None);
-        let _dashscope_guard = EnvGuard::set("DASHSCOPE_API_KEY", None);
-
-        assert!(!provider_credential_available(
-            "qwen-code",
-            Some(QWEN_OAUTH_PLACEHOLDER)
-        ));
     }
 
     #[test]

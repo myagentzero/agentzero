@@ -344,10 +344,6 @@ pub struct Config {
     #[serde(default)]
     pub hooks: HooksConfig,
 
-    /// Plugin system configuration (discovery, loading, per-plugin config).
-    #[serde(default)]
-    pub plugins: PluginsConfig,
-
     /// Hardware configuration (wizard-driven physical world setup).
     #[serde(default)]
     pub hardware: HardwareConfig,
@@ -1152,9 +1148,6 @@ pub struct SkillsConfig {
     /// Autonomous skill creation from successful multi-step task executions.
     #[serde(default)]
     pub skill_creation: SkillCreationConfig,
-    /// Automatic skill self-improvement after successful skill usage.
-    #[serde(default)]
-    pub skill_improvement: SkillImprovementConfig,
 }
 
 /// Autonomous skill creation configuration (`[skills.skill_creation]` section).
@@ -1175,30 +1168,6 @@ impl Default for SkillCreationConfig {
             enabled: false,
             max_skills: 500,
             similarity_threshold: 0.85,
-        }
-    }
-}
-
-/// Skill self-improvement configuration (`[skills.auto_improve]` section).
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct SkillImprovementConfig {
-    /// Enable automatic skill improvement after successful skill usage.
-    #[serde(default = "default_true")]
-    pub enabled: bool,
-    /// Minimum interval (in seconds) between improvements for the same skill.
-    #[serde(default = "default_skill_improvement_cooldown")]
-    pub cooldown_secs: u64,
-}
-
-fn default_skill_improvement_cooldown() -> u64 {
-    3600
-}
-
-impl Default for SkillImprovementConfig {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            cooldown_secs: 3600,
         }
     }
 }
@@ -2806,15 +2775,48 @@ pub fn build_runtime_proxy_client_with_timeouts(
     timeout_secs: u64,
     connect_timeout_secs: u64,
 ) -> reqwest::Client {
-    let cache_key =
+    build_cached_runtime_proxy_client(service_key, timeout_secs, connect_timeout_secs, None)
+}
+
+/// Like [`build_runtime_proxy_client_with_timeouts`], with a default `User-Agent` header.
+pub fn build_runtime_proxy_client_with_user_agent(
+    service_key: &str,
+    timeout_secs: u64,
+    connect_timeout_secs: u64,
+    user_agent: &str,
+) -> reqwest::Client {
+    build_cached_runtime_proxy_client(
+        service_key,
+        timeout_secs,
+        connect_timeout_secs,
+        Some(user_agent),
+    )
+}
+
+fn build_cached_runtime_proxy_client(
+    service_key: &str,
+    timeout_secs: u64,
+    connect_timeout_secs: u64,
+    user_agent: Option<&str>,
+) -> reqwest::Client {
+    let mut cache_key =
         runtime_proxy_cache_key(service_key, Some(timeout_secs), Some(connect_timeout_secs));
+    if let Some(ua) = user_agent {
+        cache_key.push_str("|user_agent=");
+        cache_key.push_str(ua);
+    }
     if let Some(client) = runtime_proxy_cached_client(&cache_key) {
         return client;
     }
 
-    let builder = reqwest::Client::builder()
+    let mut builder = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(timeout_secs))
         .connect_timeout(std::time::Duration::from_secs(connect_timeout_secs));
+    if let Some(value) = user_agent.and_then(|ua| reqwest::header::HeaderValue::from_str(ua).ok()) {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(reqwest::header::USER_AGENT, value);
+        builder = builder.default_headers(headers);
+    }
     let builder = apply_runtime_proxy_to_builder(builder, service_key);
     let client = builder.build().unwrap_or_else(|error| {
         tracing::warn!(
@@ -3217,67 +3219,6 @@ pub struct BuiltinHooksConfig {
     pub session_memory: bool,
 }
 
-// ── Plugin system ─────────────────────────────────────────────────────────────
-
-/// Plugin system configuration (`[plugins]` section).
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct PluginsConfig {
-    /// Master switch — set to `false` to disable all plugin loading. Default: `true`.
-    #[serde(default = "default_plugins_enabled")]
-    pub enabled: bool,
-
-    /// Allowlist — if non-empty, only plugins with these IDs are loaded.
-    #[serde(default)]
-    pub allow: Vec<String>,
-
-    /// Denylist — plugins with these IDs are never loaded, even if in the allowlist.
-    #[serde(default)]
-    pub deny: Vec<String>,
-
-    /// Extra directories to scan for plugins (in addition to the standard locations).
-    #[serde(default)]
-    pub load_paths: Vec<String>,
-
-    /// Per-plugin configuration entries.
-    #[serde(default)]
-    pub entries: std::collections::HashMap<String, PluginEntryConfig>,
-}
-
-fn default_plugins_enabled() -> bool {
-    true
-}
-
-impl Default for PluginsConfig {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            allow: Vec::new(),
-            deny: Vec::new(),
-            load_paths: Vec::new(),
-            entries: std::collections::HashMap::new(),
-        }
-    }
-}
-
-/// Per-plugin configuration entry (`[plugins.entries.<id>]`).
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct PluginEntryConfig {
-    /// Override the plugin's enabled state.
-    pub enabled: Option<bool>,
-
-    /// Plugin-specific configuration table, passed to `PluginApi::plugin_config()`.
-    #[serde(default)]
-    pub config: serde_json::Value,
-}
-
-impl Default for PluginEntryConfig {
-    fn default() -> Self {
-        Self {
-            enabled: None,
-            config: serde_json::Value::Object(serde_json::Map::new()),
-        }
-    }
-}
 // ── Autonomy / Security ──────────────────────────────────────────
 
 /// Natural-language behavior for non-CLI approval-management commands.
@@ -4194,14 +4135,6 @@ pub enum ProgressMode {
     Off,
 }
 
-fn default_draft_update_interval_ms() -> u64 {
-    1000
-}
-
-fn default_ack_enabled() -> bool {
-    true
-}
-
 /// Group-chat reply trigger mode for channels that support mention gating.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -4510,42 +4443,6 @@ impl ChannelConfig for WebhookConfig {
     }
 }
 
-fn redact_url_userinfo_for_debug(raw: &str) -> String {
-    let fallback = || {
-        let Some(at) = raw.rfind('@') else {
-            return raw.to_string();
-        };
-        let left = &raw[..at];
-        if left.contains('/') || left.contains('?') || left.contains('#') {
-            return raw.to_string();
-        }
-        format!("[REDACTED]@{}", &raw[at + 1..])
-    };
-
-    let Some(scheme_idx) = raw.find("://") else {
-        return fallback();
-    };
-
-    let auth_start = scheme_idx + 3;
-    let rest = &raw[auth_start..];
-    let auth_end_rel = rest
-        .find(|c| c == '/' || c == '?' || c == '#')
-        .unwrap_or(rest.len());
-    let authority = &rest[..auth_end_rel];
-
-    let Some(at) = authority.rfind('@') else {
-        return raw.to_string();
-    };
-
-    let host = &authority[at + 1..];
-    let mut sanitized = String::with_capacity(raw.len());
-    sanitized.push_str(&raw[..auth_start]);
-    sanitized.push_str("[REDACTED]@");
-    sanitized.push_str(host);
-    sanitized.push_str(&rest[auth_end_rel..]);
-    sanitized
-}
-
 /// IRC channel configuration.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct IrcConfig {
@@ -4600,25 +4497,13 @@ pub struct SecurityConfig {
     #[serde(default)]
     pub resources: ResourceLimitsConfig,
 
-    /// Audit logging configuration
-    #[serde(default)]
-    pub audit: AuditConfig,
-
     /// OTP gating configuration for sensitive actions/domains.
     #[serde(default)]
     pub otp: OtpConfig,
 
-    /// Custom security role definitions used for user-level tool authorization.
-    #[serde(default)]
-    pub roles: Vec<SecurityRoleConfig>,
-
     /// Emergency-stop state machine configuration.
     #[serde(default)]
     pub estop: EstopConfig,
-
-    /// Syscall anomaly detection profile for daemon shell/process execution.
-    #[serde(default)]
-    pub syscall_anomaly: SyscallAnomalyConfig,
 
     /// Lightweight statistical filter for adversarial suffixes (opt-in).
     #[serde(default)]
@@ -4654,11 +4539,8 @@ impl Default for SecurityConfig {
         Self {
             sandbox: SandboxConfig::default(),
             resources: ResourceLimitsConfig::default(),
-            audit: AuditConfig::default(),
             otp: OtpConfig::default(),
-            roles: Vec::default(),
             estop: EstopConfig::default(),
-            syscall_anomaly: SyscallAnomalyConfig::default(),
             perplexity_filter: PerplexityFilterConfig::default(),
             outbound_leak_guard: OutboundLeakGuardConfig::default(),
             canary_tokens: true,
@@ -4900,42 +4782,6 @@ pub struct OtpConfig {
     pub challenge_max_attempts: u8,
 }
 
-/// Custom role definition for user-level authorization.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
-#[serde(deny_unknown_fields)]
-pub struct SecurityRoleConfig {
-    /// Stable role name used by user records.
-    pub name: String,
-
-    /// Optional human-readable description.
-    #[serde(default)]
-    pub description: String,
-
-    /// Explicit allowlist of tools for this role.
-    #[serde(default)]
-    pub allowed_tools: Vec<String>,
-
-    /// Explicit denylist of tools for this role.
-    #[serde(default)]
-    pub denied_tools: Vec<String>,
-
-    /// Tool names requiring OTP for this role.
-    #[serde(default)]
-    pub totp_gated: Vec<String>,
-
-    /// Optional parent role name used for inheritance.
-    #[serde(default)]
-    pub inherits: Option<String>,
-
-    /// Role-scoped domain patterns requiring OTP.
-    #[serde(default)]
-    pub gated_domains: Vec<String>,
-
-    /// Role-scoped domain categories requiring OTP.
-    #[serde(default)]
-    pub gated_domain_categories: Vec<String>,
-}
-
 fn default_otp_enabled() -> bool {
     true
 }
@@ -5009,144 +4855,6 @@ impl Default for EstopConfig {
             enabled: false,
             state_file: default_estop_state_file(),
             require_otp_to_resume: true,
-        }
-    }
-}
-
-/// Syscall anomaly detection configuration.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct SyscallAnomalyConfig {
-    /// Enable syscall anomaly detection.
-    #[serde(default = "default_true")]
-    pub enabled: bool,
-
-    /// Treat denied syscall lines as anomalies even when syscall is in baseline.
-    #[serde(default)]
-    pub strict_mode: bool,
-
-    /// Emit anomaly alerts when a syscall appears outside the expected baseline.
-    #[serde(default = "default_true")]
-    pub alert_on_unknown_syscall: bool,
-
-    /// Allowed denied-syscall events per rolling minute before triggering an alert.
-    #[serde(default = "default_syscall_anomaly_max_denied_events_per_minute")]
-    pub max_denied_events_per_minute: u32,
-
-    /// Allowed total syscall telemetry events per rolling minute before triggering an alert.
-    #[serde(default = "default_syscall_anomaly_max_total_events_per_minute")]
-    pub max_total_events_per_minute: u32,
-
-    /// Maximum anomaly alerts emitted per rolling minute (global guardrail).
-    #[serde(default = "default_syscall_anomaly_max_alerts_per_minute")]
-    pub max_alerts_per_minute: u32,
-
-    /// Cooldown between identical anomaly alerts (seconds).
-    #[serde(default = "default_syscall_anomaly_alert_cooldown_secs")]
-    pub alert_cooldown_secs: u64,
-
-    /// Path to syscall anomaly log file (relative to ~/.agentzero unless absolute).
-    #[serde(default = "default_syscall_anomaly_log_path")]
-    pub log_path: String,
-
-    /// Expected syscall baseline. Unknown syscall names trigger anomaly when enabled.
-    #[serde(default = "default_syscall_anomaly_baseline_syscalls")]
-    pub baseline_syscalls: Vec<String>,
-}
-
-fn default_syscall_anomaly_max_denied_events_per_minute() -> u32 {
-    5
-}
-
-fn default_syscall_anomaly_max_total_events_per_minute() -> u32 {
-    120
-}
-
-fn default_syscall_anomaly_max_alerts_per_minute() -> u32 {
-    30
-}
-
-fn default_syscall_anomaly_alert_cooldown_secs() -> u64 {
-    20
-}
-
-fn default_syscall_anomaly_log_path() -> String {
-    "syscall-anomalies.log".to_string()
-}
-
-fn default_syscall_anomaly_baseline_syscalls() -> Vec<String> {
-    vec![
-        "read".to_string(),
-        "write".to_string(),
-        "open".to_string(),
-        "openat".to_string(),
-        "close".to_string(),
-        "stat".to_string(),
-        "fstat".to_string(),
-        "newfstatat".to_string(),
-        "lseek".to_string(),
-        "mmap".to_string(),
-        "mprotect".to_string(),
-        "munmap".to_string(),
-        "brk".to_string(),
-        "rt_sigaction".to_string(),
-        "rt_sigprocmask".to_string(),
-        "ioctl".to_string(),
-        "fcntl".to_string(),
-        "access".to_string(),
-        "pipe2".to_string(),
-        "dup".to_string(),
-        "dup2".to_string(),
-        "dup3".to_string(),
-        "epoll_create1".to_string(),
-        "epoll_ctl".to_string(),
-        "epoll_wait".to_string(),
-        "poll".to_string(),
-        "ppoll".to_string(),
-        "select".to_string(),
-        "futex".to_string(),
-        "clock_gettime".to_string(),
-        "nanosleep".to_string(),
-        "getpid".to_string(),
-        "gettid".to_string(),
-        "set_tid_address".to_string(),
-        "set_robust_list".to_string(),
-        "clone".to_string(),
-        "clone3".to_string(),
-        "fork".to_string(),
-        "execve".to_string(),
-        "wait4".to_string(),
-        "exit".to_string(),
-        "exit_group".to_string(),
-        "socket".to_string(),
-        "connect".to_string(),
-        "accept".to_string(),
-        "accept4".to_string(),
-        "listen".to_string(),
-        "sendto".to_string(),
-        "recvfrom".to_string(),
-        "sendmsg".to_string(),
-        "recvmsg".to_string(),
-        "getsockname".to_string(),
-        "getpeername".to_string(),
-        "setsockopt".to_string(),
-        "getsockopt".to_string(),
-        "getrandom".to_string(),
-        "statx".to_string(),
-    ]
-}
-
-impl Default for SyscallAnomalyConfig {
-    fn default() -> Self {
-        Self {
-            enabled: default_true(),
-            strict_mode: false,
-            alert_on_unknown_syscall: default_true(),
-            max_denied_events_per_minute: default_syscall_anomaly_max_denied_events_per_minute(),
-            max_total_events_per_minute: default_syscall_anomaly_max_total_events_per_minute(),
-            max_alerts_per_minute: default_syscall_anomaly_max_alerts_per_minute(),
-            alert_cooldown_secs: default_syscall_anomaly_alert_cooldown_secs(),
-            log_path: default_syscall_anomaly_log_path(),
-            baseline_syscalls: default_syscall_anomaly_baseline_syscalls(),
         }
     }
 }
@@ -5239,49 +4947,6 @@ impl Default for ResourceLimitsConfig {
             max_cpu_time_seconds: default_max_cpu_time_seconds(),
             max_subprocesses: default_max_subprocesses(),
             memory_monitoring: default_memory_monitoring_enabled(),
-        }
-    }
-}
-
-/// Audit logging configuration
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct AuditConfig {
-    /// Enable audit logging
-    #[serde(default = "default_audit_enabled")]
-    pub enabled: bool,
-
-    /// Path to audit log file (relative to agentzero dir)
-    #[serde(default = "default_audit_log_path")]
-    pub log_path: String,
-
-    /// Maximum log size in MB before rotation
-    #[serde(default = "default_audit_max_size_mb")]
-    pub max_size_mb: u32,
-
-    /// Sign events with HMAC for tamper evidence
-    #[serde(default)]
-    pub sign_events: bool,
-}
-
-fn default_audit_enabled() -> bool {
-    true
-}
-
-fn default_audit_log_path() -> String {
-    "audit.log".to_string()
-}
-
-fn default_audit_max_size_mb() -> u32 {
-    100
-}
-
-impl Default for AuditConfig {
-    fn default() -> Self {
-        Self {
-            enabled: default_audit_enabled(),
-            log_path: default_audit_log_path(),
-            max_size_mb: default_audit_max_size_mb(),
-            sign_events: false,
         }
     }
 }
@@ -5574,7 +5239,6 @@ impl Default for Config {
             agents: HashMap::new(),
             coordination: CoordinationConfig::default(),
             hooks: HooksConfig::default(),
-            plugins: PluginsConfig::default(),
             hardware: HardwareConfig::default(),
             query_classification: QueryClassificationConfig::default(),
             transcription: TranscriptionConfig::default(),
@@ -7061,150 +6725,8 @@ impl Config {
                 anyhow::bail!("agent.denied_tools[{i}] contains invalid characters: {normalized}");
             }
         }
-        let built_in_roles = ["owner", "admin", "operator", "viewer", "guest"];
-        let mut custom_role_names = std::collections::HashSet::new();
-        for (i, role) in self.security.roles.iter().enumerate() {
-            let name = role.name.trim();
-            if name.is_empty() {
-                anyhow::bail!("security.roles[{i}].name must not be empty");
-            }
-            if !name
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
-            {
-                anyhow::bail!("security.roles[{i}].name contains invalid characters: {name}");
-            }
-            let normalized_name = name.to_ascii_lowercase();
-            if built_in_roles
-                .iter()
-                .any(|built_in| built_in == &normalized_name.as_str())
-            {
-                anyhow::bail!(
-                    "security.roles[{i}].name conflicts with built-in role: {normalized_name}"
-                );
-            }
-            if !custom_role_names.insert(normalized_name.clone()) {
-                anyhow::bail!("security.roles contains duplicate role: {normalized_name}");
-            }
-
-            for (tool_idx, tool_name) in role.allowed_tools.iter().enumerate() {
-                let normalized = tool_name.trim();
-                if normalized.is_empty() {
-                    anyhow::bail!(
-                        "security.roles[{i}].allowed_tools[{tool_idx}] must not be empty"
-                    );
-                }
-                if !normalized
-                    .chars()
-                    .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '*')
-                {
-                    anyhow::bail!(
-                        "security.roles[{i}].allowed_tools[{tool_idx}] contains invalid characters: {normalized}"
-                    );
-                }
-            }
-            for (tool_idx, tool_name) in role.denied_tools.iter().enumerate() {
-                let normalized = tool_name.trim();
-                if normalized.is_empty() {
-                    anyhow::bail!("security.roles[{i}].denied_tools[{tool_idx}] must not be empty");
-                }
-                if !normalized
-                    .chars()
-                    .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '*')
-                {
-                    anyhow::bail!(
-                        "security.roles[{i}].denied_tools[{tool_idx}] contains invalid characters: {normalized}"
-                    );
-                }
-            }
-            for (tool_idx, tool_name) in role.totp_gated.iter().enumerate() {
-                let normalized = tool_name.trim();
-                if normalized.is_empty() {
-                    anyhow::bail!("security.roles[{i}].totp_gated[{tool_idx}] must not be empty");
-                }
-                if !normalized
-                    .chars()
-                    .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '*')
-                {
-                    anyhow::bail!(
-                        "security.roles[{i}].totp_gated[{tool_idx}] contains invalid characters: {normalized}"
-                    );
-                }
-            }
-            DomainMatcher::new(&role.gated_domains, &role.gated_domain_categories)
-                .with_context(|| format!("Invalid security.roles[{i}] domain settings"))?;
-            if let Some(parent) = role.inherits.as_deref() {
-                let normalized_parent = parent.trim().to_ascii_lowercase();
-                if normalized_parent.is_empty() {
-                    anyhow::bail!("security.roles[{i}].inherits must not be empty");
-                }
-                if normalized_parent == normalized_name {
-                    anyhow::bail!("security.roles[{i}].inherits must not reference itself");
-                }
-            }
-        }
-        for (i, role) in self.security.roles.iter().enumerate() {
-            if let Some(parent) = role.inherits.as_deref() {
-                let normalized_parent = parent.trim().to_ascii_lowercase();
-                let built_in_exists = built_in_roles
-                    .iter()
-                    .any(|built_in| built_in == &normalized_parent.as_str());
-                let custom_exists = custom_role_names.contains(&normalized_parent);
-                if !built_in_exists && !custom_exists {
-                    anyhow::bail!(
-                        "security.roles[{i}].inherits references unknown role: {normalized_parent}"
-                    );
-                }
-            }
-        }
         if self.security.estop.state_file.trim().is_empty() {
             anyhow::bail!("security.estop.state_file must not be empty");
-        }
-        if self.security.syscall_anomaly.max_denied_events_per_minute == 0 {
-            anyhow::bail!(
-                "security.syscall_anomaly.max_denied_events_per_minute must be greater than 0"
-            );
-        }
-        if self.security.syscall_anomaly.max_total_events_per_minute == 0 {
-            anyhow::bail!(
-                "security.syscall_anomaly.max_total_events_per_minute must be greater than 0"
-            );
-        }
-        if self.security.syscall_anomaly.max_denied_events_per_minute
-            > self.security.syscall_anomaly.max_total_events_per_minute
-        {
-            anyhow::bail!(
-                "security.syscall_anomaly.max_denied_events_per_minute must be less than or equal to security.syscall_anomaly.max_total_events_per_minute"
-            );
-        }
-        if self.security.syscall_anomaly.max_alerts_per_minute == 0 {
-            anyhow::bail!("security.syscall_anomaly.max_alerts_per_minute must be greater than 0");
-        }
-        if self.security.syscall_anomaly.alert_cooldown_secs == 0 {
-            anyhow::bail!("security.syscall_anomaly.alert_cooldown_secs must be greater than 0");
-        }
-        if self.security.syscall_anomaly.log_path.trim().is_empty() {
-            anyhow::bail!("security.syscall_anomaly.log_path must not be empty");
-        }
-        for (i, syscall_name) in self
-            .security
-            .syscall_anomaly
-            .baseline_syscalls
-            .iter()
-            .enumerate()
-        {
-            let normalized = syscall_name.trim();
-            if normalized.is_empty() {
-                anyhow::bail!("security.syscall_anomaly.baseline_syscalls[{i}] must not be empty");
-            }
-            if !normalized
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '#')
-            {
-                anyhow::bail!(
-                    "security.syscall_anomaly.baseline_syscalls[{i}] contains invalid characters: {normalized}"
-                );
-            }
         }
         if self.security.perplexity_filter.perplexity_threshold <= 1.0 {
             anyhow::bail!(
@@ -8770,7 +8292,6 @@ default_temperature = 0.7
             reliability: ReliabilityConfig::default(),
             coordination: CoordinationConfig::default(),
             skills: SkillsConfig::default(),
-            plugins: PluginsConfig::default(),
             pipeline: PipelineConfig::default(),
             model_routes: Vec::new(),
             embedding_routes: Vec::new(),
@@ -9095,7 +8616,6 @@ compact_context = true
             reliability: ReliabilityConfig::default(),
             coordination: CoordinationConfig::default(),
             skills: SkillsConfig::default(),
-            plugins: PluginsConfig::default(),
             pipeline: PipelineConfig::default(),
             model_routes: Vec::new(),
             embedding_routes: Vec::new(),
@@ -12083,12 +11603,8 @@ default_temperature = 0.7
         );
         assert_eq!(parsed.security.otp.challenge_timeout_secs, 120);
         assert_eq!(parsed.security.otp.challenge_max_attempts, 3);
-        assert!(parsed.security.roles.is_empty());
         assert!(!parsed.security.estop.enabled);
         assert!(parsed.security.estop.require_otp_to_resume);
-        assert!(parsed.security.syscall_anomaly.enabled);
-        assert!(parsed.security.syscall_anomaly.alert_on_unknown_syscall);
-        assert!(!parsed.security.syscall_anomaly.baseline_syscalls.is_empty());
         assert!(parsed.security.url_access.block_private_ip);
         assert!(parsed.security.url_access.allow_cidrs.is_empty());
         assert!(parsed.security.url_access.allow_domains.is_empty());
@@ -12137,31 +11653,10 @@ challenge_delivery = "thread"
 challenge_timeout_secs = 180
 challenge_max_attempts = 4
 
-[[security.roles]]
-name = "developer"
-description = "Developer role"
-allowed_tools = ["shell", "file_read", "file_write"]
-denied_tools = ["memory_forget"]
-totp_gated = ["shell", "file_write"]
-inherits = "operator"
-gated_domains = ["*.chase.com"]
-gated_domain_categories = ["banking"]
-
 [security.estop]
 enabled = true
 state_file = "~/.agentzero/estop-state.json"
 require_otp_to_resume = true
-
-[security.syscall_anomaly]
-enabled = true
-strict_mode = true
-alert_on_unknown_syscall = true
-max_denied_events_per_minute = 3
-max_total_events_per_minute = 60
-max_alerts_per_minute = 10
-alert_cooldown_secs = 15
-log_path = "syscall-anomalies.log"
-baseline_syscalls = ["read", "write", "openat", "close"]
 
 [security.perplexity_filter]
 enable_perplexity_filter = true
@@ -12180,18 +11675,6 @@ sensitivity = 0.9
 
         assert!(parsed.security.otp.enabled);
         assert!(parsed.security.estop.enabled);
-        assert!(parsed.security.syscall_anomaly.strict_mode);
-        assert_eq!(
-            parsed.security.syscall_anomaly.max_denied_events_per_minute,
-            3
-        );
-        assert_eq!(
-            parsed.security.syscall_anomaly.max_total_events_per_minute,
-            60
-        );
-        assert_eq!(parsed.security.syscall_anomaly.max_alerts_per_minute, 10);
-        assert_eq!(parsed.security.syscall_anomaly.alert_cooldown_secs, 15);
-        assert_eq!(parsed.security.syscall_anomaly.baseline_syscalls.len(), 4);
         assert!(parsed.security.perplexity_filter.enable_perplexity_filter);
         assert_eq!(parsed.security.perplexity_filter.perplexity_threshold, 16.5);
         assert_eq!(parsed.security.perplexity_filter.suffix_window_chars, 72);
@@ -12221,8 +11704,6 @@ sensitivity = 0.9
         );
         assert_eq!(parsed.security.otp.challenge_timeout_secs, 180);
         assert_eq!(parsed.security.otp.challenge_max_attempts, 4);
-        assert_eq!(parsed.security.roles.len(), 1);
-        assert_eq!(parsed.security.roles[0].name, "developer");
         parsed.validate().unwrap();
     }
 
@@ -12474,86 +11955,6 @@ sensitivity = 0.9
     }
 
     #[test]
-    async fn security_validation_rejects_unknown_role_parent() {
-        let mut config = Config::default();
-        config.security.roles = vec![SecurityRoleConfig {
-            name: "developer".to_string(),
-            inherits: Some("missing-parent".to_string()),
-            ..SecurityRoleConfig::default()
-        }];
-
-        let err = config
-            .validate()
-            .expect_err("expected unknown role parent validation failure");
-        assert!(err.to_string().contains("inherits references unknown role"));
-    }
-
-    #[test]
-    async fn security_validation_rejects_duplicate_role_name() {
-        let mut config = Config::default();
-        config.security.roles = vec![
-            SecurityRoleConfig {
-                name: "developer".to_string(),
-                ..SecurityRoleConfig::default()
-            },
-            SecurityRoleConfig {
-                name: "Developer".to_string(),
-                ..SecurityRoleConfig::default()
-            },
-        ];
-
-        let err = config
-            .validate()
-            .expect_err("expected duplicate role validation failure");
-        assert!(err.to_string().contains("duplicate role"));
-    }
-
-    #[test]
-    async fn security_validation_rejects_zero_syscall_threshold() {
-        let mut config = Config::default();
-        config.security.syscall_anomaly.max_denied_events_per_minute = 0;
-
-        let err = config
-            .validate()
-            .expect_err("expected syscall threshold validation failure");
-        assert!(err.to_string().contains("max_denied_events_per_minute"));
-    }
-
-    #[test]
-    async fn security_validation_rejects_invalid_syscall_baseline_name() {
-        let mut config = Config::default();
-        config.security.syscall_anomaly.baseline_syscalls =
-            vec!["openat".into(), "bad name".into()];
-
-        let err = config
-            .validate()
-            .expect_err("expected syscall baseline name validation failure");
-        assert!(err.to_string().contains("baseline_syscalls"));
-    }
-
-    #[test]
-    async fn security_validation_rejects_zero_syscall_alert_budget() {
-        let mut config = Config::default();
-        config.security.syscall_anomaly.max_alerts_per_minute = 0;
-
-        let err = config
-            .validate()
-            .expect_err("expected syscall alert budget validation failure");
-        assert!(err.to_string().contains("max_alerts_per_minute"));
-    }
-
-    #[test]
-    async fn security_validation_rejects_zero_syscall_cooldown() {
-        let mut config = Config::default();
-        config.security.syscall_anomaly.alert_cooldown_secs = 0;
-
-        let err = config
-            .validate()
-            .expect_err("expected syscall cooldown validation failure");
-        assert!(err.to_string().contains("alert_cooldown_secs"));
-    }
-
-    #[test]
     async fn heartbeat_validation_rejects_zero_max_tasks_per_tick() {
         let mut config = Config::default();
         config.heartbeat.max_tasks_per_tick = 0;
@@ -12564,21 +11965,6 @@ sensitivity = 0.9
         assert!(
             err.to_string()
                 .contains("heartbeat.max_tasks_per_tick must be greater than 0")
-        );
-    }
-
-    #[test]
-    async fn security_validation_rejects_denied_threshold_above_total_threshold() {
-        let mut config = Config::default();
-        config.security.syscall_anomaly.max_denied_events_per_minute = 10;
-        config.security.syscall_anomaly.max_total_events_per_minute = 5;
-
-        let err = config
-            .validate()
-            .expect_err("expected syscall threshold ordering validation failure");
-        assert!(
-            err.to_string()
-                .contains("max_denied_events_per_minute must be less than or equal")
         );
     }
 

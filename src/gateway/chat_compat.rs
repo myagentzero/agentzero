@@ -284,20 +284,7 @@ pub struct OaiChatRequest {
     #[serde(default)]
     pub model: Option<String>,
     #[serde(default)]
-    pub temperature: Option<f64>,
-    #[serde(default)]
     pub stream: Option<bool>,
-    // Accept and ignore other OpenAI params for compat
-    #[serde(default)]
-    pub max_tokens: Option<u32>,
-    #[serde(default)]
-    pub top_p: Option<f64>,
-    #[serde(default)]
-    pub frequency_penalty: Option<f64>,
-    #[serde(default)]
-    pub presence_penalty: Option<f64>,
-    #[serde(default)]
-    pub stop: Option<serde_json::Value>,
     #[serde(default)]
     pub user: Option<String>,
 }
@@ -812,9 +799,7 @@ mod tests {
         let req: OaiChatRequest = serde_json::from_str(json).unwrap();
         assert_eq!(req.messages.len(), 1);
         assert_eq!(req.model.as_deref(), Some("claude-sonnet-4-6"));
-        assert_eq!(req.temperature, Some(0.5));
         assert_eq!(req.stream, Some(false));
-        assert_eq!(req.max_tokens, Some(1000));
     }
 
     #[test]

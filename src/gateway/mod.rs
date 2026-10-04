@@ -79,13 +79,6 @@ fn webhook_memory_key() -> String {
     format!("webhook_msg_{}", Uuid::new_v4())
 }
 
-fn gateway_message_session_id(msg: &crate::channels::traits::ChannelMessage) -> String {
-    match &msg.thread_ts {
-        Some(thread_id) => format!("{}_{}_{}", msg.channel, thread_id, msg.sender),
-        None => format!("{}_{}", msg.channel, msg.sender),
-    }
-}
-
 fn hash_webhook_secret(value: &str) -> String {
     use sha2::{Digest, Sha256};
 

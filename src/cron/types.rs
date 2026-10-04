@@ -124,17 +124,6 @@ pub struct CronJob {
     pub last_output: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CronRun {
-    pub id: i64,
-    pub job_id: String,
-    pub started_at: DateTime<Utc>,
-    pub finished_at: DateTime<Utc>,
-    pub status: String,
-    pub output: Option<String>,
-    pub duration_ms: Option<i64>,
-}
-
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CronJobPatch {
     pub schedule: Option<Schedule>,

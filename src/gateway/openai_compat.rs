@@ -10,7 +10,7 @@ use axum::{
     http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Json},
 };
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::net::SocketAddr;
 
 /// Maximum body size for chat completions requests (512KB).
@@ -43,82 +43,6 @@ fn evaluate_openai_gateway_auth(
 // ══════════════════════════════════════════════════════════════════════════════
 // REQUEST / RESPONSE TYPES
 // ══════════════════════════════════════════════════════════════════════════════
-
-#[derive(Debug, Deserialize)]
-pub struct ChatCompletionsRequest {
-    /// Model ID (e.g. "anthropic/claude-sonnet-4"). Falls back to gateway default.
-    #[serde(default)]
-    pub model: Option<String>,
-    /// Conversation messages.
-    pub messages: Vec<ChatCompletionsMessage>,
-    /// Sampling temperature. Falls back to gateway default.
-    #[serde(default)]
-    pub temperature: Option<f64>,
-    /// Whether to stream the response as SSE events.
-    #[serde(default)]
-    pub stream: Option<bool>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct ChatCompletionsMessage {
-    pub role: String,
-    pub content: String,
-}
-
-#[derive(Debug, Serialize)]
-pub struct ChatCompletionsResponse {
-    pub id: String,
-    pub object: &'static str,
-    pub created: u64,
-    pub model: String,
-    pub choices: Vec<ChatCompletionsChoice>,
-    pub usage: ChatCompletionsUsage,
-}
-
-#[derive(Debug, Serialize)]
-pub struct ChatCompletionsChoice {
-    pub index: u32,
-    pub message: ChatCompletionsResponseMessage,
-    pub finish_reason: &'static str,
-}
-
-#[derive(Debug, Serialize)]
-pub struct ChatCompletionsResponseMessage {
-    pub role: &'static str,
-    pub content: String,
-}
-
-#[derive(Debug, Serialize)]
-pub struct ChatCompletionsUsage {
-    pub prompt_tokens: u32,
-    pub completion_tokens: u32,
-    pub total_tokens: u32,
-}
-
-/// SSE streaming chunk format.
-#[derive(Debug, Serialize)]
-struct ChatCompletionsChunk {
-    id: String,
-    object: &'static str,
-    created: u64,
-    model: String,
-    choices: Vec<ChunkChoice>,
-}
-
-#[derive(Debug, Serialize)]
-struct ChunkChoice {
-    index: u32,
-    delta: ChunkDelta,
-    finish_reason: Option<&'static str>,
-}
-
-#[derive(Debug, Serialize)]
-struct ChunkDelta {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    role: Option<&'static str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    content: Option<String>,
-}
 
 #[derive(Debug, Serialize)]
 pub struct ModelsResponse {
@@ -219,64 +143,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn chat_completions_request_deserializes_minimal() {
-        let json = r#"{"messages": [{"role": "user", "content": "Hello"}]}"#;
-        let req: ChatCompletionsRequest = serde_json::from_str(json).unwrap();
-        assert!(req.model.is_none());
-        assert!(req.temperature.is_none());
-        assert!(req.stream.is_none());
-        assert_eq!(req.messages.len(), 1);
-        assert_eq!(req.messages[0].role, "user");
-        assert_eq!(req.messages[0].content, "Hello");
-    }
-
-    #[test]
-    fn chat_completions_request_deserializes_full() {
-        let json = r#"{
-            "model": "anthropic/claude-sonnet-4",
-            "messages": [
-                {"role": "system", "content": "You are helpful"},
-                {"role": "user", "content": "Hi"}
-            ],
-            "temperature": 0.5,
-            "stream": true
-        }"#;
-        let req: ChatCompletionsRequest = serde_json::from_str(json).unwrap();
-        assert_eq!(req.model.as_deref(), Some("anthropic/claude-sonnet-4"));
-        assert_eq!(req.temperature, Some(0.5));
-        assert_eq!(req.stream, Some(true));
-        assert_eq!(req.messages.len(), 2);
-    }
-
-    #[test]
-    fn chat_completions_response_serializes() {
-        let response = ChatCompletionsResponse {
-            id: "chatcmpl-test".to_string(),
-            object: "chat.completion",
-            created: 1_234_567_890,
-            model: "test-model".to_string(),
-            choices: vec![ChatCompletionsChoice {
-                index: 0,
-                message: ChatCompletionsResponseMessage {
-                    role: "assistant",
-                    content: "Hello!".to_string(),
-                },
-                finish_reason: "stop",
-            }],
-            usage: ChatCompletionsUsage {
-                prompt_tokens: 10,
-                completion_tokens: 5,
-                total_tokens: 15,
-            },
-        };
-        let json = serde_json::to_string(&response).unwrap();
-        assert!(json.contains("chatcmpl-test"));
-        assert!(json.contains("chat.completion"));
-        assert!(json.contains("Hello!"));
-        assert!(json.contains("stop"));
-    }
-
-    #[test]
     fn models_response_serializes() {
         let response = ModelsResponse {
             object: "list",
@@ -291,49 +157,6 @@ mod tests {
         assert!(json.contains("\"object\":\"list\""));
         assert!(json.contains("anthropic/claude-sonnet-4"));
         assert!(json.contains("openai"));
-    }
-
-    #[test]
-    fn streaming_chunk_serializes() {
-        let chunk = ChatCompletionsChunk {
-            id: "chatcmpl-test".to_string(),
-            object: "chat.completion.chunk",
-            created: 1_234_567_890,
-            model: "test-model".to_string(),
-            choices: vec![ChunkChoice {
-                index: 0,
-                delta: ChunkDelta {
-                    role: Some("assistant"),
-                    content: Some("Hello".to_string()),
-                },
-                finish_reason: None,
-            }],
-        };
-        let json = serde_json::to_string(&chunk).unwrap();
-        assert!(json.contains("chat.completion.chunk"));
-        assert!(json.contains("Hello"));
-        assert!(json.contains("assistant"));
-    }
-
-    #[test]
-    fn streaming_chunk_omits_none_fields() {
-        let chunk = ChatCompletionsChunk {
-            id: "chatcmpl-test".to_string(),
-            object: "chat.completion.chunk",
-            created: 1_234_567_890,
-            model: "test-model".to_string(),
-            choices: vec![ChunkChoice {
-                index: 0,
-                delta: ChunkDelta {
-                    role: None,
-                    content: None,
-                },
-                finish_reason: None,
-            }],
-        };
-        let json = serde_json::to_string(&chunk).unwrap();
-        assert!(!json.contains("role"));
-        assert!(!json.contains("content"));
     }
 
     #[test]

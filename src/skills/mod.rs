@@ -6,8 +6,6 @@ use std::path::{Path, PathBuf};
 mod audit;
 #[cfg(feature = "skill-creation")]
 pub mod creator;
-#[cfg(feature = "skill-creation")]
-pub mod improver;
 pub mod usage_tracker;
 
 /// A skill is a user-defined or community-built capability.
@@ -93,11 +91,6 @@ fn warn_skipped_skill(path: &Path, summary: &str, allow_scripts: bool) {
             path.display(),
         );
     }
-}
-
-/// Load all skills from the workspace skills directory
-pub fn load_skills(workspace_dir: &Path) -> Vec<Skill> {
-    load_workspace_skills(workspace_dir, false)
 }
 
 /// Load skills using runtime config values (preferred at runtime).
@@ -310,15 +303,6 @@ fn render_skill_location(skill: &Skill, workspace_dir: &Path, prefer_relative: b
         }
     }
     location.display().to_string()
-}
-
-/// Build the "Available Skills" system prompt section with full skill instructions.
-pub fn skills_to_prompt(skills: &[Skill], workspace_dir: &Path) -> String {
-    skills_to_prompt_with_mode(
-        skills,
-        workspace_dir,
-        crate::config::SkillsPromptInjectionMode::Full,
-    )
 }
 
 /// Build the "Skills" system prompt section with configurable verbosity.
@@ -813,7 +797,7 @@ mod tests {
     #[test]
     fn load_empty_skills_dir() {
         let dir = tempfile::tempdir().unwrap();
-        let skills = load_skills(dir.path());
+        let skills = load_workspace_skills(dir.path(), false);
         assert!(skills.is_empty());
     }
 
@@ -841,7 +825,7 @@ command = "echo hello"
         )
         .unwrap();
 
-        let skills = load_skills(dir.path());
+        let skills = load_workspace_skills(dir.path(), false);
         assert_eq!(skills.len(), 1);
         assert_eq!(skills[0].name, "test-skill");
         assert_eq!(skills[0].tools.len(), 1);
@@ -861,7 +845,7 @@ command = "echo hello"
         )
         .unwrap();
 
-        let skills = load_skills(dir.path());
+        let skills = load_workspace_skills(dir.path(), false);
         assert_eq!(skills.len(), 1);
         assert_eq!(skills[0].name, "md-skill");
         assert!(skills[0].description.contains("cool things"));
@@ -880,7 +864,7 @@ command = "echo hello"
         )
         .unwrap();
 
-        let skills = load_skills(dir.path());
+        let skills = load_workspace_skills(dir.path(), false);
         assert_eq!(skills.len(), 1);
         assert_eq!(skills[0].name, "pdf");
         assert_eq!(skills[0].description, "Use this skill for PDFs");
@@ -902,7 +886,7 @@ command = "echo hello"
         )
         .unwrap();
 
-        let skills = load_skills(dir.path());
+        let skills = load_workspace_skills(dir.path(), false);
         assert_eq!(skills.len(), 1);
         assert_eq!(skills[0].name, "pdf");
         assert_eq!(skills[0].description, "Use this skill for PDFs");
@@ -911,7 +895,11 @@ command = "echo hello"
 
     #[test]
     fn skills_to_prompt_empty() {
-        let prompt = skills_to_prompt(&[], Path::new("/tmp"));
+        let prompt = skills_to_prompt_with_mode(
+            &[],
+            Path::new("/tmp"),
+            crate::config::SkillsPromptInjectionMode::Full,
+        );
         assert!(prompt.is_empty());
     }
 
@@ -925,7 +913,11 @@ command = "echo hello"
             prompts: vec!["Do the thing.".to_string()],
             location: None,
         }];
-        let prompt = skills_to_prompt(&skills, Path::new("/tmp"));
+        let prompt = skills_to_prompt_with_mode(
+            &skills,
+            Path::new("/tmp"),
+            crate::config::SkillsPromptInjectionMode::Full,
+        );
         assert!(prompt.contains("<available_skills>"));
         assert!(prompt.contains("<name>test</name>"));
         assert!(prompt.contains("<instruction>Do the thing.</instruction>"));
@@ -984,7 +976,7 @@ command = "echo hello"
     fn load_nonexistent_dir() {
         let dir = tempfile::tempdir().unwrap();
         let fake = dir.path().join("nonexistent");
-        let skills = load_skills(&fake);
+        let skills = load_workspace_skills(&fake, false);
         assert!(skills.is_empty());
     }
 
@@ -995,7 +987,7 @@ command = "echo hello"
         fs::create_dir_all(&skills_dir).unwrap();
         // A file, not a directory — should be ignored
         fs::write(skills_dir.join("not-a-skill.txt"), "hello").unwrap();
-        let skills = load_skills(dir.path());
+        let skills = load_workspace_skills(dir.path(), false);
         assert!(skills.is_empty());
     }
 
@@ -1006,7 +998,7 @@ command = "echo hello"
         let empty_skill = skills_dir.join("empty-skill");
         fs::create_dir_all(&empty_skill).unwrap();
         // Directory exists but no SKILL.toml or SKILL.md
-        let skills = load_skills(dir.path());
+        let skills = load_workspace_skills(dir.path(), false);
         assert!(skills.is_empty());
     }
 
@@ -1025,7 +1017,7 @@ command = "echo hello"
             .unwrap();
         }
 
-        let skills = load_skills(dir.path());
+        let skills = load_workspace_skills(dir.path(), false);
         assert_eq!(skills.len(), 3);
     }
 
@@ -1065,7 +1057,7 @@ command = "https://api.example.com/deploy"
         )
         .unwrap();
 
-        let skills = load_skills(dir.path());
+        let skills = load_workspace_skills(dir.path(), false);
         assert_eq!(skills.len(), 1);
         let s = &skills[0];
         assert_eq!(s.name, "multi-tool");
@@ -1093,7 +1085,7 @@ description = "Bare minimum"
         )
         .unwrap();
 
-        let skills = load_skills(dir.path());
+        let skills = load_workspace_skills(dir.path(), false);
         assert_eq!(skills.len(), 1);
         assert_eq!(skills[0].version, "0.1.0"); // default version
         assert!(skills[0].tools.is_empty());
@@ -1108,7 +1100,7 @@ description = "Bare minimum"
 
         fs::write(skill_dir.join("SKILL.toml"), "this is not valid toml {{{{").unwrap();
 
-        let skills = load_skills(dir.path());
+        let skills = load_workspace_skills(dir.path(), false);
         assert!(skills.is_empty()); // broken skill is skipped
     }
 
@@ -1121,7 +1113,7 @@ description = "Bare minimum"
 
         fs::write(skill_dir.join("SKILL.md"), "# Just a Heading\n").unwrap();
 
-        let skills = load_skills(dir.path());
+        let skills = load_workspace_skills(dir.path(), false);
         assert_eq!(skills.len(), 1);
         assert_eq!(skills[0].description, "No description");
     }
@@ -1142,7 +1134,11 @@ description = "Bare minimum"
             prompts: vec![],
             location: None,
         }];
-        let prompt = skills_to_prompt(&skills, Path::new("/tmp"));
+        let prompt = skills_to_prompt_with_mode(
+            &skills,
+            Path::new("/tmp"),
+            crate::config::SkillsPromptInjectionMode::Full,
+        );
         assert!(prompt.contains("weather"));
         // Skill tools are not registered as callable tools, so the prompt must
         // not present them as such and must give the model the command to run.
@@ -1166,7 +1162,11 @@ description = "Bare minimum"
             location: None,
         }];
 
-        let prompt = skills_to_prompt(&skills, Path::new("/tmp"));
+        let prompt = skills_to_prompt_with_mode(
+            &skills,
+            Path::new("/tmp"),
+            crate::config::SkillsPromptInjectionMode::Full,
+        );
         assert!(prompt.contains("<name>xml&lt;skill&gt;</name>"));
         assert!(prompt.contains("<description>A &amp; B</description>"));
         assert!(prompt.contains(
@@ -1245,7 +1245,7 @@ description = "Bare minimum"
         .unwrap();
         fs::write(skill_dir.join("SKILL.md"), "# From MD\nMD description\n").unwrap();
 
-        let skills = load_skills(dir.path());
+        let skills = load_workspace_skills(dir.path(), false);
         assert_eq!(skills.len(), 1);
         assert_eq!(skills[0].name, "from-toml"); // TOML takes priority
     }

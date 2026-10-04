@@ -49,9 +49,6 @@ pub struct Agent {
     model_name: String,
     temperature: f64,
     workspace_dir: std::path::PathBuf,
-    identity_config: crate::config::IdentityConfig,
-    skills: Vec<crate::skills::Skill>,
-    skills_prompt_mode: crate::config::SkillsPromptInjectionMode,
     auto_save: bool,
     session_id: Option<String>,
     turn_buffer: TurnBuffer,
@@ -62,10 +59,6 @@ pub struct Agent {
     research_config: ResearchPhaseConfig,
     /// IANA timezone override from `local_context.timezone`.
     timezone_override: Option<String>,
-    /// Autonomy config for shell policy instructions.
-    autonomy_config: crate::config::AutonomyConfig,
-    /// Hardware configuration for hardware tool access.
-    hardware_config: crate::config::HardwareConfig,
     /// Full Config for building prompts and other centralized uses.
     full_config: Arc<crate::config::Config>,
 }
@@ -81,9 +74,6 @@ pub struct AgentBuilder {
     model_name: Option<String>,
     temperature: Option<f64>,
     workspace_dir: Option<std::path::PathBuf>,
-    identity_config: Option<crate::config::IdentityConfig>,
-    skills: Option<Vec<crate::skills::Skill>>,
-    skills_prompt_mode: Option<crate::config::SkillsPromptInjectionMode>,
     auto_save: Option<bool>,
     session_id: Option<String>,
     classification_config: Option<crate::config::QueryClassificationConfig>,
@@ -91,8 +81,6 @@ pub struct AgentBuilder {
     route_model_by_hint: Option<HashMap<String, String>>,
     research_config: Option<ResearchPhaseConfig>,
     timezone_override: Option<String>,
-    autonomy_config: Option<crate::config::AutonomyConfig>,
-    hardware_config: Option<crate::config::HardwareConfig>,
     full_config: Option<Arc<crate::config::Config>>,
 }
 
@@ -109,9 +97,6 @@ impl AgentBuilder {
             model_name: None,
             temperature: None,
             workspace_dir: None,
-            identity_config: None,
-            skills: None,
-            skills_prompt_mode: None,
             auto_save: None,
             session_id: None,
             classification_config: None,
@@ -119,8 +104,6 @@ impl AgentBuilder {
             route_model_by_hint: None,
             research_config: None,
             timezone_override: None,
-            autonomy_config: None,
-            hardware_config: None,
             full_config: None,
         }
     }
@@ -142,11 +125,6 @@ impl AgentBuilder {
 
     pub fn observer(mut self, observer: Arc<dyn Observer>) -> Self {
         self.observer = Some(observer);
-        self
-    }
-
-    pub fn autonomy_config(mut self, autonomy_config: crate::config::AutonomyConfig) -> Self {
-        self.autonomy_config = Some(autonomy_config);
         self
     }
 
@@ -177,24 +155,6 @@ impl AgentBuilder {
 
     pub fn workspace_dir(mut self, workspace_dir: std::path::PathBuf) -> Self {
         self.workspace_dir = Some(workspace_dir);
-        self
-    }
-
-    pub fn identity_config(mut self, identity_config: crate::config::IdentityConfig) -> Self {
-        self.identity_config = Some(identity_config);
-        self
-    }
-
-    pub fn skills(mut self, skills: Vec<crate::skills::Skill>) -> Self {
-        self.skills = Some(skills);
-        self
-    }
-
-    pub fn skills_prompt_mode(
-        mut self,
-        skills_prompt_mode: crate::config::SkillsPromptInjectionMode,
-    ) -> Self {
-        self.skills_prompt_mode = Some(skills_prompt_mode);
         self
     }
 
@@ -272,9 +232,6 @@ impl AgentBuilder {
             workspace_dir: self
                 .workspace_dir
                 .unwrap_or_else(|| std::path::PathBuf::from(".")),
-            identity_config: self.identity_config.unwrap_or_default(),
-            skills: self.skills.unwrap_or_default(),
-            skills_prompt_mode: self.skills_prompt_mode.unwrap_or_default(),
             auto_save: self.auto_save.unwrap_or(false),
             session_id: self.session_id,
             turn_buffer: TurnBuffer::new(),
@@ -284,8 +241,6 @@ impl AgentBuilder {
             route_model_by_hint: self.route_model_by_hint.unwrap_or_default(),
             research_config: self.research_config.unwrap_or_default(),
             timezone_override: self.timezone_override,
-            autonomy_config: self.autonomy_config.unwrap_or_default(),
-            hardware_config: self.hardware_config.unwrap_or_default(),
             full_config: self
                 .full_config
                 .unwrap_or_else(|| Arc::new(crate::config::Config::default())),
@@ -394,19 +349,12 @@ impl Agent {
                 config.memory.min_relevance_score,
             )))
             .config(config.agent.clone())
-            .autonomy_config(config.autonomy.clone())
             .model_name(model_name)
             .temperature(config.default_temperature)
             .workspace_dir(config.workspace_dir.clone())
             .classification_config(config.query_classification.clone())
             .available_hints(available_hints)
             .route_model_by_hint(route_model_by_hint)
-            .identity_config(config.identity.clone())
-            .skills(crate::skills::load_skills_with_config(
-                &config.workspace_dir,
-                config,
-            ))
-            .skills_prompt_mode(config.skills.prompt_injection_mode)
             .auto_save(config.memory.auto_save)
             .research_config(config.research.clone())
             .timezone_override(config.local_context.timezone.clone())

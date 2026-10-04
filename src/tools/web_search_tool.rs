@@ -5,7 +5,20 @@ use async_trait::async_trait;
 use regex::Regex;
 use serde_json::json;
 use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
 use std::time::Duration;
+
+/// Extract result links: `<a class="result__a" href="...">Title</a>`
+static DDG_LINK_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"<a[^>]*class="[^"]*result__a[^"]*"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)</a>"#)
+        .unwrap()
+});
+
+/// Extract snippets: `<a class="result__snippet">...</a>`
+static DDG_SNIPPET_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"<a class="result__snippet[^"]*"[^>]*>([\s\S]*?)</a>"#).unwrap());
+
+static HTML_TAG_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"<[^>]+>").unwrap());
 
 /// Web search tool for searching the internet.
 /// Supports multiple providers: DuckDuckGo (free), Brave (requires API key),
@@ -148,20 +161,12 @@ impl WebSearchTool {
     }
 
     fn parse_duckduckgo_results(&self, html: &str, query: &str) -> anyhow::Result<String> {
-        // Extract result links: <a class="result__a" href="...">Title</a>
-        let link_regex = Regex::new(
-            r#"<a[^>]*class="[^"]*result__a[^"]*"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)</a>"#,
-        )?;
-
-        // Extract snippets: <a class="result__snippet">...</a>
-        let snippet_regex = Regex::new(r#"<a class="result__snippet[^"]*"[^>]*>([\s\S]*?)</a>"#)?;
-
-        let link_matches: Vec<_> = link_regex
+        let link_matches: Vec<_> = DDG_LINK_REGEX
             .captures_iter(html)
             .take(self.max_results + 2)
             .collect();
 
-        let snippet_matches: Vec<_> = snippet_regex
+        let snippet_matches: Vec<_> = DDG_SNIPPET_REGEX
             .captures_iter(html)
             .take(self.max_results + 2)
             .collect();
@@ -382,8 +387,7 @@ fn decode_ddg_redirect_url(raw_url: &str) -> String {
 }
 
 fn strip_tags(content: &str) -> String {
-    let re = Regex::new(r"<[^>]+>").unwrap();
-    re.replace_all(content, "").to_string()
+    HTML_TAG_REGEX.replace_all(content, "").to_string()
 }
 
 #[async_trait]

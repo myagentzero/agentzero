@@ -1,5 +1,6 @@
 use crate::providers::ChatMessage;
 
+use super::context_compressor::estimate_tokens;
 use crate::config::HistoryPrunerConfig;
 
 // ---------------------------------------------------------------------------
@@ -12,23 +13,6 @@ pub struct PruneStats {
     pub messages_after: usize,
     pub collapsed_pairs: usize,
     pub dropped_messages: usize,
-}
-
-// ---------------------------------------------------------------------------
-// Token estimation
-// ---------------------------------------------------------------------------
-
-fn estimate_tokens(messages: &[ChatMessage]) -> usize {
-    let raw: usize = messages
-        .iter()
-        .map(|m| m.content.len().div_ceil(4) + 4)
-        .sum();
-    // Apply 1.2x safety margin consistent with context_compressor to avoid
-    // underestimation that leads to context_length_exceeded errors.
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-    {
-        (raw as f64 * 1.2) as usize
-    }
 }
 
 // ---------------------------------------------------------------------------

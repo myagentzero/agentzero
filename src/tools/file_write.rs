@@ -193,6 +193,17 @@ impl Tool for FileWriteTool {
             });
         }
 
+        if self.security.is_runtime_config_path(&resolved_target) {
+            return Ok(ToolResult {
+                success: false,
+                output: String::new(),
+                error: Some(
+                    self.security
+                        .runtime_config_violation_message(&resolved_target),
+                ),
+            });
+        }
+
         // If the target already exists and is a symlink, refuse to follow it
         if let Ok(meta) = tokio::fs::symlink_metadata(&resolved_target).await {
             if meta.file_type().is_symlink() {
@@ -734,6 +745,42 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(content, "original", "original file must not be modified");
+
+        let _ = tokio::fs::remove_dir_all(&root).await;
+    }
+
+    #[tokio::test]
+    async fn file_write_blocks_runtime_config_file() {
+        let root = std::env::temp_dir().join("agentzero_test_file_write_runtime_config");
+        let workspace = root.join("workspace");
+
+        let _ = tokio::fs::remove_dir_all(&root).await;
+        tokio::fs::create_dir_all(&workspace).await.unwrap();
+        tokio::fs::write(root.join("config.toml"), "original")
+            .await
+            .unwrap();
+
+        let tool = FileWriteTool::new(test_security_allows_outside_workspace(workspace.clone()));
+        let config_path = root.join("config.toml");
+        let result = tool
+            .execute(json!({
+                "path": config_path.to_string_lossy(),
+                "content": "overwritten"
+            }))
+            .await
+            .unwrap();
+
+        assert!(!result.success, "writing runtime config must be blocked");
+        assert!(
+            result
+                .error
+                .as_deref()
+                .unwrap_or("")
+                .contains("runtime config")
+        );
+
+        let content = tokio::fs::read_to_string(&config_path).await.unwrap();
+        assert_eq!(content, "original");
 
         let _ = tokio::fs::remove_dir_all(&root).await;
     }

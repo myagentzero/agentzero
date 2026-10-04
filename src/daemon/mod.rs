@@ -26,16 +26,6 @@ fn shutdown_reason(signal: ShutdownSignal) -> &'static str {
     }
 }
 
-#[cfg(unix)]
-fn shutdown_hint() -> &'static str {
-    "Ctrl+C or SIGTERM to stop"
-}
-
-#[cfg(not(unix))]
-fn shutdown_hint() -> &'static str {
-    "Ctrl+C to stop"
-}
-
 async fn wait_for_shutdown_signal() -> Result<ShutdownSignal> {
     #[cfg(unix)]
     {
@@ -743,15 +733,6 @@ mod tests {
             shutdown_reason(ShutdownSignal::SigTerm),
             "shutdown requested (SIGTERM)"
         );
-    }
-
-    #[test]
-    fn shutdown_hint_matches_platform_signal_support() {
-        #[cfg(unix)]
-        assert_eq!(shutdown_hint(), "Ctrl+C or SIGTERM to stop");
-
-        #[cfg(not(unix))]
-        assert_eq!(shutdown_hint(), "Ctrl+C to stop");
     }
 
     #[tokio::test]
