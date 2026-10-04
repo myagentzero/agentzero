@@ -23,7 +23,7 @@ import { t } from '@/lib/i18n';
 
 const COLLAPSE_BUTTON_DELAY_MS = 1000;
 
-const navItems = [
+export const navItems = [
   { to: '/', icon: LayoutDashboard, labelKey: 'nav.dashboard' },
   { to: '/agent', icon: MessageSquare, labelKey: 'nav.agent' },
   { to: '/mission-control', icon: Activity, labelKey: 'nav.logs' },

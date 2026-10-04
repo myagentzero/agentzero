@@ -11,15 +11,11 @@ import {
 } from 'lucide-react';
 import type { MemoryEntry } from '@/types/api';
 import { getMemory, storeMemory, deleteMemory, deleteMemories } from '@/lib/api';
+import { formatDate } from '@/lib/format';
 
 function truncate(text: string, max: number): string {
   if (text.length <= max) return text;
   return text.slice(0, max) + '...';
-}
-
-function formatDate(iso: string): string {
-  const d = new Date(iso);
-  return d.toLocaleString();
 }
 
 export default function Memory() {

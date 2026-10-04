@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import type { CostSummary, CronJob, StatusResponse } from '@/types/api';
 import { getCost, getCronJobs, getStatus } from '@/lib/api';
+import { formatUSD } from '@/lib/format';
 
 type DashboardSectionKey = 'cost' | 'tokens' | 'health';
 
@@ -40,10 +41,6 @@ function formatUptime(seconds: number): string {
   if (d > 0) return `${d}d ${h}h ${m}m`;
   if (h > 0) return `${h}h ${m}m`;
   return `${m}m`;
-}
-
-function formatUSD(value: number): string {
-  return `$${value.toFixed(4)}`;
 }
 
 function countUpcomingJobs(jobs: CronJob[]): number {

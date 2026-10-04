@@ -10,12 +10,7 @@ import {
 } from 'lucide-react';
 import type { CronJob } from '@/types/api';
 import { getCronJobs, addCronJob, deleteCronJob } from '@/lib/api';
-
-function formatDate(iso: string | null): string {
-  if (!iso) return '-';
-  const d = new Date(iso);
-  return d.toLocaleString();
-}
+import { formatDate } from '@/lib/format';
 
 export default function Cron() {
   const [jobs, setJobs] = useState<CronJob[]>([]);

@@ -158,13 +158,6 @@ export interface ModelStats {
   channel?: string;
 }
 
-export interface CliTool {
-  name: string;
-  path: string;
-  version: string | null;
-  category: string;
-}
-
 export interface SkillToolSummary {
   name: string;
   description: string;

@@ -1,29 +1,9 @@
 import { useLocation, Link } from 'react-router-dom';
 import { LogOut, Menu, PanelLeftClose, PanelLeftOpen, OctagonAlert } from 'lucide-react';
-import { t, LANGUAGE_BUTTON_LABELS, LANGUAGE_SWITCH_ORDER } from '@/lib/i18n';
-import { useLocaleContext } from '@/App';
+import { t } from '@/lib/i18n';
 import { useAuth } from '@/hooks/useAuth';
 import { useEstopStatus } from '@/hooks/EstopProvider';
-
-const routeTitles: Record<string, string> = {
-  '/': 'nav.dashboard',
-  '/agent': 'nav.agent',
-  '/tools': 'nav.tools',
-  '/skills': 'nav.skills',
-  '/cron': 'nav.cron',
-  '/integrations': 'nav.integrations',
-  '/memory': 'nav.memory',
-  '/devices': 'nav.devices',
-  '/config': 'nav.config',
-  '/cost': 'nav.cost',
-  '/logs': 'nav.logs',
-  '/mission-control': 'nav.logs',
-  '/doctor': 'nav.doctor',
-  '/workspace': 'nav.workspace',
-  '/estop': 'nav.estop',
-};
-
-const languageSummary = 'English · 简体中文 · 日本語 · Русский · Français · Tiếng Việt · Ελληνικά';
+import { navItems } from './Sidebar';
 
 interface HeaderProps {
   isSidebarCollapsed: boolean;
@@ -38,18 +18,11 @@ export default function Header({
 }: HeaderProps) {
   const location = useLocation();
   const { logout } = useAuth();
-  const { locale, setAppLocale } = useLocaleContext();
   const { status: estopStatus } = useEstopStatus();
 
-  const titleKey = routeTitles[location.pathname] ?? 'nav.dashboard';
+  const titleKey =
+    navItems.find((item) => item.to === location.pathname)?.labelKey ?? 'nav.dashboard';
   const pageTitle = t(titleKey);
-
-  const toggleLanguage = () => {
-    const currentIndex = LANGUAGE_SWITCH_ORDER.indexOf(locale);
-    const nextLocale =
-      LANGUAGE_SWITCH_ORDER[(currentIndex + 1) % LANGUAGE_SWITCH_ORDER.length] ?? 'en';
-    setAppLocale(nextLocale);
-  };
 
   return (
     <header className="glass-header relative flex min-h-[4.5rem] flex-wrap items-center justify-between gap-2 rounded-2xl border border-[#1a3670] px-4 py-3 sm:px-5 sm:py-3.5 md:flex-nowrap md:px-8 md:py-4">
@@ -94,15 +67,6 @@ export default function Header({
         >
           {isSidebarCollapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
           <span>{isSidebarCollapsed ? 'Expand' : 'Collapse'}</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={toggleLanguage}
-          title={`🌐 Languages: ${languageSummary}`}
-          className="rounded-lg border border-[#2b4f97] bg-[#091937]/75 px-2.5 py-1 text-xs font-medium text-[#c4d8ff] transition hover:border-[#4f83ff] hover:text-white sm:px-3 sm:text-sm"
-        >
-          {LANGUAGE_BUTTON_LABELS[locale] ?? 'EN'}
         </button>
 
         <button

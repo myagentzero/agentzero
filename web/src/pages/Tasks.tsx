@@ -10,12 +10,7 @@ import {
 } from 'lucide-react';
 import type { TaskItem } from '@/types/api';
 import { getTasks, deleteTask } from '@/lib/api';
-
-function formatDate(iso: string | null): string {
-  if (!iso) return '-';
-  const d = new Date(iso);
-  return d.toLocaleString();
-}
+import { formatDate } from '@/lib/format';
 
 const STATUS_FILTERS = ['all', 'pending', 'in_progress', 'completed'] as const;
 type StatusFilter = (typeof STATUS_FILTERS)[number];

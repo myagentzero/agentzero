@@ -7,10 +7,7 @@ import {
 } from 'lucide-react';
 import type { CostSummary } from '@/types/api';
 import { getCost } from '@/lib/api';
-
-function formatUSD(value: number): string {
-  return `$${value.toFixed(4)}`;
-}
+import { formatUSD } from '@/lib/format';
 
 export default function Cost() {
   const [cost, setCost] = useState<CostSummary | null>(null);

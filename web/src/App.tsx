@@ -1,5 +1,5 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
-import { useState, useEffect, createContext, useContext } from 'react';
+import { useState, useEffect } from 'react';
 import Layout from './components/layout/Layout';
 import Dashboard from './pages/Dashboard';
 import AgentChat from './pages/AgentChat';
@@ -19,22 +19,6 @@ import Estop from './pages/Estop';
 import { AuthProvider, useAuth } from './hooks/useAuth';
 import { SSEProvider } from './hooks/SSEProvider';
 import { EstopProvider } from './hooks/EstopProvider';
-import { coerceLocale, setLocale, type Locale } from './lib/i18n';
-
-const LOCALE_STORAGE_KEY = 'agentzero:locale';
-
-// Locale context
-interface LocaleContextType {
-  locale: Locale;
-  setAppLocale: (locale: Locale) => void;
-}
-
-export const LocaleContext = createContext<LocaleContextType>({
-  locale: 'en',
-  setAppLocale: (_locale: Locale) => {},
-});
-
-export const useLocaleContext = () => useContext(LocaleContext);
 
 // Pairing dialog component
 function PairingDialog({ onPair }: { onPair: (code: string) => Promise<void> }) {
@@ -90,29 +74,6 @@ function PairingDialog({ onPair }: { onPair: (code: string) => Promise<void> }) 
 
 function AppContent() {
   const { isAuthenticated, loading, pair, logout } = useAuth();
-  const [locale, setLocaleState] = useState<Locale>(() => {
-    if (typeof window === 'undefined') {
-      return 'en';
-    }
-
-    const saved = window.localStorage.getItem(LOCALE_STORAGE_KEY);
-    if (saved) {
-      return coerceLocale(saved);
-    }
-
-    return coerceLocale(window.navigator.language);
-  });
-
-  useEffect(() => {
-    setLocale(locale);
-    if (typeof window !== 'undefined') {
-      window.localStorage.setItem(LOCALE_STORAGE_KEY, locale);
-    }
-  }, [locale]);
-
-  const setAppLocale = (newLocale: Locale) => {
-    setLocaleState(newLocale);
-  };
 
   // Listen for 401 events to force logout
   useEffect(() => {
@@ -139,32 +100,30 @@ function AppContent() {
   }
 
   return (
-    <LocaleContext.Provider value={{ locale, setAppLocale }}>
-      <SSEProvider>
-        <EstopProvider>
-          <Routes>
-            <Route element={<Layout />}>
-              <Route path="/" element={<Dashboard />} />
-              <Route path="/agent" element={<AgentChat />} />
-              <Route path="/tools" element={<Tools />} />
-              <Route path="/skills" element={<Skills />} />
-              <Route path="/cron" element={<Cron />} />
-              <Route path="/tasks" element={<Tasks />} />
-              <Route path="/integrations" element={<Integrations />} />
-              <Route path="/memory" element={<Memory />} />
-              <Route path="/devices" element={<Devices />} />
-              <Route path="/config" element={<Config />} />
-              <Route path="/cost" element={<Cost />} />
-              <Route path="/mission-control" element={<MissionControl />} />
-              <Route path="/doctor" element={<Doctor />} />
-              <Route path="/workspace" element={<Workspace />} />
-              <Route path="/estop" element={<Estop />} />
-              <Route path="*" element={<Navigate to="/" replace />} />
-            </Route>
-          </Routes>
-        </EstopProvider>
-      </SSEProvider>
-    </LocaleContext.Provider>
+    <SSEProvider>
+      <EstopProvider>
+        <Routes>
+          <Route element={<Layout />}>
+            <Route path="/" element={<Dashboard />} />
+            <Route path="/agent" element={<AgentChat />} />
+            <Route path="/tools" element={<Tools />} />
+            <Route path="/skills" element={<Skills />} />
+            <Route path="/cron" element={<Cron />} />
+            <Route path="/tasks" element={<Tasks />} />
+            <Route path="/integrations" element={<Integrations />} />
+            <Route path="/memory" element={<Memory />} />
+            <Route path="/devices" element={<Devices />} />
+            <Route path="/config" element={<Config />} />
+            <Route path="/cost" element={<Cost />} />
+            <Route path="/mission-control" element={<MissionControl />} />
+            <Route path="/doctor" element={<Doctor />} />
+            <Route path="/workspace" element={<Workspace />} />
+            <Route path="/estop" element={<Estop />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Route>
+        </Routes>
+      </EstopProvider>
+    </SSEProvider>
   );
 }
 

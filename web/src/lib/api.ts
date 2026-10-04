@@ -9,8 +9,6 @@ import type {
   MemoryEntry,
   PairedDevice,
   CostSummary,
-  CliTool,
-  HealthSnapshot,
   SkillSummary,
   WorkspaceTree,
   WorkspaceFileContent,
@@ -22,14 +20,14 @@ import { clearToken, getToken, setToken } from './auth';
 // Base fetch wrapper
 // ---------------------------------------------------------------------------
 
-export class UnauthorizedError extends Error {
+class UnauthorizedError extends Error {
   constructor() {
     super('Unauthorized');
     this.name = 'UnauthorizedError';
   }
 }
 
-export async function apiFetch<T = unknown>(
+async function apiFetch<T = unknown>(
   path: string,
   options: RequestInit = {},
 ): Promise<T> {
@@ -120,12 +118,6 @@ export async function getPublicHealth(): Promise<{ require_pairing: boolean; pai
 
 export function getStatus(): Promise<StatusResponse> {
   return apiFetch<StatusResponse>('/api/status');
-}
-
-export function getHealth(): Promise<HealthSnapshot> {
-  return apiFetch<HealthSnapshot | { health: HealthSnapshot }>('/api/health').then((data) =>
-    unwrapField(data, 'health'),
-  );
 }
 
 // ---------------------------------------------------------------------------
@@ -356,16 +348,6 @@ export function getCost(): Promise<CostSummary> {
 export function getSkills(): Promise<SkillSummary[]> {
   return apiFetch<SkillSummary[] | { skills: SkillSummary[] }>('/api/skills').then((data) =>
     unwrapField(data, 'skills'),
-  );
-}
-
-// ---------------------------------------------------------------------------
-// CLI Tools
-// ---------------------------------------------------------------------------
-
-export function getCliTools(): Promise<CliTool[]> {
-  return apiFetch<CliTool[] | { cli_tools: CliTool[] }>('/api/cli-tools').then((data) =>
-    unwrapField(data, 'cli_tools'),
   );
 }
 
