@@ -1,3 +1,4 @@
+use super::decay::{self, DecayHalfLives};
 use super::traits::{Memory, MemoryEntry};
 
 /// Minimum message length (chars) to trigger keyword expansion query.
@@ -5,6 +6,37 @@ const MIN_EXPANSION_LENGTH: usize = 30;
 
 /// Minimum word length to keep in keyword extraction.
 const MIN_KEYWORD_LENGTH: usize = 4;
+
+/// Recall multiplier so decayed and boosted entries can be re-ranked fairly.
+const RECALL_OVER_FETCH_FACTOR: usize = 2;
+
+/// Recall ranked by relevance, recency, and category.
+///
+/// Over-fetches via [`enhanced_recall`], decays non-Core scores by age, adds
+/// the recent-Core boost, and sorts descending. Each entry's `score` becomes
+/// its final ranking score; unscored entries keep `None` and sort last.
+/// Callers apply their own relevance cutoff and output limit.
+pub async fn ranked_recall(
+    mem: &dyn Memory,
+    query: &str,
+    limit: usize,
+    session_id: Option<&str>,
+    half_lives: &DecayHalfLives,
+) -> anyhow::Result<Vec<MemoryEntry>> {
+    let fetch_limit = limit.saturating_mul(RECALL_OVER_FETCH_FACTOR);
+    let mut entries = enhanced_recall(mem, query, fetch_limit, session_id).await?;
+
+    decay::apply_time_decay(&mut entries, half_lives);
+    for entry in &mut entries {
+        let boost = decay::core_recency_boost(entry, decay::CORE_BOOST_WINDOW_DAYS);
+        if let Some(score) = entry.score.as_mut() {
+            *score = (*score + boost).min(1.0);
+        }
+    }
+
+    sort_by_score_desc(&mut entries);
+    Ok(entries)
+}
 
 /// Enhanced memory retrieval with multi-query expansion.
 ///
@@ -45,16 +77,19 @@ pub async fn enhanced_recall(
         None => mem.recall(query, limit, session_id).await?,
     };
 
-    // Sort by score descending, take top `limit`
-    results.sort_by(|a, b| {
+    sort_by_score_desc(&mut results);
+    results.truncate(limit);
+
+    Ok(results)
+}
+
+fn sort_by_score_desc(entries: &mut [MemoryEntry]) {
+    entries.sort_by(|a, b| {
         b.score
             .unwrap_or(0.0)
             .partial_cmp(&a.score.unwrap_or(0.0))
             .unwrap_or(std::cmp::Ordering::Equal)
     });
-    results.truncate(limit);
-
-    Ok(results)
 }
 
 /// Extract significant keywords (length >= 4) from a message.
@@ -327,6 +362,43 @@ mod tests {
             .await
             .expect_err("expected primary recall error to propagate");
         assert!(err.to_string().contains("primary recall failed"));
+    }
+
+    #[tokio::test]
+    async fn ranked_recall_decays_old_entries_and_boosts_recent_core() {
+        let now = chrono::Utc::now();
+        let days_ago = |days: i64| (now - chrono::Duration::days(days)).to_rfc3339();
+        let entry =
+            |key: &str, category: MemoryCategory, timestamp: String, score: f64| MemoryEntry {
+                id: key.into(),
+                key: key.into(),
+                content: key.into(),
+                category,
+                timestamp,
+                session_id: None,
+                score: Some(score),
+            };
+        let mem = MockMemory {
+            primary_query: "q".into(),
+            primary: vec![
+                entry("old_daily", MemoryCategory::Daily, days_ago(6), 0.9),
+                entry("old_core", MemoryCategory::Core, days_ago(30), 0.5),
+                entry("new_core", MemoryCategory::Core, days_ago(1), 0.5),
+            ],
+            keyword: vec![],
+            fail_primary: false,
+            fail_keyword: false,
+        };
+
+        let results = ranked_recall(&mem, "q", 5, None, &DecayHalfLives::default())
+            .await
+            .unwrap();
+        let keys: Vec<_> = results.iter().map(|e| e.key.as_str()).collect();
+        assert_eq!(keys, ["new_core", "old_core", "old_daily"]);
+        assert!((results[0].score.unwrap() - 0.8).abs() < 1e-9);
+        assert!((results[1].score.unwrap() - 0.5).abs() < 1e-9);
+        // Two 3-day daily half-lives: 0.9 * 0.25.
+        assert!((results[2].score.unwrap() - 0.225).abs() < 0.01);
     }
 
     #[tokio::test]

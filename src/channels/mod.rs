@@ -3136,10 +3136,13 @@ async fn build_memory_context(
     user_msg: &str,
     min_relevance_score: f64,
     session_id: Option<&str>,
+    half_lives: &crate::memory::decay::DecayHalfLives,
 ) -> String {
     let mut context = String::new();
 
-    if let Ok(entries) = mem.recall(user_msg, 5, session_id).await {
+    if let Ok(entries) =
+        crate::memory::retrieval::ranked_recall(mem, user_msg, 5, session_id, half_lives).await
+    {
         let mut included = 0usize;
         let mut used_chars = 0usize;
 
@@ -3959,6 +3962,9 @@ If this input is legitimate, rephrase the request and avoid instruction-override
                     &msg.content,
                     runtime_defaults.min_relevance_score,
                     Some(&history_key),
+                    &crate::memory::decay::DecayHalfLives::from_config(
+                        &runtime_memory_config_snapshot(ctx.as_ref()),
+                    ),
                 )
                 .await;
                 if !memory_context.is_empty() {

@@ -347,6 +347,7 @@ impl Agent {
             .memory_loader(Box::new(DefaultMemoryLoader::new(
                 5,
                 config.memory.min_relevance_score,
+                crate::memory::decay::DecayHalfLives::from_config(&config.memory),
             )))
             .config(config.agent.clone())
             .model_name(model_name)

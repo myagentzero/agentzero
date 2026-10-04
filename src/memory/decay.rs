@@ -1,9 +1,58 @@
 use super::traits::{MemoryCategory, MemoryEntry};
+use crate::config::MemoryConfig;
 use chrono::{DateTime, Utc};
 
-/// Default half-life in days for time-decay scoring.
-/// After this many days, a non-Core memory's score drops to 50%.
+/// Half-life in days for custom categories, and for conversations when
+/// retention is disabled or hygiene is off.
 const DEFAULT_HALF_LIFE_DAYS: f64 = 7.0;
+
+/// Half-life in days for `Daily` memories, which lose relevance quickly.
+const DAILY_HALF_LIFE_DAYS: f64 = 3.0;
+
+/// Half-life in days for `System` memories, which lose relevance quickly.
+const SYSTEM_HALF_LIFE_DAYS: f64 = 2.0;
+
+/// Per-category half-lives. Conversation uses half of its retention window
+/// so a memory still holds 25% of its score when hygiene prunes it; Daily
+/// and System use fixed short half-lives.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DecayHalfLives {
+    conversation: f64,
+    daily: f64,
+    system: f64,
+}
+
+impl DecayHalfLives {
+    pub fn from_config(config: &MemoryConfig) -> Self {
+        let retention_days = config.conversation_retention_days;
+        Self {
+            conversation: if config.hygiene_enabled && retention_days > 0 {
+                f64::from(retention_days) / 2.0
+            } else {
+                DEFAULT_HALF_LIFE_DAYS
+            },
+            daily: DAILY_HALF_LIFE_DAYS,
+            system: SYSTEM_HALF_LIFE_DAYS,
+        }
+    }
+
+    /// Half-life for `category`, or `None` for evergreen `Core` memories.
+    fn for_category(&self, category: &MemoryCategory) -> Option<f64> {
+        match category {
+            MemoryCategory::Core => None,
+            MemoryCategory::Conversation => Some(self.conversation),
+            MemoryCategory::Daily => Some(self.daily),
+            MemoryCategory::System => Some(self.system),
+            MemoryCategory::Custom(_) => Some(DEFAULT_HALF_LIFE_DAYS),
+        }
+    }
+}
+
+impl Default for DecayHalfLives {
+    fn default() -> Self {
+        Self::from_config(&MemoryConfig::default())
+    }
+}
 
 /// Days during which `Core` memories receive a ranking boost.
 pub const CORE_BOOST_WINDOW_DAYS: f64 = 7.0;
@@ -44,21 +93,15 @@ pub fn core_recency_boost(entry: &MemoryEntry, window_days: f64) -> f64 {
 /// - Entries without a parseable RFC3339 timestamp are left unchanged.
 /// - Entries without a score (`None`) are left unchanged.
 ///
-/// Decay formula: `score * 2^(-age_days / half_life_days)`
-pub fn apply_time_decay(entries: &mut [MemoryEntry], half_life_days: f64) {
-    let half_life = if half_life_days <= 0.0 {
-        DEFAULT_HALF_LIFE_DAYS
-    } else {
-        half_life_days
-    };
-
+/// Decay formula: `score * 2^(-age_days / half_life_days)`, with the
+/// half-life chosen per category by `half_lives`.
+pub fn apply_time_decay(entries: &mut [MemoryEntry], half_lives: &DecayHalfLives) {
     let now = Utc::now();
 
     for entry in entries.iter_mut() {
-        // Core memories are evergreen — never decay
-        if entry.category == MemoryCategory::Core {
+        let Some(half_life) = half_lives.for_category(&entry.category) else {
             continue;
-        }
+        };
 
         let score = match entry.score {
             Some(s) => s,
@@ -98,6 +141,79 @@ mod tests {
         (Utc::now() - chrono::Duration::days(days)).to_rfc3339()
     }
 
+    const WEEK: DecayHalfLives = DecayHalfLives {
+        conversation: 7.0,
+        daily: 7.0,
+        system: 7.0,
+    };
+
+    #[test]
+    fn half_lives_per_category() {
+        let config = MemoryConfig {
+            conversation_retention_days: 60,
+            ..MemoryConfig::default()
+        };
+        let half_lives = DecayHalfLives::from_config(&config);
+        assert_eq!(
+            half_lives.for_category(&MemoryCategory::Conversation),
+            Some(30.0)
+        );
+        assert_eq!(
+            half_lives.for_category(&MemoryCategory::Daily),
+            Some(DAILY_HALF_LIFE_DAYS)
+        );
+        assert_eq!(
+            half_lives.for_category(&MemoryCategory::System),
+            Some(SYSTEM_HALF_LIFE_DAYS)
+        );
+        assert_eq!(half_lives.for_category(&MemoryCategory::Core), None);
+        assert_eq!(
+            half_lives.for_category(&MemoryCategory::Custom("notes".into())),
+            Some(DEFAULT_HALF_LIFE_DAYS)
+        );
+    }
+
+    #[test]
+    fn half_lives_fall_back_without_retention() {
+        let unpruned = MemoryConfig {
+            conversation_retention_days: 0,
+            ..MemoryConfig::default()
+        };
+        assert_eq!(
+            DecayHalfLives::from_config(&unpruned).for_category(&MemoryCategory::Conversation),
+            Some(DEFAULT_HALF_LIFE_DAYS)
+        );
+
+        let hygiene_off = MemoryConfig {
+            hygiene_enabled: false,
+            ..MemoryConfig::default()
+        };
+        assert_eq!(
+            DecayHalfLives::from_config(&hygiene_off),
+            DecayHalfLives {
+                conversation: DEFAULT_HALF_LIFE_DAYS,
+                daily: DAILY_HALF_LIFE_DAYS,
+                system: SYSTEM_HALF_LIFE_DAYS,
+            }
+        );
+    }
+
+    #[test]
+    fn entry_at_retention_keeps_quarter_score() {
+        let half_lives = DecayHalfLives::from_config(&MemoryConfig {
+            conversation_retention_days: 30,
+            ..MemoryConfig::default()
+        });
+        let mut entries = vec![make_entry(
+            MemoryCategory::Conversation,
+            Some(1.0),
+            &days_ago_rfc3339(30),
+        )];
+        apply_time_decay(&mut entries, &half_lives);
+        let decayed = entries[0].score.unwrap();
+        assert!((decayed - 0.25).abs() < 0.01, "got {decayed}");
+    }
+
     #[test]
     fn core_memories_are_never_decayed() {
         let mut entries = vec![make_entry(
@@ -105,7 +221,7 @@ mod tests {
             Some(0.9),
             &days_ago_rfc3339(30),
         )];
-        apply_time_decay(&mut entries, 7.0);
+        apply_time_decay(&mut entries, &WEEK);
         assert_eq!(entries[0].score, Some(0.9));
     }
 
@@ -116,7 +232,7 @@ mod tests {
             Some(0.8),
             &recent_rfc3339(),
         )];
-        apply_time_decay(&mut entries, 7.0);
+        apply_time_decay(&mut entries, &WEEK);
         let decayed = entries[0].score.unwrap();
         assert!(
             (decayed - 0.8).abs() < 0.01,
@@ -131,7 +247,7 @@ mod tests {
             Some(1.0),
             &days_ago_rfc3339(7),
         )];
-        apply_time_decay(&mut entries, 7.0);
+        apply_time_decay(&mut entries, &WEEK);
         let decayed = entries[0].score.unwrap();
         assert!(
             (decayed - 0.5).abs() < 0.05,
@@ -146,7 +262,7 @@ mod tests {
             Some(1.0),
             &days_ago_rfc3339(14),
         )];
-        apply_time_decay(&mut entries, 7.0);
+        apply_time_decay(&mut entries, &WEEK);
         let decayed = entries[0].score.unwrap();
         assert!(
             (decayed - 0.25).abs() < 0.05,
@@ -161,7 +277,7 @@ mod tests {
             None,
             &days_ago_rfc3339(30),
         )];
-        apply_time_decay(&mut entries, 7.0);
+        apply_time_decay(&mut entries, &WEEK);
         assert_eq!(entries[0].score, None);
     }
 
@@ -172,7 +288,7 @@ mod tests {
             Some(0.9),
             "not-a-date",
         )];
-        apply_time_decay(&mut entries, 7.0);
+        apply_time_decay(&mut entries, &WEEK);
         assert_eq!(entries[0].score, Some(0.9));
     }
 

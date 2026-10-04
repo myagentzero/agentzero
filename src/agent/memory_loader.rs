@@ -1,13 +1,6 @@
-use crate::memory::{self, Memory, decay, retrieval};
+use crate::memory::{self, Memory, decay::DecayHalfLives, retrieval};
 use async_trait::async_trait;
 use std::fmt::Write;
-
-/// Default half-life (days) for time decay in memory loading.
-const LOADER_DECAY_HALF_LIFE_DAYS: f64 = 7.0;
-
-/// Over-fetch factor: retrieve more candidates than the output limit so
-/// that Core boost and re-ranking can select the best subset.
-const RECALL_OVER_FETCH_FACTOR: usize = 2;
 
 #[async_trait]
 pub trait MemoryLoader: Send + Sync {
@@ -18,6 +11,7 @@ pub trait MemoryLoader: Send + Sync {
 pub struct DefaultMemoryLoader {
     limit: usize,
     min_relevance_score: f64,
+    half_lives: DecayHalfLives,
 }
 
 impl Default for DefaultMemoryLoader {
@@ -25,15 +19,17 @@ impl Default for DefaultMemoryLoader {
         Self {
             limit: 5,
             min_relevance_score: 0.4,
+            half_lives: DecayHalfLives::default(),
         }
     }
 }
 
 impl DefaultMemoryLoader {
-    pub fn new(limit: usize, min_relevance_score: f64) -> Self {
+    pub fn new(limit: usize, min_relevance_score: f64, half_lives: DecayHalfLives) -> Self {
         Self {
             limit: limit.max(1),
             min_relevance_score,
+            half_lives,
         }
     }
 }
@@ -45,43 +41,23 @@ impl MemoryLoader for DefaultMemoryLoader {
         memory: &dyn Memory,
         user_message: &str,
     ) -> anyhow::Result<String> {
-        // Over-fetch so Core-boosted entries can compete fairly after re-ranking.
-        let fetch_limit = self.limit * RECALL_OVER_FETCH_FACTOR;
-        let mut entries =
-            retrieval::enhanced_recall(memory, user_message, fetch_limit, None).await?;
-        if entries.is_empty() {
-            return Ok(String::new());
-        }
+        let entries =
+            retrieval::ranked_recall(memory, user_message, self.limit, None, &self.half_lives)
+                .await?;
 
-        // Apply time decay: older non-Core memories score lower.
-        decay::apply_time_decay(&mut entries, LOADER_DECAY_HALF_LIFE_DAYS);
-
-        // Apply 7-day Core recency boost and filter by minimum relevance.
-        let mut scored: Vec<_> = entries
+        let scored: Vec<_> = entries
             .iter()
             .filter(|e| !memory::is_assistant_autosave_key(&e.key))
-            .filter_map(|e| {
-                let base = e.score.unwrap_or(self.min_relevance_score);
-                let boosted =
-                    (base + decay::core_recency_boost(e, decay::CORE_BOOST_WINDOW_DAYS)).min(1.0);
-                if boosted >= self.min_relevance_score {
-                    Some((e, boosted))
-                } else {
-                    None
-                }
-            })
+            .filter(|e| e.score.map_or(true, |s| s >= self.min_relevance_score))
+            .take(self.limit)
             .collect();
-
-        // Sort by boosted score descending, then truncate to output limit.
-        scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-        scored.truncate(self.limit);
 
         if scored.is_empty() {
             return Ok(String::new());
         }
 
         let mut context = String::from("[Memory context]\n");
-        for (entry, _) in &scored {
+        for entry in &scored {
             let _ = writeln!(context, "- {}: {}", entry.key, entry.content);
         }
         context.push('\n');
@@ -281,7 +257,7 @@ mod tests {
 
     #[tokio::test]
     async fn default_loader_skips_legacy_assistant_autosave_entries() {
-        let loader = DefaultMemoryLoader::new(5, 0.0);
+        let loader = DefaultMemoryLoader::new(5, 0.0, DecayHalfLives::default());
         let memory = MockMemoryWithEntries {
             entries: Arc::new(vec![
                 MemoryEntry {
@@ -313,7 +289,7 @@ mod tests {
 
     #[tokio::test]
     async fn core_category_boost_promotes_low_score_core_entry() {
-        let loader = DefaultMemoryLoader::new(2, 0.4);
+        let loader = DefaultMemoryLoader::new(2, 0.4, DecayHalfLives::default());
         let memory = MockMemoryWithEntries {
             entries: Arc::new(vec![
                 MemoryEntry {
@@ -363,7 +339,7 @@ mod tests {
 
     #[tokio::test]
     async fn core_boost_reranks_above_conversation() {
-        let loader = DefaultMemoryLoader::new(1, 0.0);
+        let loader = DefaultMemoryLoader::new(1, 0.0, DecayHalfLives::default());
         let memory = MockMemoryWithEntries {
             entries: Arc::new(vec![
                 MemoryEntry {
@@ -402,7 +378,7 @@ mod tests {
 
     #[tokio::test]
     async fn core_older_than_seven_days_does_not_receive_boost() {
-        let loader = DefaultMemoryLoader::new(2, 0.4);
+        let loader = DefaultMemoryLoader::new(2, 0.4, DecayHalfLives::default());
         let memory = MockMemoryWithEntries {
             entries: Arc::new(vec![
                 MemoryEntry {

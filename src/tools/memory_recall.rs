@@ -1,5 +1,6 @@
 use super::traits::{Tool, ToolCategory, ToolResult};
-use crate::memory::{Memory, MemoryCategory};
+use crate::memory::decay::DecayHalfLives;
+use crate::memory::{Memory, MemoryCategory, retrieval};
 use async_trait::async_trait;
 use chrono::{DateTime, NaiveDate, TimeDelta, Utc};
 use serde_json::json;
@@ -56,11 +57,12 @@ fn parse_since(s: &str) -> anyhow::Result<DateTime<Utc>> {
 /// Let the agent search its own memory
 pub struct MemoryRecallTool {
     memory: Arc<dyn Memory>,
+    half_lives: DecayHalfLives,
 }
 
 impl MemoryRecallTool {
-    pub fn new(memory: Arc<dyn Memory>) -> Self {
-        Self { memory }
+    pub fn new(memory: Arc<dyn Memory>, half_lives: DecayHalfLives) -> Self {
+        Self { memory, half_lives }
     }
 }
 
@@ -134,7 +136,8 @@ impl Tool for MemoryRecallTool {
             } else {
                 limit
             };
-            self.memory.recall(q, fetch_limit, None).await
+            retrieval::ranked_recall(self.memory.as_ref(), q, fetch_limit, None, &self.half_lives)
+                .await
         } else {
             self.memory.list(category_filter.as_ref(), None).await
         };
@@ -207,7 +210,7 @@ mod tests {
     #[tokio::test]
     async fn recall_empty() {
         let (_tmp, mem) = seeded_mem();
-        let tool = MemoryRecallTool::new(mem);
+        let tool = MemoryRecallTool::new(mem, DecayHalfLives::default());
         let result = tool.execute(json!({"query": "anything"})).await.unwrap();
         assert!(result.success);
         assert!(result.output.contains("No memories found"));
@@ -223,7 +226,7 @@ mod tests {
             .await
             .unwrap();
 
-        let tool = MemoryRecallTool::new(mem);
+        let tool = MemoryRecallTool::new(mem, DecayHalfLives::default());
         let result = tool.execute(json!({"query": "Rust"})).await.unwrap();
         assert!(result.success);
         assert!(result.output.contains("Rust"));
@@ -244,7 +247,7 @@ mod tests {
             .unwrap();
         }
 
-        let tool = MemoryRecallTool::new(mem);
+        let tool = MemoryRecallTool::new(mem, DecayHalfLives::default());
         let result = tool
             .execute(json!({"query": "Rust", "limit": 3}))
             .await
@@ -256,7 +259,7 @@ mod tests {
     #[tokio::test]
     async fn recall_missing_query_lists() {
         let (_tmp, mem) = seeded_mem();
-        let tool = MemoryRecallTool::new(mem);
+        let tool = MemoryRecallTool::new(mem, DecayHalfLives::default());
         let result = tool.execute(json!({})).await.unwrap();
         assert!(result.success);
         assert!(result.output.contains("No memories found"));
@@ -265,7 +268,7 @@ mod tests {
     #[test]
     fn name_and_schema() {
         let (_tmp, mem) = seeded_mem();
-        let tool = MemoryRecallTool::new(mem);
+        let tool = MemoryRecallTool::new(mem, DecayHalfLives::default());
         assert_eq!(tool.name(), "memory_recall");
         assert!(tool.parameters_schema()["properties"]["query"].is_object());
     }
@@ -288,7 +291,7 @@ mod tests {
         .await
         .unwrap();
 
-        let tool = MemoryRecallTool::new(mem);
+        let tool = MemoryRecallTool::new(mem, DecayHalfLives::default());
         let result = tool
             .execute(json!({"query": "Rust", "category": "core"}))
             .await
@@ -309,7 +312,7 @@ mod tests {
             .await
             .unwrap();
 
-        let tool = MemoryRecallTool::new(mem);
+        let tool = MemoryRecallTool::new(mem, DecayHalfLives::default());
         let result = tool.execute(json!({})).await.unwrap();
         assert!(result.success);
         assert!(result.output.contains("Found 2"));
@@ -328,7 +331,7 @@ mod tests {
             .await
             .unwrap();
 
-        let tool = MemoryRecallTool::new(mem);
+        let tool = MemoryRecallTool::new(mem, DecayHalfLives::default());
         let result = tool.execute(json!({"category": "core"})).await.unwrap();
         assert!(result.success);
         assert!(result.output.contains("Found 2"));
@@ -351,7 +354,7 @@ mod tests {
         .await
         .unwrap();
 
-        let tool = MemoryRecallTool::new(mem);
+        let tool = MemoryRecallTool::new(mem, DecayHalfLives::default());
         let result = tool.execute(json!({"query": "Rust"})).await.unwrap();
         assert!(result.success);
         assert!(result.output.contains("Found 2"));
@@ -364,7 +367,7 @@ mod tests {
             .await
             .unwrap();
 
-        let tool = MemoryRecallTool::new(mem);
+        let tool = MemoryRecallTool::new(mem, DecayHalfLives::default());
         // Memory was just stored, so "1h" should include it
         let result = tool
             .execute(json!({"query": "Rust", "since": "1h"}))
@@ -381,7 +384,7 @@ mod tests {
             .await
             .unwrap();
 
-        let tool = MemoryRecallTool::new(mem);
+        let tool = MemoryRecallTool::new(mem, DecayHalfLives::default());
         // A future date should exclude everything
         let result = tool
             .execute(json!({"query": "Rust", "since": "2099-01-01"}))

@@ -1,63 +1,36 @@
 use crate::config::Config;
-use crate::memory::{self, Memory, decay, retrieval};
+use crate::memory::{self, Memory, decay::DecayHalfLives, retrieval};
 use std::fmt::Write;
-
-/// Time-decay half-life (days) for context recall.
-const CONTEXT_DECAY_HALF_LIFE_DAYS: f64 = 7.0;
 
 /// Max memory entries in context.
 const CONTEXT_ENTRY_LIMIT: usize = 5;
 
-/// Recall multiplier before re-ranking.
-const RECALL_OVER_FETCH_FACTOR: usize = 2;
-
 /// Build memory context for the current message.
 ///
-/// Uses enhanced recall, applies time decay + a 7-day Core recency boost,
-/// and filters entries below `min_relevance_score`.
+/// Uses [`retrieval::ranked_recall`] and filters entries below
+/// `min_relevance_score`.
 pub(super) async fn build_context(
     mem: &dyn Memory,
     user_msg: &str,
     min_relevance_score: f64,
     session_id: Option<&str>,
+    half_lives: &DecayHalfLives,
 ) -> String {
     let mut context = String::new();
 
-    // Over-fetch before boost/re-rank.
-    let fetch_limit = CONTEXT_ENTRY_LIMIT * RECALL_OVER_FETCH_FACTOR;
-    if let Ok(mut entries) =
-        retrieval::enhanced_recall(mem, user_msg, fetch_limit, session_id).await
+    if let Ok(entries) =
+        retrieval::ranked_recall(mem, user_msg, CONTEXT_ENTRY_LIMIT, session_id, half_lives).await
     {
-        if entries.is_empty() {
-            return context;
-        }
-
-        // Older non-Core memories decay.
-        decay::apply_time_decay(&mut entries, CONTEXT_DECAY_HALF_LIFE_DAYS);
-
-        // Boost recent Core, then filter by relevance.
-        let mut scored: Vec<_> = entries
+        let scored: Vec<_> = entries
             .iter()
             .filter(|e| !memory::is_assistant_autosave_key(&e.key))
-            .filter_map(|e| {
-                let base = e.score.unwrap_or(min_relevance_score);
-                let boosted =
-                    (base + decay::core_recency_boost(e, decay::CORE_BOOST_WINDOW_DAYS)).min(1.0);
-                if boosted >= min_relevance_score {
-                    Some((e, boosted))
-                } else {
-                    None
-                }
-            })
+            .filter(|e| e.score.map_or(true, |s| s >= min_relevance_score))
+            .take(CONTEXT_ENTRY_LIMIT)
             .collect();
-
-        // Rank and cap output.
-        scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-        scored.truncate(CONTEXT_ENTRY_LIMIT);
 
         if !scored.is_empty() {
             context.push_str("[Memory context]\n");
-            for (entry, _) in &scored {
+            for entry in &scored {
                 let _ = writeln!(context, "- {}: {}", entry.key, entry.content);
             }
             context.push('\n');
@@ -80,8 +53,14 @@ pub(super) async fn build_injected_context(
     hardware_rag: Option<&crate::hardware::datasheet::HardwareRag>,
     board_names: &[String],
 ) -> String {
-    let mem_context =
-        build_context(mem, message, config.memory.min_relevance_score, session_id).await;
+    let mem_context = build_context(
+        mem,
+        message,
+        config.memory.min_relevance_score,
+        session_id,
+        &DecayHalfLives::from_config(&config.memory),
+    )
+    .await;
     let rag_limit = if config.agent.light_context { 2 } else { 5 };
     let hw_context = hardware_rag
         .map(|r| build_hardware_context(r, message, board_names, rag_limit))
@@ -265,7 +244,8 @@ mod tests {
             ]),
         };
 
-        let context = build_context(&memory, "test query", 0.4, None).await;
+        let context =
+            build_context(&memory, "test query", 0.4, None, &DecayHalfLives::default()).await;
         assert!(
             context.contains("core_rule"),
             "expected core boost to include core_rule"
@@ -290,7 +270,8 @@ mod tests {
             }]),
         };
 
-        let context = build_context(&memory, "test query", 0.4, None).await;
+        let context =
+            build_context(&memory, "test query", 0.4, None, &DecayHalfLives::default()).await;
         assert!(
             !context.contains("old_core"),
             "core older than 7 days should not get the recency boost: {context}"
@@ -314,7 +295,7 @@ mod tests {
             entries: Arc::new(entries),
         };
 
-        let context = build_context(&memory, "limit", 0.0, None).await;
+        let context = build_context(&memory, "limit", 0.0, None, &DecayHalfLives::default()).await;
         let listed = context
             .lines()
             .filter(|line| line.starts_with("- "))

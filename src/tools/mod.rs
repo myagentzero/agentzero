@@ -398,7 +398,10 @@ pub fn all_tools_with_runtime(
         Arc::new(CronListTool::new(config.clone())),
         Arc::new(CronRemoveTool::new(config.clone(), security.clone())),
         Arc::new(MemoryStoreTool::new(memory.clone(), security.clone())),
-        Arc::new(MemoryRecallTool::new(memory.clone())),
+        Arc::new(MemoryRecallTool::new(
+            memory.clone(),
+            crate::memory::decay::DecayHalfLives::from_config(&root_config.memory),
+        )),
         Arc::new(MemoryForgetTool::new(memory, security.clone())),
         Arc::new(CalculatorTool::new()),
         Arc::new(WeatherTool::new()),

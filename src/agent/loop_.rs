@@ -6549,7 +6549,14 @@ Tail"#;
         .await
         .unwrap();
 
-        let context = context::build_context(&mem, "status updates", 0.0, None).await;
+        let context = context::build_context(
+            &mem,
+            "status updates",
+            0.0,
+            None,
+            &crate::memory::decay::DecayHalfLives::default(),
+        )
+        .await;
         assert!(context.contains("user_msg_real"));
         assert!(!context.contains("assistant_resp_poisoned"));
         assert!(!context.contains("fabricated event"));
