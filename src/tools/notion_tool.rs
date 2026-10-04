@@ -8,6 +8,12 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 const NOTION_API_BASE: &str = "https://api.notion.com/v1";
 const NOTION_VERSION: &str = "2022-06-28";
 const NOTION_REQUEST_TIMEOUT_SECS: u64 = 30;
+/// Retries after a rate-limited (HTTP 429) response before giving up.
+const NOTION_RATE_LIMIT_RETRIES: u32 = 3;
+/// Upper bound on a single rate-limit wait, regardless of `Retry-After`.
+const NOTION_MAX_RETRY_WAIT_SECS: u64 = 10;
+/// Notion's maximum (and default) page size for paginated endpoints.
+const NOTION_MAX_PAGE_SIZE: u64 = 100;
 /// Maximum number of characters to include from an error response body.
 const MAX_ERROR_BODY_CHARS: usize = 500;
 /// Maximum recursion depth when flattening block children into text. Guards
@@ -60,25 +66,40 @@ impl NotionTool {
         Ok(headers)
     }
 
-    /// Query a Notion database with an optional filter.
+    /// Query a Notion database with an optional filter, sorts, pagination, and a
+    /// property allowlist (`filter_properties`) to shrink each result.
     async fn query_database(
         &self,
         database_id: &str,
         filter: Option<&serde_json::Value>,
+        sorts: Option<&serde_json::Value>,
+        start_cursor: Option<&str>,
+        page_size: Option<u32>,
+        filter_properties: &[String],
     ) -> anyhow::Result<serde_json::Value> {
         let url = format!("{NOTION_API_BASE}/databases/{database_id}/query");
         let mut body = json!({});
         if let Some(f) = filter {
             body["filter"] = f.clone();
         }
-        let resp = self
-            .http
-            .post(&url)
-            .headers(self.headers()?)
-            .json(&body)
-            .timeout(std::time::Duration::from_secs(NOTION_REQUEST_TIMEOUT_SECS))
-            .send()
-            .await?;
+        if let Some(s) = sorts {
+            body["sorts"] = s.clone();
+        }
+        if let Some(cursor) = start_cursor {
+            body["start_cursor"] = json!(cursor);
+        }
+        if let Some(size) = page_size {
+            body["page_size"] = json!(size);
+        }
+        let mut req = self.http.post(&url).headers(self.headers()?).json(&body);
+        for prop in filter_properties {
+            // Property IDs arrive percent-encoded in responses; decode so the query
+            // encoder doesn't double-encode them.
+            let decoded =
+                urlencoding::decode(prop).map_or_else(|_| prop.clone(), |s| s.into_owned());
+            req = req.query(&[("filter_properties", decoded)]);
+        }
+        let resp = send_with_retry(req).await?;
         let status = resp.status();
         if !status.is_success() {
             let text = resp.text().await.unwrap_or_default();
@@ -91,13 +112,8 @@ impl NotionTool {
     /// Read a single Notion page by ID.
     async fn read_page(&self, page_id: &str) -> anyhow::Result<serde_json::Value> {
         let url = format!("{NOTION_API_BASE}/pages/{page_id}");
-        let resp = self
-            .http
-            .get(&url)
-            .headers(self.headers()?)
-            .timeout(std::time::Duration::from_secs(NOTION_REQUEST_TIMEOUT_SECS))
-            .send()
-            .await?;
+        let req = self.http.get(&url).headers(self.headers()?);
+        let resp = send_with_retry(req).await?;
         let status = resp.status();
         if !status.is_success() {
             let text = resp.text().await.unwrap_or_default();
@@ -118,14 +134,8 @@ impl NotionTool {
         if let Some(db_id) = database_id {
             body["parent"] = json!({ "database_id": db_id });
         }
-        let resp = self
-            .http
-            .post(&url)
-            .headers(self.headers()?)
-            .json(&body)
-            .timeout(std::time::Duration::from_secs(NOTION_REQUEST_TIMEOUT_SECS))
-            .send()
-            .await?;
+        let req = self.http.post(&url).headers(self.headers()?).json(&body);
+        let resp = send_with_retry(req).await?;
         let status = resp.status();
         if !status.is_success() {
             let text = resp.text().await.unwrap_or_default();
@@ -143,14 +153,8 @@ impl NotionTool {
     ) -> anyhow::Result<serde_json::Value> {
         let url = format!("{NOTION_API_BASE}/pages/{page_id}");
         let body = json!({ "properties": properties });
-        let resp = self
-            .http
-            .patch(&url)
-            .headers(self.headers()?)
-            .json(&body)
-            .timeout(std::time::Duration::from_secs(NOTION_REQUEST_TIMEOUT_SECS))
-            .send()
-            .await?;
+        let req = self.http.patch(&url).headers(self.headers()?).json(&body);
+        let resp = send_with_retry(req).await?;
         let status = resp.status();
         if !status.is_success() {
             let text = resp.text().await.unwrap_or_default();
@@ -160,18 +164,27 @@ impl NotionTool {
         resp.json().await.map_err(Into::into)
     }
 
-    /// Search the Notion workspace by query string.
-    async fn search(&self, query: &str) -> anyhow::Result<serde_json::Value> {
+    /// Search the Notion workspace by query string, with an optional sort and pagination.
+    async fn search(
+        &self,
+        query: &str,
+        sort: Option<&serde_json::Value>,
+        start_cursor: Option<&str>,
+        page_size: Option<u32>,
+    ) -> anyhow::Result<serde_json::Value> {
         let url = format!("{NOTION_API_BASE}/search");
-        let body = json!({ "query": query });
-        let resp = self
-            .http
-            .post(&url)
-            .headers(self.headers()?)
-            .json(&body)
-            .timeout(std::time::Duration::from_secs(NOTION_REQUEST_TIMEOUT_SECS))
-            .send()
-            .await?;
+        let mut body = json!({ "query": query });
+        if let Some(s) = sort {
+            body["sort"] = s.clone();
+        }
+        if let Some(cursor) = start_cursor {
+            body["start_cursor"] = json!(cursor);
+        }
+        if let Some(size) = page_size {
+            body["page_size"] = json!(size);
+        }
+        let req = self.http.post(&url).headers(self.headers()?).json(&body);
+        let resp = send_with_retry(req).await?;
         let status = resp.status();
         if !status.is_success() {
             let text = resp.text().await.unwrap_or_default();
@@ -199,10 +212,7 @@ impl NotionTool {
         if let Some(size) = page_size {
             req = req.query(&[("page_size", size.to_string())]);
         }
-        let resp = req
-            .timeout(std::time::Duration::from_secs(NOTION_REQUEST_TIMEOUT_SECS))
-            .send()
-            .await?;
+        let resp = send_with_retry(req).await?;
         let status = resp.status();
         if !status.is_success() {
             let text = resp.text().await.unwrap_or_default();
@@ -227,14 +237,8 @@ impl NotionTool {
         if let Some(after_id) = after {
             body["after"] = json!(after_id);
         }
-        let resp = self
-            .http
-            .patch(&url)
-            .headers(self.headers()?)
-            .json(&body)
-            .timeout(std::time::Duration::from_secs(NOTION_REQUEST_TIMEOUT_SECS))
-            .send()
-            .await?;
+        let req = self.http.patch(&url).headers(self.headers()?).json(&body);
+        let resp = send_with_retry(req).await?;
         let status = resp.status();
         if !status.is_success() {
             let text = resp.text().await.unwrap_or_default();
@@ -373,6 +377,45 @@ impl NotionTool {
             Ok(BlockTextResult { text, truncated })
         })
     }
+}
+
+/// Send a Notion request, waiting and retrying when Notion rate-limits it (HTTP 429).
+/// After `NOTION_RATE_LIMIT_RETRIES` waits, the final response is returned as-is.
+async fn send_with_retry(req: reqwest::RequestBuilder) -> anyhow::Result<reqwest::Response> {
+    let req = req.timeout(std::time::Duration::from_secs(NOTION_REQUEST_TIMEOUT_SECS));
+    for _ in 0..NOTION_RATE_LIMIT_RETRIES {
+        let Some(attempt) = req.try_clone() else {
+            break;
+        };
+        let resp = attempt.send().await?;
+        if resp.status() != reqwest::StatusCode::TOO_MANY_REQUESTS {
+            return Ok(resp);
+        }
+        let wait = retry_after_secs(resp.headers())
+            .unwrap_or(1)
+            .min(NOTION_MAX_RETRY_WAIT_SECS);
+        tokio::time::sleep(std::time::Duration::from_secs(wait)).await;
+    }
+    Ok(req.send().await?)
+}
+
+/// Parse a `Retry-After` header given in whole seconds (the form Notion sends).
+fn retry_after_secs(headers: &reqwest::header::HeaderMap) -> Option<u64> {
+    headers
+        .get(reqwest::header::RETRY_AFTER)?
+        .to_str()
+        .ok()?
+        .trim()
+        .parse()
+        .ok()
+}
+
+/// Notion IDs are UUIDs: 32 hex digits, with or without dashes. IDs are interpolated
+/// into request paths, so anything else (`/`, `..`, `?`) must be rejected.
+fn is_valid_notion_id(id: &str) -> bool {
+    id.len() <= 36
+        && id.chars().all(|c| c.is_ascii_hexdigit() || c == '-')
+        && id.chars().filter(char::is_ascii_hexdigit).count() == 32
 }
 
 /// Concatenate the `plain_text` (falling back to `text.content`) of every rich
@@ -536,7 +579,7 @@ impl Tool for NotionTool {
     }
 
     fn description(&self) -> &str {
-        "Notion: query databases, read/create/update pages, read (raw or flattened text)/append block children (page bodies), search."
+        "Notion: query databases (filter/sort), read/create/update pages, read (raw or flattened text)/append block children (page bodies), search (optional last_edited_time sort)."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {
@@ -577,6 +620,19 @@ impl Tool for NotionTool {
                     "type": "object",
                     "description": "Notion filter object for query_database"
                 },
+                "sorts": {
+                    "type": "array",
+                    "description": "Sort objects for query_database. Each item is a property sort ({property, direction}) or timestamp sort ({timestamp: created_time|last_edited_time, direction}). direction is ascending or descending. Earlier items take precedence."
+                },
+                "sort": {
+                    "type": "object",
+                    "description": "Sort object for search. Notion search only supports {timestamp: last_edited_time, direction: ascending|descending}."
+                },
+                "filter_properties": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "For query_database: return only these properties (IDs or names) in each result. Property IDs appear as properties.<name>.id in results; the title property's ID is 'title'."
+                },
                 "properties": {
                     "type": "object",
                     "description": "Properties object for create_page and update_page"
@@ -591,11 +647,11 @@ impl Tool for NotionTool {
                 },
                 "start_cursor": {
                     "type": "string",
-                    "description": "Pagination cursor for read_block_children"
+                    "description": "Pagination cursor (next_cursor from a previous response) for query_database, search, and read_block_children (raw format)"
                 },
                 "page_size": {
                     "type": "integer",
-                    "description": "Page size for read_block_children (max 100)"
+                    "description": "Max results per call for query_database, search, and read_block_children (raw format). Clamped to 1-100; Notion's default is 100"
                 },
                 "query": {
                     "type": "string",
@@ -643,6 +699,26 @@ impl Tool for NotionTool {
             });
         }
 
+        for field in ["database_id", "page_id", "block_id"] {
+            if let Some(id) = args.get(field).and_then(|v| v.as_str()) {
+                if !is_valid_notion_id(id) {
+                    return Ok(ToolResult {
+                        success: false,
+                        output: String::new(),
+                        error: Some(format!(
+                            "Invalid {field} '{id}': expected a Notion ID (32 hex characters, dashes optional)"
+                        )),
+                    });
+                }
+            }
+        }
+
+        let start_cursor = args.get("start_cursor").and_then(|v| v.as_str());
+        let page_size = args
+            .get("page_size")
+            .and_then(|v| v.as_u64())
+            .map(|n| n.clamp(1, NOTION_MAX_PAGE_SIZE) as u32);
+
         let result = match action {
             "query_database" => {
                 let database_id = match args.get("database_id").and_then(|v| v.as_str()) {
@@ -656,7 +732,47 @@ impl Tool for NotionTool {
                     }
                 };
                 let filter = args.get("filter");
-                self.query_database(database_id, filter).await
+                let sorts = match args.get("sorts") {
+                    Some(s) if s.is_array() => Some(s),
+                    Some(_) => {
+                        return Ok(ToolResult {
+                            success: false,
+                            output: String::new(),
+                            error: Some("query_database requires sorts to be an array".into()),
+                        });
+                    }
+                    None => None,
+                };
+                let filter_properties: Vec<String> = match args.get("filter_properties") {
+                    None => Vec::new(),
+                    Some(v) => match v.as_array().and_then(|items| {
+                        items
+                            .iter()
+                            .map(|item| item.as_str().map(String::from))
+                            .collect::<Option<Vec<_>>>()
+                    }) {
+                        Some(props) => props,
+                        None => {
+                            return Ok(ToolResult {
+                                success: false,
+                                output: String::new(),
+                                error: Some(
+                                    "query_database requires filter_properties to be an array of strings"
+                                        .into(),
+                                ),
+                            });
+                        }
+                    },
+                };
+                self.query_database(
+                    database_id,
+                    filter,
+                    sorts,
+                    start_cursor,
+                    page_size,
+                    &filter_properties,
+                )
+                .await
             }
             "read_page" => {
                 let page_id = match args.get("page_id").and_then(|v| v.as_str()) {
@@ -727,11 +843,6 @@ impl Tool for NotionTool {
                     .unwrap_or("text");
                 match format {
                     "raw" => {
-                        let start_cursor = args.get("start_cursor").and_then(|v| v.as_str());
-                        let page_size = args
-                            .get("page_size")
-                            .and_then(|v| v.as_u64())
-                            .map(|n| n as u32);
                         self.read_block_children(block_id, start_cursor, page_size)
                             .await
                     }
@@ -794,7 +905,18 @@ impl Tool for NotionTool {
             }
             "search" => {
                 let query = args.get("query").and_then(|v| v.as_str()).unwrap_or("");
-                self.search(query).await
+                let sort = match args.get("sort") {
+                    Some(s) if s.is_object() => Some(s),
+                    Some(_) => {
+                        return Ok(ToolResult {
+                            success: false,
+                            output: String::new(),
+                            error: Some("search requires sort to be an object".into()),
+                        });
+                    }
+                    None => None,
+                };
+                self.search(query, sort, start_cursor, page_size).await
             }
             _ => unreachable!(), // Already handled above
         };
@@ -818,6 +940,8 @@ impl Tool for NotionTool {
 mod tests {
     use super::*;
     use crate::security::SecurityPolicy;
+
+    const TEST_ID: &str = "00000000-0000-0000-0000-000000000000";
 
     fn test_tool() -> NotionTool {
         let security = Arc::new(SecurityPolicy::default());
@@ -869,6 +993,25 @@ mod tests {
         assert!(result.error.as_deref().unwrap().contains("Unknown action"));
     }
 
+    #[test]
+    fn parameters_schema_defines_sorts_and_sort() {
+        let tool = test_tool();
+        let schema = tool.parameters_schema();
+        assert_eq!(schema["properties"]["sorts"]["type"], "array");
+        assert_eq!(schema["properties"]["sort"]["type"], "object");
+    }
+
+    #[test]
+    fn parameters_schema_pagination_covers_query_and_search() {
+        let tool = test_tool();
+        let schema = tool.parameters_schema();
+        for field in ["page_size", "start_cursor"] {
+            let desc = schema["properties"][field]["description"].as_str().unwrap();
+            assert!(desc.contains("query_database"), "{field}");
+            assert!(desc.contains("search"), "{field}");
+        }
+    }
+
     #[tokio::test]
     async fn execute_query_database_missing_id_returns_error() {
         let tool = test_tool();
@@ -878,6 +1021,118 @@ mod tests {
             .unwrap();
         assert!(!result.success);
         assert!(result.error.as_deref().unwrap().contains("database_id"));
+    }
+
+    #[tokio::test]
+    async fn execute_query_database_sorts_must_be_array() {
+        let tool = test_tool();
+        let result = tool
+            .execute(json!({
+                "action": "query_database",
+                "database_id": TEST_ID,
+                "sorts": {"property": "Name", "direction": "ascending"}
+            }))
+            .await
+            .unwrap();
+        assert!(!result.success);
+        assert!(result.error.as_deref().unwrap().contains("sorts"));
+    }
+
+    #[test]
+    fn is_valid_notion_id_accepts_dashed_and_undashed() {
+        assert!(is_valid_notion_id("3b766917-483e-8066-8ed3-e5ce78cf64f9"));
+        assert!(is_valid_notion_id("3b766917483e80668ed3e5ce78cf64f9"));
+    }
+
+    #[test]
+    fn is_valid_notion_id_rejects_path_tricks() {
+        for id in [
+            "",
+            "test-id",
+            "../search?x=",
+            "3b766917483e80668ed3e5ce78cf64f9/../../search",
+            "3b766917483e80668ed3e5ce78cf64f9?x=1",
+            "3b766917483e80668ed3e5ce78cf64f",
+            "3b766917483e80668ed3e5ce78cf64f9a",
+            "--------3b766917483e80668ed3e5ce78cf64f9",
+        ] {
+            assert!(!is_valid_notion_id(id), "{id}");
+        }
+    }
+
+    #[tokio::test]
+    async fn execute_rejects_invalid_ids_for_each_id_field() {
+        let tool = test_tool();
+        for (action, field) in [
+            ("query_database", "database_id"),
+            ("read_page", "page_id"),
+            ("read_block_children", "block_id"),
+        ] {
+            let result = tool
+                .execute(json!({"action": action, field: "../search?x="}))
+                .await
+                .unwrap();
+            assert!(!result.success);
+            assert!(
+                result
+                    .error
+                    .as_deref()
+                    .unwrap()
+                    .contains(&format!("Invalid {field}")),
+                "{action}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn execute_query_database_filter_properties_must_be_string_array() {
+        let tool = test_tool();
+        for bad in [json!("title"), json!(["title", 1])] {
+            let result = tool
+                .execute(json!({
+                    "action": "query_database",
+                    "database_id": TEST_ID,
+                    "filter_properties": bad
+                }))
+                .await
+                .unwrap();
+            assert!(!result.success);
+            assert!(
+                result
+                    .error
+                    .as_deref()
+                    .unwrap()
+                    .contains("filter_properties")
+            );
+        }
+    }
+
+    #[test]
+    fn retry_after_secs_parses_whole_seconds() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        assert_eq!(retry_after_secs(&headers), None);
+        headers.insert(reqwest::header::RETRY_AFTER, "2".parse().unwrap());
+        assert_eq!(retry_after_secs(&headers), Some(2));
+        headers.insert(
+            reqwest::header::RETRY_AFTER,
+            "Wed, 21 Oct 2026 07:28:00 GMT".parse().unwrap(),
+        );
+        assert_eq!(retry_after_secs(&headers), None);
+    }
+
+    #[tokio::test]
+    async fn execute_search_sort_must_be_object() {
+        let tool = test_tool();
+        let result = tool
+            .execute(json!({
+                "action": "search",
+                "query": "notes",
+                "sort": "last_edited_time"
+            }))
+            .await
+            .unwrap();
+        assert!(!result.success);
+        assert!(result.error.as_deref().unwrap().contains("sort"));
     }
 
     #[tokio::test]
@@ -914,7 +1169,7 @@ mod tests {
     async fn execute_update_page_missing_properties_returns_error() {
         let tool = test_tool();
         let result = tool
-            .execute(json!({"action": "update_page", "page_id": "test-id"}))
+            .execute(json!({"action": "update_page", "page_id": TEST_ID}))
             .await
             .unwrap();
         assert!(!result.success);
@@ -950,7 +1205,7 @@ mod tests {
     async fn execute_append_blocks_missing_children_returns_error() {
         let tool = test_tool();
         let result = tool
-            .execute(json!({"action": "append_blocks", "block_id": "test-id"}))
+            .execute(json!({"action": "append_blocks", "block_id": TEST_ID}))
             .await
             .unwrap();
         assert!(!result.success);
@@ -963,7 +1218,7 @@ mod tests {
         let result = tool
             .execute(json!({
                 "action": "append_blocks",
-                "block_id": "test-id",
+                "block_id": TEST_ID,
                 "children": {"type": "paragraph"}
             }))
             .await
@@ -978,7 +1233,7 @@ mod tests {
         let result = tool
             .execute(json!({
                 "action": "read_block_children",
-                "block_id": "test-id",
+                "block_id": TEST_ID,
                 "format": "yaml"
             }))
             .await

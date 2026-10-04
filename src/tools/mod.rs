@@ -591,17 +591,15 @@ pub fn all_tools_with_runtime(
     if root_config.elasticsearch.enabled {
         let endpoint = root_config.elasticsearch.endpoint.trim();
         let auth = root_config.elasticsearch.auth.trim();
-        let cluster_names = root_config.elasticsearch.cluster_names.clone();
-        if endpoint.is_empty() || auth.is_empty() || cluster_names.is_empty() {
+        if endpoint.is_empty() || auth.is_empty() {
             tracing::warn!(
                 "Elasticsearch tool enabled but missing required config in [elasticsearch] section \
-                 (endpoint, auth, cluster_names)"
+                 (endpoint, auth)"
             );
         } else {
             match EssQueryTool::new(
                 endpoint.to_string(),
                 auth.to_string(),
-                cluster_names,
                 security.clone(),
                 root_config.elasticsearch.timeout_secs,
             ) {

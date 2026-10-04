@@ -5016,8 +5016,6 @@ pub struct ElasticsearchConfig {
     pub endpoint: String,
     #[serde(default)]
     pub auth: String,
-    #[serde(default)]
-    pub cluster_names: Vec<String>,
     #[serde(default = "default_elasticsearch_timeout")]
     pub timeout_secs: u64,
 }
@@ -5032,7 +5030,6 @@ impl Default for ElasticsearchConfig {
             enabled: false,
             endpoint: String::new(),
             auth: String::new(),
-            cluster_names: Vec::new(),
             timeout_secs: default_elasticsearch_timeout(),
         }
     }

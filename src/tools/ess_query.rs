@@ -20,10 +20,9 @@ const MAX_ERROR_BODY_CHARS: usize = 500;
 ///
 /// Accepts an arbitrary relative path (e.g. `/_cat/indices?v` or `/my-index/_search`)
 /// and forwards it to the configured cluster with `GET` or `POST`. Authenticated via
-/// a base64-encoded API key from Kibana ("Create API key").
+/// a base64-encoded API key from Kibana ("Create API key"). Other clusters are reached
+/// through cross-cluster search paths (`/<remote>:<index>/_search`).
 pub struct EssQueryTool {
-    cluster_names: Vec<String>,
-    description: String,
     timeout_secs: u64,
     security: Arc<SecurityPolicy>,
     client: Elasticsearch,
@@ -33,7 +32,6 @@ impl EssQueryTool {
     pub fn new(
         endpoint: String,
         auth: String,
-        mut cluster_names: Vec<String>,
         security: Arc<SecurityPolicy>,
         timeout_secs: u64,
     ) -> anyhow::Result<Self> {
@@ -44,18 +42,7 @@ impl EssQueryTool {
             .auth(Credentials::EncodedApiKey(auth))
             .build()
             .map_err(|e| anyhow::anyhow!("Failed to build elasticsearch transport: {e}"))?;
-        if !cluster_names.iter().any(|n| n == "*") {
-            cluster_names.push("*".to_string());
-        }
-        let names_list = cluster_names.join(", ");
-        let default_name = cluster_names.first().cloned().unwrap_or_default();
-        let description = format!(
-            "Read-only Elasticsearch query. Accepts a path (e.g. /_cat/indices?v, /_search) with GET or POST. \
-             Clusters: {names_list}. Default: {default_name}."
-        );
         Ok(Self {
-            cluster_names,
-            description,
             timeout_secs,
             security,
             client: Elasticsearch::new(transport),
@@ -74,15 +61,13 @@ impl Tool for EssQueryTool {
     }
 
     fn description(&self) -> &str {
-        &self.description
+        "Read-only Elasticsearch query against the configured cluster. Accepts a path \
+         (e.g. /_cat/indices?v, /my-index/_search) with GET or POST. Query other clusters \
+         with cross-cluster search paths (e.g. /remote_name:index-pattern/_search); \
+         list remotes with /_remote/info."
     }
 
     fn parameters_schema(&self) -> Value {
-        let default_name = self.cluster_names.first().map(String::as_str).unwrap_or("");
-        let cluster_name_desc = format!(
-            "Cluster to query: {}. Default: {default_name}.",
-            self.cluster_names.join(", ")
-        );
         json!({
             "type": "object",
             "properties": {
@@ -98,11 +83,6 @@ impl Tool for EssQueryTool {
                 "body": {
                     "type": "object",
                     "description": "JSON body for POST requests."
-                },
-                "cluster_name": {
-                    "type": "string",
-                    "enum": self.cluster_names,
-                    "description": cluster_name_desc
                 }
             },
             "required": ["path"]
@@ -110,23 +90,6 @@ impl Tool for EssQueryTool {
     }
 
     async fn execute(&self, args: Value) -> anyhow::Result<ToolResult> {
-        let cluster_name = match args.get("cluster_name").and_then(Value::as_str) {
-            Some(name) => {
-                if !self.cluster_names.iter().any(|n| n == name) {
-                    return Ok(ToolResult {
-                        success: false,
-                        output: String::new(),
-                        error: Some(format!(
-                            "Unknown cluster_name {name:?}. Valid options: {}",
-                            self.cluster_names.join(", ")
-                        )),
-                    });
-                }
-                name.to_string()
-            }
-            None => self.cluster_names.first().cloned().unwrap_or_default(),
-        };
-
         let path = match args.get("path").and_then(Value::as_str) {
             Some(p) => p,
             None => {
@@ -233,9 +196,7 @@ impl Tool for EssQueryTool {
                 return Ok(ToolResult {
                     success: false,
                     output: String::new(),
-                    error: Some(format!(
-                        "Elasticsearch request to cluster {cluster_name:?} failed: {e}"
-                    )),
+                    error: Some(format!("Elasticsearch request failed: {e}")),
                 });
             }
         };
@@ -285,7 +246,6 @@ mod tests {
         EssQueryTool::new(
             "https://example.invalid:9200".into(),
             "ZmFrZS1iYXNlNjQta2V5".into(),
-            vec!["prod".into(), "staging".into()],
             Arc::new(SecurityPolicy::default()),
             5,
         )
@@ -293,7 +253,7 @@ mod tests {
     }
 
     #[test]
-    fn schema_exposes_path_method_body_cluster_name() {
+    fn schema_exposes_path_method_body_only() {
         let tool = make_tool();
         let schema = tool.parameters_schema();
         assert_eq!(schema["type"], "object");
@@ -302,11 +262,21 @@ mod tests {
         let methods = schema["properties"]["method"]["enum"].as_array().unwrap();
         let methods: Vec<&str> = methods.iter().map(|v| v.as_str().unwrap()).collect();
         assert_eq!(methods, vec!["GET", "POST"]);
-        let clusters = schema["properties"]["cluster_name"]["enum"]
-            .as_array()
-            .unwrap();
-        let clusters: Vec<&str> = clusters.iter().map(|v| v.as_str().unwrap()).collect();
-        assert_eq!(clusters, vec!["prod", "staging", "*"]);
+        let mut props: Vec<&str> = schema["properties"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        props.sort_unstable();
+        assert_eq!(props, vec!["body", "method", "path"]);
+    }
+
+    #[test]
+    fn description_points_to_cross_cluster_search() {
+        let tool = make_tool();
+        assert!(tool.description().contains("cross-cluster"));
+        assert!(tool.description().contains("/_remote/info"));
     }
 
     #[tokio::test]
@@ -337,72 +307,5 @@ mod tests {
             .unwrap();
         assert!(!res.success);
         assert!(res.error.unwrap().contains("read-only"));
-    }
-
-    #[test]
-    fn wildcard_always_in_cluster_names() {
-        let tool = make_tool();
-        let schema = tool.parameters_schema();
-        let clusters = schema["properties"]["cluster_name"]["enum"]
-            .as_array()
-            .unwrap();
-        let names: Vec<&str> = clusters.iter().map(|v| v.as_str().unwrap()).collect();
-        assert!(
-            names.contains(&"*"),
-            "* should always be in cluster_name enum"
-        );
-    }
-
-    #[tokio::test]
-    async fn rejects_invalid_cluster_name() {
-        let tool = make_tool();
-        let res = tool
-            .execute(json!({ "path": "/", "cluster_name": "unknown" }))
-            .await
-            .unwrap();
-        assert!(!res.success);
-        let err = res.error.unwrap();
-        assert!(
-            err.contains("unknown"),
-            "error should mention the bad name: {err}"
-        );
-        assert!(err.contains("prod"), "error should list valid names: {err}");
-        assert!(
-            err.contains("staging"),
-            "error should list valid names: {err}"
-        );
-    }
-
-    #[tokio::test]
-    async fn accepts_valid_cluster_name() {
-        let tool = make_tool();
-        // Security check happens after validation; just ensure we get past cluster_name check.
-        // The request will fail at network level, but with a network error, not a validation error.
-        let res = tool
-            .execute(json!({ "path": "/", "cluster_name": "staging" }))
-            .await
-            .unwrap();
-        // If there's an error it should be network-related, not a validation error.
-        if let Some(err) = res.error {
-            assert!(
-                !err.contains("Unknown cluster_name"),
-                "should not be a validation error: {err}"
-            );
-        }
-    }
-
-    #[tokio::test]
-    async fn missing_cluster_name_defaults_to_first() {
-        let tool = make_tool();
-        // No cluster_name provided — should default to "prod".
-        // We can't easily assert the chosen name without a real cluster, but we can
-        // assert there is no validation error by verifying any error isn't about cluster_name.
-        let res = tool.execute(json!({ "path": "/" })).await.unwrap();
-        if let Some(err) = res.error {
-            assert!(
-                !err.contains("Unknown cluster_name"),
-                "should not be a validation error: {err}"
-            );
-        }
     }
 }
